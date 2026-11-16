@@ -280,7 +280,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   a request whose pooled connection dies before any response byte
   goes again on a new connection like in Chrome (#397), a new HTTP/2 connection opens more
   streams only once the server announced how many it allows, where www.postfinance.ch (limit 10)
-  reset the rest and the page lost stylesheets and scripts (#479), the relay connects with Happy Eyeballs
+  reset the rest and the page lost stylesheets and scripts (#479), a response whose
+  Content-Encoding names a coding the engine cannot decode (`UTF-8` on www.migros.ch) keeps its body
+  like in Chromium instead of failing with curl error 61 (#586), the relay connects with Happy Eyeballs
   like a browser, so a site with IPv4 and IPv6 addresses whose IPv4 handshake is slow or loses a
   packet no longer fails after 0.25 to 0.5 s on a relay without IPv6 (neverssl.com, #415), dead relay detection (#177), fix of a WTF timer
   bug that aborted about 1 % of heavy page loads (#219), pages left behind no longer kept alive

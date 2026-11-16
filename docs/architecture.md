@@ -498,7 +498,9 @@ so JA3 differs; the TCP/IP fingerprint is the relay's. All loaders share one req
 redirects, CORS and CSP for pings). curl keeps 64 connections, 6 per host (#176). A new HTTP/2
 connection carries only the request that opened it until the server's SETTINGS announce how many
 streams it allows; the waiting requests then take what the limit leaves, the rest open the next
-connection (curl patch `deps/patches/curl/0003`, #479). The HTTP cache
+connection (curl patch `deps/patches/curl/0003`, #479). curl decodes gzip, deflate, br and zstd;
+like in Chromium a response whose Content-Encoding also names another coding (`UTF-8`, `foo`)
+keeps its body as it is instead of failing (curl patch `deps/patches/curl/0004`, #586). The HTTP cache
 stores responses in the host's Cache API (`<namespace>-http-v<format>`, #70, #182), partitioned
 like Chrome's HTTP cache (#213): every entry belongs to the top site, the frame site and whether
 it is the document of a subframe (`HttpCache::partition`). The top site comes from the origin of

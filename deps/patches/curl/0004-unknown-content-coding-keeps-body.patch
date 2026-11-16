@@ -1,0 +1,84 @@
+diff --git a/lib/content_encoding.c b/lib/content_encoding.c
+--- a/lib/content_encoding.c
++++ b/lib/content_encoding.c
+@@ -746,6 +746,66 @@
+   return NULL;
+ }
+ 
++/* browser-lite: a response whose Content-Encoding names a coding libcurl
++ * cannot decode keeps its body as it is, like in browsers. This writer marks
++ * such a response, so that later Content-Encoding lines are ignored. */
++static const struct Curl_cwtype raw_writer = {
++  "ce-raw",
++  NULL,
++  0,
++  Curl_cwriter_def_init,
++  Curl_cwriter_def_write,
++  Curl_cwriter_def_flush,
++  Curl_cwriter_def_close,
++  sizeof(struct Curl_cwriter)
++};
++
++static bool has_unknown_coding(const char *enclist)
++{
++  do {
++    const char *name;
++    size_t namelen;
++
++    while(ISBLANK(*enclist) || *enclist == ',')
++      enclist++;
++    name = enclist;
++    for(namelen = 0; *enclist && *enclist != ','; enclist++)
++      if(*enclist > ' ')
++        namelen = enclist - name + 1;
++    if(namelen &&
++       !find_unencode_writer(name, namelen, CURL_CW_CONTENT_DECODE))
++      return TRUE;
++  } while(*enclist);
++  return FALSE;
++}
++
++/* Drop the content decoders of earlier Content-Encoding lines and pass the
++ * body on undecoded. */
++static CURLcode keep_raw_body(struct Curl_easy *data)
++{
++  struct Curl_cwriter **anchor = &data->req.writer.stack;
++  struct Curl_cwriter *writer;
++  CURLcode result;
++
++  while(*anchor) {
++    writer = *anchor;
++    if(writer->phase == CURL_CW_CONTENT_DECODE) {
++      *anchor = writer->next;
++      Curl_cwriter_free(data, writer);
++    }
++    else
++      anchor = &writer->next;
++  }
++  result = Curl_cwriter_create(&writer, data, &raw_writer,
++                               CURL_CW_CONTENT_DECODE);
++  if(result)
++    return result;
++  result = Curl_cwriter_add(data, writer);
++  if(result)
++    Curl_cwriter_free(data, writer);
++  return result;
++}
++
+ /* Setup the unencoding stack from the Content-Encoding header value.
+  * See RFC 7231 section 3.1.2.2. */
+ CURLcode Curl_build_unencoding_stack(struct Curl_easy *data,
+@@ -756,6 +816,13 @@
+   CURLcode result;
+   bool has_chunked = FALSE;
+ 
++  if(!is_transfer && !data->set.http_ce_skip) {
++    if(Curl_cwriter_get_by_type(data, &raw_writer))
++      return CURLE_OK;
++    if(has_unknown_coding(enclist))
++      return keep_raw_body(data);
++  }
++
+   do {
+     const char *name;
+     size_t namelen;
