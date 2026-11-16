@@ -43,7 +43,8 @@ them for nobody, or the quota of localStorage, which counted bytes, so text outs
 half of Chrome's room, or the parts of a date or time field, which kept taking digits instead of
 moving on to the next part once full and showed today's date in grey when empty, or the failed
 or stopped navigation that waited for the page being left to finish its scripts, so a page paused
-for the navigation never got its error page and Stop did nothing) comes as patches
+for the navigation never got its error page and Stop did nothing, or the web fonts, each of which
+restyled the whole document from scratch when it loaded) comes as patches
 from `patches/`.
 
 ## Folders

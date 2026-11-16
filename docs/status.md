@@ -853,6 +853,19 @@ browser (Safari keeps Cmd+L, T and W for itself).
    engine thread and up to half of the longest step ([jit.md](jit.md#measured)), open. The debug
    log no longer walks the JS heap around every work item, which made every step about 5 %
    longer with `log=1` (#551).
+   www.nytimes.com while it loads (2026-11-15, local, Chromium host, load 3 to 9, 45 s): steps of
+   1.5 to 5 s every few seconds. A quarter to a third of the engine thread was style: WebKit
+   restyled the whole document from scratch (3000 elements, 0.45 to 0.65 s each with its custom
+   properties) for every web font that loaded and every font face a script added, 16 of 26 full
+   restyles of a load. Patch 0148 gives the styles only their new fonts (#584): a font load restyles
+   in 0.1 to 0.2 s, the style time of the load is 7.2 to 8.1 s instead of 9.1 to 11.7 s (engine
+   thread profiles of 45 s, 3 runs each). Still open: 5 to 7 full restyles of 0.4 to 0.6 s, after
+   sheets added with `@keyframes` or `@container` rules and after CSSOM changes that patch 0124
+   does not restyle selectively (not looked into further). A
+   restyle of only the elements the rules of removed or replaced sheets match (as Blink does) was
+   built and measured: a removed sheet next to 4000 elements in 2 instead of 57 ms, but no gain on
+   nytimes.com, so it was not kept. The longest steps (3 to 5 s) are JS of the page's bundles, the
+   payment iframe and the tag manager on cold code (see above).
 13. YouTube's stream protection (2026-11-13, local, Chromium host, one video, 19 loads): in about
    half of the loads playback stops after about 40 s with "Something went wrong. Refresh or try
    again later." (`ump.spsrejectfailure`). Every media response of YouTube's SABR stream carries a

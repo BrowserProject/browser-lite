@@ -1,0 +1,688 @@
+diff --git a/Source/WebCore/css/CSSToLengthConversionData.cpp b/Source/WebCore/css/CSSToLengthConversionData.cpp
+index 3f81624464..cd7d111630 100644
+--- a/Source/WebCore/css/CSSToLengthConversionData.cpp
++++ b/Source/WebCore/css/CSSToLengthConversionData.cpp
+@@ -169,6 +169,12 @@ void CSSToLengthConversionData::setUsesContainerUnits() const
+         m_styleBuilderState->setIsContainerDependent();
+ }
+ 
++void CSSToLengthConversionData::setUsesFontMetrics() const
++{
++    if (m_styleBuilderState)
++        m_styleBuilderState->setUsesFontMetrics();
++}
++
+ bool CSSToLengthConversionData::evaluationTimeZoomEnabled() const
+ {
+     ASSERT(m_style);
+diff --git a/Source/WebCore/css/CSSToLengthConversionData.h b/Source/WebCore/css/CSSToLengthConversionData.h
+index 71d7c7de4b..2175952550 100644
+--- a/Source/WebCore/css/CSSToLengthConversionData.h
++++ b/Source/WebCore/css/CSSToLengthConversionData.h
+@@ -111,6 +111,8 @@ public:
+     }
+ 
+     void NODELETE setUsesContainerUnits() const;
++    // browser-lite: the length depends on font metrics, which change when a web font loads.
++    void NODELETE setUsesFontMetrics() const;
+ 
+     Style::BuilderState* styleBuilderState() const { return m_styleBuilderState.get(); }
+ 
+diff --git a/Source/WebCore/dom/Document.cpp b/Source/WebCore/dom/Document.cpp
+index 12e7df9b3f..23526decbf 100644
+--- a/Source/WebCore/dom/Document.cpp
++++ b/Source/WebCore/dom/Document.cpp
+@@ -2807,7 +2807,7 @@ void Document::scheduleStyleRecalc()
+     if (m_styleRecalcTimer.isActive() || backForwardCacheState() != NotInBackForwardCache)
+         return;
+ 
+-    ASSERT(childNeedsStyleRecalc() || m_needsFullStyleRebuild);
++    ASSERT(childNeedsStyleRecalc() || m_needsFullStyleRebuild || m_needsStyleUpdateForFontChange);
+ 
+     // browser-lite: Page::setDefersStyleAndLayout(false) schedules it again
+     if (RefPtr page = this->page(); page && page->defersStyleAndLayout())
+@@ -2836,6 +2836,17 @@ bool Document::hasPendingFullStyleRebuild() const
+     return hasPendingStyleRecalc() && m_needsFullStyleRebuild;
+ }
+ 
++void Document::scheduleStyleUpdateForFontChange()
++{
++    m_needsStyleUpdateForFontChange = true;
++    scheduleStyleRecalc();
++}
++
++bool Document::hasPendingStyleUpdateForFontChange() const
++{
++    return hasPendingStyleRecalc() && m_needsStyleUpdateForFontChange;
++}
++
+ void Document::updateRenderTree(std::unique_ptr<Style::Update> styleUpdate)
+ {
+     ASSERT(!inRenderTreeUpdate());
+@@ -2898,10 +2909,12 @@ void Document::resolveStyle(ResolveStyleType type)
+ 
+         if (m_needsFullStyleRebuild)
+             type = ResolveStyleType::Rebuild;
++        bool isUpdatingFonts = std::exchange(m_needsStyleUpdateForFontChange, false) && type != ResolveStyleType::Rebuild;
+ 
+-        if (type == ResolveStyleType::Rebuild) {
++        if (type == ResolveStyleType::Rebuild || isUpdatingFonts) {
+             // This may get set again during style resolve.
+-            m_hasNodesWithMissingStyle = false;
++            if (!isUpdatingFonts)
++                m_hasNodesWithMissingStyle = false;
+ 
+             auto newStyle = Style::resolveForDocument(*this);
+ 
+@@ -2912,7 +2925,7 @@ void Document::resolveStyle(ResolveStyleType type)
+                 renderView()->setStyle(WTF::move(newStyle));
+             }
+ 
+-            if (RefPtr documentElement = this->documentElement())
++            if (RefPtr documentElement = this->documentElement(); documentElement && !isUpdatingFonts)
+                 documentElement->invalidateStyleForSubtree();
+         }
+ 
+@@ -2920,7 +2933,7 @@ void Document::resolveStyle(ResolveStyleType type)
+         styleScope().evaluateMediaQueriesForViewportChange();
+ 
+         {
+-            Style::TreeResolver resolver(*this, WTF::move(m_pendingRenderTreeUpdate));
++            Style::TreeResolver resolver(*this, WTF::move(m_pendingRenderTreeUpdate), isUpdatingFonts);
+             auto styleUpdate = resolver.resolve();
+ 
+             while (resolver.needsInterleavedLayout()) {
+@@ -3032,7 +3045,7 @@ bool Document::needsStyleRecalc() const
+     if (backForwardCacheState() != NotInBackForwardCache)
+         return false;
+ 
+-    if (m_needsFullStyleRebuild)
++    if (m_needsFullStyleRebuild || m_needsStyleUpdateForFontChange)
+         return true;
+ 
+     if (childNeedsStyleRecalc())
+@@ -3247,7 +3260,7 @@ std::unique_ptr<Style::ComputedStyle> Document::styleForElementIgnoringPendingSt
+ 
+     std::optional<Style::ComputedStyle> updatedDocumentStyle;
+     CheckedPtr parentStyle = parentStyleArg;
+-    if (!parentStyle && m_needsFullStyleRebuild && hasLivingRenderTree()) {
++    if (!parentStyle && (m_needsFullStyleRebuild || m_needsStyleUpdateForFontChange) && hasLivingRenderTree()) {
+         updatedDocumentStyle.emplace(Style::resolveForDocument(*this));
+         parentStyle = &*updatedDocumentStyle;
+     }
+@@ -3493,7 +3506,11 @@ void Document::pageSizeAndMarginsInPixels(int pageIndex, IntSize& pageSize, int&
+ void Document::fontsNeedUpdate(FontSelector&)
+ {
+     ASSERT(!deletionHasBegun());
+-    invalidateMatchedPropertiesCacheAndForceStyleRecalc();
++    // browser-lite: not a full style rebuild, which resolved every element anew for each web font that loaded.
++    styleScope().invalidateMatchedDeclarationsCache();
++    if (backForwardCacheState() != NotInBackForwardCache || !renderView())
++        return;
++    scheduleStyleUpdateForFontChange();
+ }
+ 
+ void Document::invalidateMatchedPropertiesCacheAndForceStyleRecalc()
+diff --git a/Source/WebCore/dom/Document.h b/Source/WebCore/dom/Document.h
+index 823e4cd420..5785c3ed48 100644
+--- a/Source/WebCore/dom/Document.h
++++ b/Source/WebCore/dom/Document.h
+@@ -1041,6 +1041,9 @@ public:
+     void unscheduleStyleRecalc();
+     bool NODELETE hasPendingStyleRecalc() const;
+     bool NODELETE hasPendingFullStyleRebuild() const;
++    // browser-lite: web fonts loaded or font faces changed; the next style resolution gives every style the fonts that changed for it.
++    void scheduleStyleUpdateForFontChange();
++    bool NODELETE hasPendingStyleUpdateForFontChange() const;
+ 
+     void registerNodeListForInvalidation(LiveNodeList&);
+     void unregisterNodeListForInvalidation(LiveNodeList&);
+@@ -2774,6 +2777,7 @@ private:
+     bool m_bParsing { false }; // FIXME: rename
+ 
+     bool m_needsFullStyleRebuild { false };
++    bool m_needsStyleUpdateForFontChange { false };
+     bool m_inStyleRecalc { false };
+     bool m_inRenderTreeUpdate { false };
+     bool m_isResolvingTreeStyle { false };
+diff --git a/Source/WebCore/dom/Element.cpp b/Source/WebCore/dom/Element.cpp
+index 4de1fdbd5f..018326f660 100644
+--- a/Source/WebCore/dom/Element.cpp
++++ b/Source/WebCore/dom/Element.cpp
+@@ -4791,7 +4791,7 @@ const Style::ComputedStyle* Element::resolveComputedStyle(ResolveComputedStyleMo
+         if (mode != ResolveComputedStyleMode::RenderedOnly && !document->hasPendingStyleRecalc() && existingComputedStyle())
+             return nullptr;
+ 
+-        if (document->hasPendingFullStyleRebuild())
++        if (document->hasPendingFullStyleRebuild() || document->hasPendingStyleUpdateForFontChange())
+             return document->documentElement();
+ 
+         if (!document->documentElement() || document->documentElement()->hasStateFlag(StateFlag::IsComputedStyleInvalidFlag))
+diff --git a/Source/WebCore/page/Page.cpp b/Source/WebCore/page/Page.cpp
+index ecaefb2ba0..ff50020bb7 100644
+--- a/Source/WebCore/page/Page.cpp
++++ b/Source/WebCore/page/Page.cpp
+@@ -1633,7 +1633,7 @@ void Page::setDefersStyleAndLayout(bool defers)
+     forEachDocument([](Document& document) {
+         if (document.backForwardCacheState() != Document::NotInBackForwardCache)
+             return;
+-        if (document.childNeedsStyleRecalc() || document.hasPendingFullStyleRebuild())
++        if (document.childNeedsStyleRecalc() || document.hasPendingFullStyleRebuild() || document.hasPendingStyleUpdateForFontChange())
+             document.scheduleStyleRecalc();
+         if (RefPtr view = document.view())
+             view->layoutContext().scheduleLayout();
+diff --git a/Source/WebCore/platform/graphics/FontCascade.cpp b/Source/WebCore/platform/graphics/FontCascade.cpp
+index 346c71d7f0..f7d3afb1c0 100644
+--- a/Source/WebCore/platform/graphics/FontCascade.cpp
++++ b/Source/WebCore/platform/graphics/FontCascade.cpp
+@@ -156,6 +156,16 @@ bool FontCascade::isCurrent(const FontSelector& fontSelector) const
+     return true;
+ }
+ 
++bool FontCascade::fontsAreUpToDate(FontSelector* fontSelector) const
++{
++    if (!m_fonts)
++        return false;
++    auto& fontCache = FontCache::forCurrentThread();
++    if (m_fonts->generation() != fontCache.generation())
++        return false;
++    return m_fonts.get() == fontCache.fontCascadeCache().retrieveOrAddCachedFonts(m_fontDescription, fontSelector).ptr();
++}
++
+ unsigned FontCascade::fontSelectorVersion() const
+ {
+     return m_fontSelector ? m_fontSelector->version() : 0;
+diff --git a/Source/WebCore/platform/graphics/FontCascade.h b/Source/WebCore/platform/graphics/FontCascade.h
+index 3718ad14a8..b854993d96 100644
+--- a/Source/WebCore/platform/graphics/FontCascade.h
++++ b/Source/WebCore/platform/graphics/FontCascade.h
+@@ -111,6 +111,8 @@ public:
+     float size() const { return fontDescription().computedSize(); }
+ 
+     bool isCurrent(const FontSelector&) const;
++    // browser-lite: false when update() with this font selector would give other fonts, as after a web font load.
++    bool fontsAreUpToDate(FontSelector*) const;
+     void updateFonts(Ref<FontCascadeFonts>&&) const;
+     WEBCORE_EXPORT void update(RefPtr<FontSelector>&& = nullptr) const;
+     unsigned fontSelectorVersion() const;
+diff --git a/Source/WebCore/style/StyleBuilderState.cpp b/Source/WebCore/style/StyleBuilderState.cpp
+index b93e8135a7..d5bed41e31 100644
+--- a/Source/WebCore/style/StyleBuilderState.cpp
++++ b/Source/WebCore/style/StyleBuilderState.cpp
+@@ -318,6 +318,11 @@ void BuilderState::setIsContainerDependent()
+     m_style.setIsContainerDependent();
+ }
+ 
++void BuilderState::setUsesFontMetrics()
++{
++    m_style.setUsesFontMetrics();
++}
++
+ double BuilderState::lookupCSSRandomBaseValue(const CSSCalc::RandomCachingKey& key, std::optional<CSS::Keyword::ElementScoped> elementScoped) const
+ {
+     if (elementScoped)
+diff --git a/Source/WebCore/style/StyleBuilderState.h b/Source/WebCore/style/StyleBuilderState.h
+index 7c60ff7903..439169d8d4 100644
+--- a/Source/WebCore/style/StyleBuilderState.h
++++ b/Source/WebCore/style/StyleBuilderState.h
+@@ -184,6 +184,7 @@ public:
+ 
+     void NODELETE setUsesViewportUnits();
+     void NODELETE setIsContainerDependent();
++    void NODELETE setUsesFontMetrics();
+ 
+     double lookupCSSRandomBaseValue(const CSSCalc::RandomCachingKey&, std::optional<CSS::Keyword::ElementScoped>) const;
+ 
+diff --git a/Source/WebCore/style/StyleExtractor.cpp b/Source/WebCore/style/StyleExtractor.cpp
+index c4a067f45b..ab9b69dbf4 100644
+--- a/Source/WebCore/style/StyleExtractor.cpp
++++ b/Source/WebCore/style/StyleExtractor.cpp
+@@ -146,7 +146,7 @@ static inline bool hasValidStyleForProperty(Element& element, CSSPropertyID prop
+ {
+     if (element.styleValidity() != Style::Validity::Valid)
+         return false;
+-    if (element.document().hasPendingFullStyleRebuild())
++    if (element.document().hasPendingFullStyleRebuild() || element.document().hasPendingStyleUpdateForFontChange())
+         return false;
+     if (!element.document().childNeedsStyleRecalc())
+         return true;
+diff --git a/Source/WebCore/style/StyleTreeResolver.cpp b/Source/WebCore/style/StyleTreeResolver.cpp
+index 952f5a5479..b1fc9d24ac 100644
+--- a/Source/WebCore/style/StyleTreeResolver.cpp
++++ b/Source/WebCore/style/StyleTreeResolver.cpp
+@@ -34,6 +34,7 @@
+ #include "ComposedTreeAncestorIterator.h"
+ #include "ComposedTreeIterator.h"
+ #include "Document.h"
++#include "DocumentInlines.h"
+ #include "DocumentPage.h"
+ #include "DocumentQuirks.h"
+ #include "DocumentTimeline.h"
+@@ -90,9 +91,10 @@ namespace Style {
+ 
+ DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(TreeResolverScope);
+ 
+-TreeResolver::TreeResolver(Document& document, std::unique_ptr<Update> update)
++TreeResolver::TreeResolver(Document& document, std::unique_ptr<Update> update, bool isUpdatingFonts)
+     : m_document(document)
+     , m_update(WTF::move(update))
++    , m_isUpdatingFonts(isUpdatingFonts)
+ {
+ }
+ 
+@@ -187,6 +189,13 @@ ResolvedStyle TreeResolver::styleForStyleable(const Styleable& styleable, Resolu
+     if (auto optionStyle = tryChoosePositionOption(styleable, resolutionContext))
+         return WTF::move(*optionStyle);
+ 
++    if (resolutionType == ResolutionType::FontUpdate) {
++        auto style = Style::ComputedStyle::clonePtr(*existingStyle);
++        auto* previousParentStyle = parent().element ? parent().element->renderOrDisplayContentsStyle() : nullptr;
++        style->updateFontsAfterFontChange(previousParentStyle, parent().style, protect(m_document->fontSelector()).ptr());
++        return { WTF::move(style) };
++    }
++
+     if (resolutionType == ResolutionType::FastPathInherit) {
+         // If the only reason we are computing the style is that some parent inherited properties changed, we can just copy them.
+         auto style = Style::ComputedStyle::clonePtr(*existingStyle);
+@@ -280,19 +289,19 @@ static bool affectsRenderedSubtree(Element& element, const Style::ComputedStyle&
+     return false;
+ }
+ 
+-auto TreeResolver::computeDescendantsToResolve(const ElementUpdate& update, const Style::ComputedStyle* existingStyle, Validity validity) const -> DescendantsToResolve
++auto TreeResolver::computeDescendantsToResolve(OptionSet<Change> changes, const Style::ComputedStyle& newStyle, const Style::ComputedStyle* existingStyle, Validity validity) const -> DescendantsToResolve
+ {
+     if (parent().descendantsToResolve == DescendantsToResolve::All)
+         return DescendantsToResolve::All;
+     if (validity >= Validity::SubtreeInvalid)
+         return DescendantsToResolve::All;
+ 
+-    if (update.changes && existingStyle) {
++    if (changes && existingStyle) {
+         auto customPropertyInStyleContainerQueryChanged = [&] {
+             auto& namesInQueries = scope().resolver->ruleSets().customPropertyNamesInStyleContainerQueries();
+             for (auto& name : namesInQueries) {
+                 // Any descendant may depend on this changed custom property via a style query.
+-                if (!existingStyle->customPropertyValueEqual(*update.style, name))
++                if (!existingStyle->customPropertyValueEqual(newStyle, name))
+                     return true;
+             }
+             return false;
+@@ -301,23 +310,37 @@ auto TreeResolver::computeDescendantsToResolve(const ElementUpdate& update, cons
+             return DescendantsToResolve::All;
+     }
+ 
+-    if (update.changes.containsAny({ Change::Container, Change::Renderer }))
++    if (changes.containsAny({ Change::Container, Change::Renderer }))
+         return DescendantsToResolve::All;
+ 
+-    if (update.changes.containsAny(inheritedChanges()))
++    if (changes.containsAny(inheritedChanges()))
+         return DescendantsToResolve::Children;
+ 
+-    if (update.changes.contains(Change::NonInherited))
++    if (changes.contains(Change::NonInherited))
+         return DescendantsToResolve::ChildrenWithExplicitInherit;
+ 
+-    ASSERT(!update.changes);
++    ASSERT(!changes);
+     return DescendantsToResolve::None;
+ };
+ 
+-static bool styleChangeAffectsRelativeUnits(const Style::ComputedStyle& style, const Style::ComputedStyle* existingStyle)
++// browser-lite: after a font change the new fonts alone are no change for the descendants of a style
++// resolved anew; they get theirs by themselves (m_isUpdatingFonts).
++auto TreeResolver::descendantsToResolveAfterFontChange(const ElementUpdate& update, const Style::ComputedStyle* existingStyle, Validity validity) const -> DescendantsToResolve
++{
++    if (!m_isUpdatingFonts || !existingStyle || !update.changes)
++        return computeDescendantsToResolve(update.changes, *update.style, existingStyle, validity);
++    auto existingWithNewFonts = Style::ComputedStyle::clonePtr(*existingStyle);
++    existingWithNewFonts->updateFontsAfterFontChange(nullptr, parent().style, protect(m_document->fontSelector()).ptr());
++    return computeDescendantsToResolve(determineChanges(*existingWithNewFonts, *update.style), *update.style, existingWithNewFonts.get(), validity);
++}
++
++static bool styleChangeAffectsRelativeUnits(const Style::ComputedStyle& style, const Style::ComputedStyle* existingStyle, bool isUpdatingFonts)
+ {
+     if (!existingStyle)
+         return true;
++    // browser-lite: after a font change the fonts differ anyway; styles using the root's font metrics are resolved again by themselves.
++    if (isUpdatingFonts)
++        return existingStyle->fontDescription() != style.fontDescription() || existingStyle->lineHeight() != style.lineHeight();
+     return !existingStyle->fontCascadeEqual(style)
+         || existingStyle->computedLineHeight() != style.computedLineHeight();
+ }
+@@ -352,10 +375,11 @@ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle*
+         return { };
+     }
+ 
+-    auto descendantsToResolve = computeDescendantsToResolve(update, existingStyle, element.styleValidity());
++    // browser-lite: the descendants of a style that only got new fonts get theirs by themselves (m_isUpdatingFonts).
++    auto descendantsToResolve = resolutionType == ResolutionType::FontUpdate ? DescendantsToResolve::None : descendantsToResolveAfterFontChange(update, existingStyle, element.styleValidity());
+     bool isDocumentElement = &element == m_document->documentElement();
+-    if (isDocumentElement) {
+-        if (styleChangeAffectsRelativeUnits(*update.style, existingStyle)) {
++    if (isDocumentElement && resolutionType != ResolutionType::FontUpdate) {
++        if (styleChangeAffectsRelativeUnits(*update.style, existingStyle, m_isUpdatingFonts)) {
+             // "rem" units are relative to the document element's font size so we need to recompute everything.
+             protect(scope().resolver)->invalidateMatchedDeclarationsCache();
+             descendantsToResolve = DescendantsToResolve::All;
+@@ -1213,6 +1237,40 @@ auto TreeResolver::determineResolutionType(const Element& element, const Style::
+     return { };
+ }
+ 
++static bool fontsAreUpToDate(const Style::ComputedStyle& style, FontSelector& fontSelector)
++{
++    if (!style.fontCascade().fontsAreUpToDate(&fontSelector))
++        return false;
++    for (auto& pseudoElementStyle : style.pseudoElementStyles().values()) {
++        if (!pseudoElementStyle->fontCascade().fontsAreUpToDate(&fontSelector))
++            return false;
++    }
++    return true;
++}
++
++auto TreeResolver::resolutionTypeAfterFontChange(const Element& element, const Style::ComputedStyle* existingStyle, std::optional<ResolutionType> resolutionType) const -> std::optional<ResolutionType>
++{
++    if (!m_isUpdatingFonts || !existingStyle)
++        return resolutionType;
++    if (resolutionType == ResolutionType::Full || resolutionType == ResolutionType::FullWithMatchResultCache)
++        return resolutionType;
++    if (fontsAreUpToDate(*existingStyle, protect(m_document->fontSelector())))
++        return resolutionType;
++    // The other types copy the old style with its fonts.
++    if (resolutionType)
++        return ResolutionType::Full;
++
++    auto valuesDependOnFonts = existingStyle->usesFontMetrics()
++        || !existingStyle->fontDescription().fontSizeAdjust().isNone()
++        || existingStyle->isContainerDependent()
++        || existingStyle->usesAnchorFunctions();
++    // Elements of user agent shadow trees may make their style from the host's (resolveCustomStyle).
++    auto hasCustomStyle = element.hasCustomStyleResolveCallbacks() && element.isInUserAgentShadowTree();
++    if (valuesDependOnFonts || hasCustomStyle || element.hasKeyframeEffects({ }))
++        return ResolutionType::Full;
++    return ResolutionType::FontUpdate;
++}
++
+ static void NODELETE clearNeedsStyleResolution(Element& element)
+ {
+     element.setHasValidStyle();
+@@ -1348,7 +1406,7 @@ void TreeResolver::resolveComposedTree()
+         bool didAXUpdateFontSubtree = parent.didAXUpdateFontSubtree;
+         bool didAXUpdateTextColorSubtree = parent.didAXUpdateTextColorSubtree;
+ #endif
+-        auto resolutionType = determineResolutionType(element.get(), style, parent.descendantsToResolve, parent.changes);
++        auto resolutionType = resolutionTypeAfterFontChange(element.get(), style, determineResolutionType(element.get(), style, parent.descendantsToResolve, parent.changes));
+         if (resolutionType) {
+             element->resetComputedStyle();
+ 
+@@ -1405,9 +1463,17 @@ void TreeResolver::resolveComposedTree()
+                 return false;
+             }
+ 
+-            return element->childNeedsStyleRecalc() || descendantsToResolve != DescendantsToResolve::None;
++            return element->childNeedsStyleRecalc() || descendantsToResolve != DescendantsToResolve::None || m_isUpdatingFonts;
+         }();
+ 
++        // browser-lite: computed styles cached below an element that renders no descendants keep the old fonts.
++        if (!shouldIterateChildren && m_isUpdatingFonts && (!style || style->display() == DisplayType::None)) {
++            for (Ref descendant : composedTreeDescendants(element.get())) {
++                if (RefPtr descendantElement = dynamicDowncast<Element>(WTF::move(descendant)))
++                    descendantElement->resetComputedStyle();
++            }
++        }
++
+         if (!m_didSeePendingStylesheet)
+             m_didSeePendingStylesheet = hasLoadingStylesheet(m_document->styleScope(), element.get(), !shouldIterateChildren);
+ 
+@@ -1481,7 +1547,7 @@ auto TreeResolver::updateStateForQueryContainer(Element& element, const Style::C
+     if (style->containerType().hasSizeContainment() || (existingStyle && existingStyle->containerType().hasSizeContainment())) {
+         // If any of the queries use font-size relative units then a font size change
+         // may affect their evaluation, so force re-evaluating all descendants.
+-        if (styleChangeAffectsRelativeUnits(*style, existingStyle))
++        if (styleChangeAffectsRelativeUnits(*style, existingStyle, m_isUpdatingFonts))
+             descendantsToResolve = DescendantsToResolve::All;
+ 
+         m_queryContainerStates.add(element, QueryContainerState { });
+@@ -1507,7 +1573,7 @@ std::unique_ptr<Update> TreeResolver::resolve()
+     if (didInterleavedLayout)
+         AnchorPositionEvaluator::updateAnchorPositioningStatesAfterInterleavedLayout(m_document, m_treeResolutionState.anchorPositionedStates);
+ 
+-    if (!documentElement->childNeedsStyleRecalc() && !documentElement->needsStyleRecalc())
++    if (!documentElement->childNeedsStyleRecalc() && !documentElement->needsStyleRecalc() && !m_isUpdatingFonts)
+         return WTF::move(m_update);
+ 
+     m_didSeePendingStylesheet = m_document->styleScope().hasPendingSheetsBeforeBody();
+diff --git a/Source/WebCore/style/StyleTreeResolver.h b/Source/WebCore/style/StyleTreeResolver.h
+index 54dc8ec6b4..3a0ac4eba5 100644
+--- a/Source/WebCore/style/StyleTreeResolver.h
++++ b/Source/WebCore/style/StyleTreeResolver.h
+@@ -63,7 +63,8 @@ enum class IsInDisplayNoneTree : bool { No, Yes };
+ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(TreeResolverScope);
+ class TreeResolver {
+ public:
+-    TreeResolver(Document&, std::unique_ptr<Update> = { });
++    // browser-lite: isUpdatingFonts after web fonts loaded or font faces changed, see m_isUpdatingFonts.
++    TreeResolver(Document&, std::unique_ptr<Update> = { }, bool isUpdatingFonts = false);
+     ~TreeResolver();
+ 
+     std::unique_ptr<Update> resolve();
+@@ -71,7 +72,7 @@ public:
+     bool needsInterleavedLayout() const { return m_needsInterleavedLayout; }
+ 
+ private:
+-    enum class ResolutionType : uint8_t { RebuildUsingExisting, AnimationOnly, FastPathInherit, FullWithMatchResultCache, Full };
++    enum class ResolutionType : uint8_t { RebuildUsingExisting, AnimationOnly, FastPathInherit, FontUpdate, FullWithMatchResultCache, Full };
+     ResolvedStyle styleForStyleable(const Styleable&, ResolutionType, const ResolutionContext&, const Style::ComputedStyle* existingStyle);
+ 
+     void resolveComposedTree();
+@@ -160,8 +161,10 @@ private:
+     void popParent();
+     void popParentsToDepth(unsigned depth);
+ 
+-    DescendantsToResolve computeDescendantsToResolve(const ElementUpdate&, const Style::ComputedStyle* existingStyle, Validity) const;
++    DescendantsToResolve computeDescendantsToResolve(OptionSet<Change>, const Style::ComputedStyle& newStyle, const Style::ComputedStyle* existingStyle, Validity) const;
++    DescendantsToResolve descendantsToResolveAfterFontChange(const ElementUpdate&, const Style::ComputedStyle* existingStyle, Validity) const;
+     static std::optional<ResolutionType> determineResolutionType(const Element&, const Style::ComputedStyle*, DescendantsToResolve, OptionSet<Change> parentChange);
++    std::optional<ResolutionType> resolutionTypeAfterFontChange(const Element&, const Style::ComputedStyle*, std::optional<ResolutionType>) const;
+     void resetDescendantStyleRelations(Element&, DescendantsToResolve);
+ 
+     ResolutionContext makeResolutionContext();
+@@ -204,6 +207,10 @@ private:
+     Vector<Parent, 32> m_parentStack;
+     bool m_didSeePendingStylesheet { false };
+     bool m_isFullDocumentStyleRebuild { false };
++    // browser-lite: every element whose fonts (or those of its pseudo-elements) are no longer the ones the
++    // font selector gives is resolved again. Where no value depends on the fonts its style only gets the new
++    // fonts (ResolutionType::FontUpdate), like Blink restyles only font metric dependent styles on a font load.
++    bool m_isUpdatingFonts { false };
+ 
+     // States relevant to deferring and resuming descendant resolution.
+     // Also see deferDescendantResolution and resumeDescendantResolutionIfNeeded.
+diff --git a/Source/WebCore/style/computed/StyleComputedStyle.cpp b/Source/WebCore/style/computed/StyleComputedStyle.cpp
+index 4eff5bbd99..4f2a736655 100644
+--- a/Source/WebCore/style/computed/StyleComputedStyle.cpp
++++ b/Source/WebCore/style/computed/StyleComputedStyle.cpp
+@@ -28,6 +28,7 @@
+ 
+ #include "ColorBlending.h"
+ #include "FontCascadeInlines.h"
++#include "FontSelector.h"
+ #include "Pagination.h"
+ #include "PlatformRenderTheme.h"
+ #include "RenderBlock.h"
+@@ -69,6 +70,7 @@ struct SameSizeAsComputedStyle : CanMakeCheckedPtr<SameSizeAsComputedStyle> {
+         unsigned floating : 3;
+         bool usesViewportUnits : 1;
+         bool isContainerDependent : 1;
++        bool usesFontMetrics : 1;
+         bool useTreeCountingFunctions : 1;
+         bool hasExplicitlyInheritedProperties : 1;
+         bool disallowsFastPathInheritance : 1;
+@@ -223,6 +225,23 @@ void ComputedStyle::fastPathInheritFrom(const ComputedStyle& inheritParent)
+     }
+ }
+ 
++void ComputedStyle::updateFontsAfterFontChange(const ComputedStyle* previousParentStyle, const ComputedStyle& parentStyle, FontSelector* fontSelector)
++{
++    if (previousParentStyle) {
++        if (m_inheritedData.ptr() == previousParentStyle->m_inheritedData.ptr()) {
++            m_inheritedData = parentStyle.m_inheritedData;
++            return;
++        }
++        if (m_inheritedData->fontData.ptr() == previousParentStyle->m_inheritedData->fontData.ptr()) {
++            m_inheritedData.access().fontData = parentStyle.m_inheritedData->fontData;
++            return;
++        }
++    }
++    FontCascade fontCascade { FontCascadeDescription { fontDescription() }, this->fontCascade() };
++    fontCascade.update(fontSelector);
++    setFontCascade(WTF::move(fontCascade));
++}
++
+ void ComputedStyle::copyNonInheritedFrom(const ComputedStyle& other)
+ {
+     m_nonInheritedData = other.m_nonInheritedData;
+diff --git a/Source/WebCore/style/computed/StyleComputedStyle.h b/Source/WebCore/style/computed/StyleComputedStyle.h
+index 011ff9f4be..55d0eb9f78 100644
+--- a/Source/WebCore/style/computed/StyleComputedStyle.h
++++ b/Source/WebCore/style/computed/StyleComputedStyle.h
+@@ -29,6 +29,9 @@
+ #include <WebCore/StyleComputedStyleProperties.h>
+ 
+ namespace WebCore {
++
++class FontSelector;
++
+ namespace Style {
+ 
+ class ComputedStyle final : public ComputedStyleProperties {
+@@ -61,6 +64,8 @@ public:
+     void NODELETE inheritUnicodeBidiFrom(const ComputedStyle&);
+     inline void inheritColumnPropertiesFrom(const ComputedStyle&);
+     void fastPathInheritFrom(const ComputedStyle&);
++    // browser-lite: takes the fonts the font selector gives now, sharing the parent's font data where it shared the previous parent style's.
++    void updateFontsAfterFontChange(const ComputedStyle* previousParentStyle, const ComputedStyle& parentStyle, FontSelector*);
+     void copyNonInheritedFrom(const ComputedStyle&);
+     void copyContentFrom(const ComputedStyle&);
+     void copyPseudoElementsFrom(const ComputedStyle&);
+diff --git a/Source/WebCore/style/computed/StyleComputedStyleBase+ConstructionInlines.h b/Source/WebCore/style/computed/StyleComputedStyleBase+ConstructionInlines.h
+index 8a4627bddb..377a6a3c99 100644
+--- a/Source/WebCore/style/computed/StyleComputedStyleBase+ConstructionInlines.h
++++ b/Source/WebCore/style/computed/StyleComputedStyleBase+ConstructionInlines.h
+@@ -78,6 +78,7 @@ inline ComputedStyleBase::ComputedStyleBase(CreateDefaultStyleTag)
+     m_nonInheritedFlags.textDecorationLine = ComputedStyle::initialTextDecorationLine().toRaw();
+     m_nonInheritedFlags.usesViewportUnits = false;
+     m_nonInheritedFlags.isContainerDependent = false;
++    m_nonInheritedFlags.usesFontMetrics = false;
+     m_nonInheritedFlags.useTreeCountingFunctions = false;
+     m_nonInheritedFlags.hasExplicitlyInheritedProperties = false;
+     m_nonInheritedFlags.disallowsFastPathInheritance = false;
+@@ -126,6 +127,7 @@ inline void ComputedStyleBase::NonInheritedFlags::copyNonInheritedFrom(const Non
+     textDecorationLine = other.textDecorationLine;
+     usesViewportUnits = other.usesViewportUnits;
+     isContainerDependent = other.isContainerDependent;
++    usesFontMetrics = other.usesFontMetrics;
+     useTreeCountingFunctions = other.useTreeCountingFunctions;
+     hasExplicitlyInheritedProperties = other.hasExplicitlyInheritedProperties;
+     disallowsFastPathInheritance = other.disallowsFastPathInheritance;
+diff --git a/Source/WebCore/style/computed/StyleComputedStyleBase+GettersInlines.h b/Source/WebCore/style/computed/StyleComputedStyleBase+GettersInlines.h
+index 731bf74960..64cfcd6bb3 100644
+--- a/Source/WebCore/style/computed/StyleComputedStyleBase+GettersInlines.h
++++ b/Source/WebCore/style/computed/StyleComputedStyleBase+GettersInlines.h
+@@ -109,6 +109,11 @@ inline bool ComputedStyleBase::isContainerDependent() const
+     return m_nonInheritedFlags.isContainerDependent;
+ }
+ 
++inline bool ComputedStyleBase::usesFontMetrics() const
++{
++    return m_nonInheritedFlags.usesFontMetrics;
++}
++
+ inline bool ComputedStyleBase::useTreeCountingFunctions() const
+ {
+     return m_nonInheritedFlags.useTreeCountingFunctions;
+diff --git a/Source/WebCore/style/computed/StyleComputedStyleBase+SettersInlines.h b/Source/WebCore/style/computed/StyleComputedStyleBase+SettersInlines.h
+index dce2321025..59ad1e0d5c 100644
+--- a/Source/WebCore/style/computed/StyleComputedStyleBase+SettersInlines.h
++++ b/Source/WebCore/style/computed/StyleComputedStyleBase+SettersInlines.h
+@@ -68,6 +68,11 @@ inline void ComputedStyleBase::setIsContainerDependent()
+     m_nonInheritedFlags.isContainerDependent = true;
+ }
+ 
++inline void ComputedStyleBase::setUsesFontMetrics()
++{
++    m_nonInheritedFlags.usesFontMetrics = true;
++}
++
+ inline void ComputedStyleBase::setUsesTreeCountingFunctions()
+ {
+     m_nonInheritedFlags.useTreeCountingFunctions = true;
+diff --git a/Source/WebCore/style/computed/StyleComputedStyleBase.cpp b/Source/WebCore/style/computed/StyleComputedStyleBase.cpp
+index 341ab70f8d..752418864d 100644
+--- a/Source/WebCore/style/computed/StyleComputedStyleBase.cpp
++++ b/Source/WebCore/style/computed/StyleComputedStyleBase.cpp
+@@ -438,6 +438,7 @@ void ComputedStyleBase::NonInheritedFlags::dumpDifferences(TextStream& ts, const
+ 
+     LOG_IF_DIFFERENT(usesViewportUnits);
+     LOG_IF_DIFFERENT(isContainerDependent);
++    LOG_IF_DIFFERENT(usesFontMetrics);
+     LOG_IF_DIFFERENT(useTreeCountingFunctions);
+ 
+     LOG_IF_DIFFERENT_WITH_FROM_RAW(TextDecorationLine, textDecorationLine);
+diff --git a/Source/WebCore/style/computed/StyleComputedStyleBase.h b/Source/WebCore/style/computed/StyleComputedStyleBase.h
+index 5d6a136cf3..f8b4442b15 100644
+--- a/Source/WebCore/style/computed/StyleComputedStyleBase.h
++++ b/Source/WebCore/style/computed/StyleComputedStyleBase.h
+@@ -473,6 +473,10 @@ public:
+     inline bool isContainerDependent() const;
+     inline void setIsContainerDependent();
+ 
++    // browser-lite: a value of this style was computed from font metrics (ex, ch, ic, cap, lh and their root variants).
++    inline bool usesFontMetrics() const;
++    inline void setUsesFontMetrics();
++
+     inline bool useTreeCountingFunctions() const;
+     inline void setUsesTreeCountingFunctions();
+ 
+@@ -760,6 +764,7 @@ public:
+ 
+         PREFERRED_TYPE(bool) unsigned usesViewportUnits : 1;
+         PREFERRED_TYPE(bool) unsigned isContainerDependent : 1;
++        PREFERRED_TYPE(bool) unsigned usesFontMetrics : 1;
+         PREFERRED_TYPE(bool) unsigned useTreeCountingFunctions : 1;
+         PREFERRED_TYPE(bool) unsigned hasExplicitlyInheritedProperties : 1; // Explicitly inherits a non-inherited property.
+         PREFERRED_TYPE(bool) unsigned disallowsFastPathInheritance : 1;
+diff --git a/Source/WebCore/style/values/primitives/StyleLengthResolution.cpp b/Source/WebCore/style/values/primitives/StyleLengthResolution.cpp
+index b9f788b5ba..407157560a 100644
+--- a/Source/WebCore/style/values/primitives/StyleLengthResolution.cpp
++++ b/Source/WebCore/style/values/primitives/StyleLengthResolution.cpp
+@@ -323,11 +323,14 @@ double computeNonCalcLengthDouble(double value, CSS::LengthUnit lengthUnit, cons
+     case Cap:
+     case Ch:
+     case Ic:
++        if (lengthUnit != Em && lengthUnit != QuirkyEm)
++            conversionData.setUsesFontMetrics();
+         value = computeUnzoomedNonCalcLengthDouble(value, lengthUnit, conversionData.propertyToCompute(), &conversionData.fontCascadeForFontUnits(), conversionData.rangeZoomOption());
+         value = adjustZoomStateForFontRelativeUnitsIfNeeded(value, conversionData);
+         break;
+ 
+     case Lh:
++        conversionData.setUsesFontMetrics();
+         if (conversionData.computingLineHeight() || conversionData.computingFontSize()) {
+             // Try to get the parent's computed line-height, or fall back to the initial line-height of this element's font spacing.
+             value *= conversionData.parentStyle() ? conversionData.parentStyle()->computedLineHeight() : conversionData.fontCascadeForFontUnits().metricsOfPrimaryFont().intLineSpacing();
+@@ -346,11 +349,14 @@ double computeNonCalcLengthDouble(double value, CSS::LengthUnit lengthUnit, cons
+     case Rem:
+     case Rex:
+     case Ric:
++        if (lengthUnit != Rem)
++            conversionData.setUsesFontMetrics();
+         value = computeUnzoomedNonCalcLengthDouble(value, lengthUnit, conversionData.propertyToCompute(), conversionData.rootStyle() ? &conversionData.rootStyle()->fontCascade() : &conversionData.fontCascadeForFontUnits(), conversionData.rangeZoomOption());
+         value = adjustZoomStateForFontRelativeUnitsIfNeeded(value, conversionData);
+         break;
+ 
+     case Rlh:
++        conversionData.setUsesFontMetrics();
+         if (auto* rootStyle = conversionData.rootStyle()) {
+             if (conversionData.computingLineHeight() || conversionData.computingFontSize())
+                 value *= Style::evaluate<float>(rootStyle->specifiedLineHeight(), Style::LineHeightEvaluationContext { rootStyle->computedFontSize(), rootStyle->metricsOfPrimaryFont().lineSpacing() }, rootStyle->usedZoomForLength());

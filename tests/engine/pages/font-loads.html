@@ -1,0 +1,153 @@
+<!doctype html>
+<title>Font loads</title>
+<!-- A web font that loads or a font face that is added gives every style the fonts that changed
+     for it (patch 0148): only styles whose values depend on font metrics (ex, ch, ic, cap, lh and
+     their root variants), on font-size-adjust, on a container or on an animation are resolved
+     again, the others keep their values with the new fonts. Before, each load restyled the whole
+     document from scratch (nytimes.com: 16 of its 26 full restyles of 3000 elements). Every
+     load below must give the same computed style and geometry as a fresh style of the whole tree,
+     and a font face added next to 2000 heavily styled elements costs a fraction of a full restyle. -->
+<style>
+  html { font-family: Web, sans-serif; }
+  body { margin: 0; font-size: 16px; line-height: 20px; }
+  .ex { width: 10ex; letter-spacing: 0.05ex; }
+  .ex > i { padding-left: 1ex; }
+  .ch { padding-left: 2ch; display: inline-block; }
+  .ic { margin-top: 1ic; display: block; }
+  .cap { margin-bottom: 1cap; display: block; }
+  .lh { line-height: normal; }
+  .lh > b { display: block; margin-top: 1lh; }
+  .root { margin-left: 2rex; padding-top: 1rch; padding-bottom: 1rlh; display: block; }
+  .icon::before { content: "AB"; font-family: Icon, monospace; }
+  .icon::after { content: "x"; padding-left: 1ex; }
+  .mono { font-family: Mono, monospace; }
+  .late { font-family: Late, serif; }
+  .contents { display: contents; font-family: Mono, monospace; }
+  .adjust { font-size-adjust: 0.6; }
+  .pulse { animation: pulse 100s infinite alternate; }
+  @keyframes pulse { from { opacity: 0.5; } to { opacity: 0.6; } }
+  .container { container-type: inline-size; width: 300px; }
+  @container (min-width: 20ex) { .query { color: rgb(0, 120, 0); } }
+  .query { color: rgb(120, 0, 0); }
+  .hidden { display: none; }
+  .fonts-on { color: rgb(1, 2, 3); }
+  .fonts-on .mono { letter-spacing: 1px; }
+  @font-face { font-family: Late; src: local("Noto Serif"); }
+</style>
+<div id="app">
+  <p><span id="probe">Plain text in the web font</span></p>
+  <p class="ex">Ex <i>units</i> and spacing</p>
+  <p><span class="ch">Ch</span> <span class="ic">Ic</span> <span class="cap">Cap</span></p>
+  <p class="lh">Normal line height <b>Lh</b></p>
+  <p><span class="root">Root units</span></p>
+  <p><span class="icon">Icon</span></p>
+  <p><span class="mono">Mono</span> <span class="late">Late</span></p>
+  <p><span class="contents">Contents <em>inside</em></span></p>
+  <p class="adjust">Adjusted size</p>
+  <p class="pulse">Animated</p>
+  <div class="container"><span class="query">Query</span></div>
+  <div class="hidden"><span class="ex" id="hiddenEx">Hidden</span></div>
+  <div id="host"></div>
+</div>
+<div id="many"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const shadow = $('host').attachShadow({ mode: 'open' });
+shadow.innerHTML = '<style>.inner { width: 8ex; } .icon::before { content: "C"; font-family: Icon, monospace; }</style><p class="inner">Inner</p><span class="icon">Shadow icon</span><slot></slot>';
+$('host').innerHTML = '<span class="ex">Slotted</span>';
+
+const properties = ['font-family', 'font-size', 'width', 'letter-spacing', 'padding-left', 'padding-top', 'padding-bottom', 'margin-top', 'margin-bottom', 'margin-left', 'color', 'opacity'];
+const elements = () => [...$('app').querySelectorAll('*'), ...shadow.querySelectorAll('*')];
+const snapshot = () =>
+  elements().map((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return `${properties.map((name) => style.getPropertyValue(name)).join(',')},${rect.width.toFixed(2)}x${rect.height.toFixed(2)}`;
+  }).concat(getComputedStyle($('hiddenEx')).getPropertyValue('letter-spacing'));
+// A fresh style: the whole tree is styled again from nothing
+const fresh = () => {
+  $('app').style.display = 'none';
+  $('app').offsetHeight;
+  $('app').style.display = '';
+  $('host').style.display = 'none';
+  $('host').offsetHeight;
+  $('host').style.display = '';
+  return snapshot();
+};
+const loadFace = async (family, source) => {
+  const face = new FontFace(family, source);
+  document.fonts.add(face);
+  await face.load();
+};
+
+const results = [];
+const compare = (name) => {
+  const incremental = snapshot();
+  const expected = fresh();
+  const differ = incremental.filter((value, index) => value !== expected[index]).length;
+  if (differ) results.push(`${name}:${differ}`);
+  return incremental;
+};
+
+addEventListener('load', async () => {
+  await document.fonts.ready;
+  fresh();
+  const width = () => $('probe').getBoundingClientRect().width;
+  const before = width();
+  await loadFace('Web', 'local("Noto Serif")');
+  compare('web font');
+  if (Math.abs(width() - before) < 1) results.push('the web font did not apply');
+  await loadFace('Icon', 'local("Noto Sans Mono")');
+  compare('pseudo-element font');
+  await loadFace('Mono', 'local("Noto Sans")');
+  compare('display contents');
+  getComputedStyle($('hiddenEx')).letterSpacing;
+  await loadFace('Web', 'local("Noto Sans Mono")');
+  compare('second face of a family');
+  await loadFace('Unused', 'local("Noto Sans")');
+  compare('face nobody uses');
+  const face = new FontFace('Mono', 'local("Noto Serif")');
+  document.fonts.add(face);
+  document.documentElement.classList.add('fonts-on');
+  await face.load();
+  compare('class on the root with a load');
+  measure();
+});
+
+// Cost of a font face added next to 2000 elements whose rules declare many custom properties, as
+// design systems and CSS-in-JS give them, against what a font load cost before: every element
+// resolved again and all text laid out again (a changed font size of the body)
+function measure() {
+  const sheet = document.createElement('style');
+  const rules = [':root { --base: 1px; }'];
+  const rows = [];
+  for (let i = 0; i < 1000; i++) {
+    const vars = [`--p0: calc(var(--base) + ${i % 13}px);`];
+    for (let v = 1; v < 30; v++) vars.push(`--p${v}: calc(var(--p${v - 1}) + 1px);`);
+    rules.push(`.r${i} { ${vars.join(' ')} padding-left: var(--p29); }`);
+    rows.push(`<div class="row r${i}"><b>${i}</b></div>`);
+  }
+  sheet.textContent = rules.join('\n');
+  document.head.append(sheet);
+  $('many').innerHTML = rows.join('');
+  document.body.offsetHeight;
+  const median = (run) => {
+    const times = [];
+    for (let i = 0; i < 9; i++) {
+      const start = performance.now();
+      run(i);
+      document.body.offsetHeight;
+      times.push(performance.now() - start);
+    }
+    times.sort((a, b) => a - b);
+    return times[4];
+  };
+  const added = median((i) => document.fonts.add(new FontFace(`Extra${i}`, 'local("Noto Sans")')));
+  const root = document.body.style;
+  const full = median((i) => root.setProperty('font-size', `${16 + ((i % 2) + 1) / 64}px`));
+  root.removeProperty('font-size');
+  console.log(`FONTLOADS added=${added.toFixed(2)}ms full=${full.toFixed(2)}ms`);
+  if (added / full > 0.5) results.push(`an added font face costs ${Math.round((added / full) * 100)}% of a full restyle`);
+  console.log(`FONTLOADS done=${results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'}`);
+}
+</script>

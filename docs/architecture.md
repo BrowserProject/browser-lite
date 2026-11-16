@@ -75,7 +75,17 @@ whole document; CSS-in-JS libraries insert hundreds of rules while a page render
 something else of the sheets changed or the rule is no style rule (also inside `@media`); the
 style resolver is still built anew. Such a new resolver keeps the faces of the `@font-face` rules
 whose descriptors did not change, where WebKit made every face anew, which loaded its font again
-and so restyled and laid out the whole document once more (patch 0124, #530). `CompressionStream` and
+and so restyled and laid out the whole document once more (patch 0124, #530). A web font that
+loads or a font face that is added or removed no longer restyles the whole document from scratch
+(WebKit's `Document::fontsNeedUpdate` scheduled a full style rebuild for each): the next style
+resolution visits every element and gives a style whose fonts (or those of its pseudo-elements)
+are no longer the ones the font selector gives just the new fonts, sharing its parent's font data
+where it did before, unless one of its values depends on the fonts: lengths in `ex`, `ch`, `ic`,
+`cap`, `lh` and their root variants (a new style flag, `usesFontMetrics`), `font-size-adjust`,
+container queries and units, anchor functions, animations and the styles user agent shadow trees
+make themselves are resolved again, and the new fonts alone count as no change for their
+descendants. Like Blink, which restyles only font metric dependent styles on a font load
+(patch 0148, #584). `CompressionStream` and
 `DecompressionStream` take every `BufferSource`, also one of another realm such as an iframe's
 `Uint8Array`: WebKit's builtin refused chunks that failed `instanceof ArrayBuffer` of its own
 realm, now the WebIDL conversion of the encoder and decoder checks them by brand (patch 0110, #506).
