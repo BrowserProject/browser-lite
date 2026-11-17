@@ -404,7 +404,11 @@ Digits typed into a part of a date or time field move on to the next part once t
 or no further digit fits (a month of 03 or 4, an hour of 9 on a 12 hour clock), like Chrome, so
 03152025 types a whole date; the year takes up to 6 digits like Chrome's and moves on only at a
 separator or an arrow key (patch 0143, #570). An empty part shows `mm`, `dd`, `yyyy` or dashes in
-grey like Chrome and Firefox, not a part of the current date or time (patch 0144, #571).
+grey like Chrome and Firefox, not a part of the current date or time (patch 0144, #571). Like in
+Chrome a part is only as wide as its text (with a value: its widest value, so it keeps its width
+while the user types), and the field's edit element keeps the room for every part's widest value
+or placeholder, so `11/20/2026` and `mm/dd/yyyy` show without gaps and the field keeps its width
+when it gets a value (patch 0156, #603).
 Words end where they end in Chrome on Linux (#572). The engine's ICU data has Chromium's word
 break rules: `tools/icu-word-rules.cpp`, built with the sysroot's ICU and run in node during the
 engine build, takes the rules ICU stores in its `word.brk`, makes a full stop between letters

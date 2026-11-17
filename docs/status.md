@@ -143,7 +143,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (#371; on an iPhone or iPad their sheet keeps its width and 8 px from the window edge, #473) and close when the page removes the field or navigates (#424).
   Typed digits fill a date or time field part by part like in Chrome: `03152025` gives
   2025-03-15 (#570; before, the month kept taking digits and the value stayed empty), an empty
-  field shows mm/dd/yyyy and --:-- -- instead of today's date and 12:30 PM in grey (#571).
+  field shows mm/dd/yyyy and --:-- -- instead of today's date and 12:30 PM in grey (#571), and a
+  set one shows 11/20/2026 without the gaps around the month that the width of "mm" left (#603).
   Words end where they end in Chrome on Linux (#572): one Ctrl+Backspace on "hello world, "
   leaves "hello world" and on "user@example.com" "user@example." (before, "hello " and
   "user@"), Ctrl+Arrow stops at punctuation, and a double click on "example" selects "example",

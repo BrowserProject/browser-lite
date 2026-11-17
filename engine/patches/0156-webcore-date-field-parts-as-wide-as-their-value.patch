@@ -1,0 +1,264 @@
+diff --git a/Source/WebCore/html/shadow/DateTimeEditElement.cpp b/Source/WebCore/html/shadow/DateTimeEditElement.cpp
+index 3f1bea1dc3..c078c5415e 100644
+--- a/Source/WebCore/html/shadow/DateTimeEditElement.cpp
++++ b/Source/WebCore/html/shadow/DateTimeEditElement.cpp
+@@ -35,13 +35,20 @@
+ #include "DateTimeFormat.h"
+ #include "DateTimeSymbolicFieldElement.h"
+ #include "Document.h"
++#include "ElementChildIteratorInlines.h"
+ #include "ExceptionOr.h"
++#include "FontCascade.h"
+ #include "HTMLNames.h"
+ #include "KeyboardEvent.h"
+ #include "NodeDocument.h"
+ #include "PlatformLocale.h"
++#include "RenderBlock.h"
+ #include "RenderElement.h"
++#include "ResolvedStyle.h"
+ #include "ScriptDisallowedScope.h"
++#include "StyleComputedStyle+GettersInlines.h"
++#include "StyleComputedStyle+SettersInlines.h"
++#include "StyleResolver.h"
+ #include "Text.h"
+ #include "UserAgentParts.h"
+ #include <wtf/TZoneMallocInlines.h>
+@@ -178,6 +185,10 @@ void DateTimeEditBuilder::visitField(DateTimeFormat::FieldType fieldType, int co
+     }
+ }
+ 
++// browser-lite: the margin of a literal at a space, and the inline padding of a part in html.css.
++static constexpr int literalSpaceMargin = -1;
++static constexpr int fieldInlinePadding = 2;
++
+ void DateTimeEditBuilder::visitLiteral(const String& text)
+ {
+     ASSERT(text.length());
+@@ -193,9 +204,9 @@ void DateTimeEditBuilder::visitLiteral(const String& text)
+     // prevent selected fields from appearing squished. To fix, pull fields closer
+     // together by applying a negative margin.
+     if (text.startsWith(' '))
+-        element->setInlineStyleProperty(CSSPropertyMarginInlineStart, -1, CSSUnitType::CSS_PX);
++        element->setInlineStyleProperty(CSSPropertyMarginInlineStart, literalSpaceMargin, CSSUnitType::CSS_PX);
+     if (text.endsWith(' '))
+-        element->setInlineStyleProperty(CSSPropertyMarginInlineEnd, -1, CSSUnitType::CSS_PX);
++        element->setInlineStyleProperty(CSSPropertyMarginInlineEnd, literalSpaceMargin, CSSUnitType::CSS_PX);
+ 
+     element->appendChild(Text::create(document.get(), String { text }));
+     protect(m_editElement->fieldsWrapperElement())->appendChild(element);
+@@ -204,7 +215,7 @@ void DateTimeEditBuilder::visitLiteral(const String& text)
+ DateTimeEditElementEditControlOwner::~DateTimeEditElementEditControlOwner() = default;
+ 
+ DateTimeEditElement::DateTimeEditElement(Document& document, DateTimeEditElementEditControlOwner& editControlOwner)
+-    : HTMLDivElement(document)
++    : HTMLDivElement(document, TypeFlag::HasCustomStyleResolveCallbacks)
+     , m_editControlOwner(editControlOwner)
+ {
+     m_placeholderDate.setToCurrentLocalTime();
+@@ -233,6 +244,38 @@ size_t DateTimeEditElement::fieldIndexOf(const DateTimeFieldElement& fieldToFind
+     });
+ }
+ 
++// browser-lite: like Chrome, the edit element is as wide as its parts with their widest values or
++// placeholders, so the field keeps its width when the user sets, types or clears a value, while
++// each part is only as wide as its value and the value has no gaps around it.
++std::optional<Style::UnadjustedStyle> DateTimeEditElement::resolveCustomStyle(const Style::ResolutionContext& resolutionContext, const Style::ComputedStyle*)
++{
++    auto elementStyle = resolveStyle(resolutionContext);
++    if (!firstChild())
++        return elementStyle;
++
++    CheckedRef style = *elementStyle.style;
++    CheckedRef font = style->fontCascade();
++    float textInlineSize = 0;
++    float boxInlineSize = 0;
++    for (auto& field : m_fields) {
++        textInlineSize += field->maximumWidth(style.get());
++        boxInlineSize += fieldInlinePadding;
++    }
++    for (Ref child : childrenOfType<Element>(fieldsWrapperElement())) {
++        if (child->userAgentPart() != UserAgentParts::webkitDatetimeEditText())
++            continue;
++        auto text = child->textContent();
++        auto textRun = RenderBlock::constructTextRun(text, style.get());
++        textInlineSize += font->width(protect(textRun));
++        if (text.startsWith(' '))
++            boxInlineSize += literalSpaceMargin;
++        if (text.endsWith(' '))
++            boxInlineSize += literalSpaceMargin;
++    }
++    style->setLogicalMinWidth(Style::MinimumSize::Fixed { textInlineSize / style->usedZoomForLength().value + boxInlineSize });
++    return elementStyle;
++}
++
+ void DateTimeEditElement::defaultEventHandler(Event& event)
+ {
+     if (RefPtr keyboardEvent = dynamicDowncast<KeyboardEvent>(event)) {
+@@ -311,6 +354,9 @@ void DateTimeEditElement::layout(const LayoutParameters& layoutParameters)
+                 break;
+         }
+     }
++
++    // browser-lite: the minimum width depends on the parts (resolveCustomStyle).
++    invalidateStyle();
+ }
+ 
+ void DateTimeEditElement::didBlurFromField(Event& event)
+diff --git a/Source/WebCore/html/shadow/DateTimeEditElement.h b/Source/WebCore/html/shadow/DateTimeEditElement.h
+index f90afb8ec7..b7d9d54fdc 100644
+--- a/Source/WebCore/html/shadow/DateTimeEditElement.h
++++ b/Source/WebCore/html/shadow/DateTimeEditElement.h
+@@ -96,6 +96,7 @@ private:
+     DateTimeFieldsState valueAsDateTimeFieldsState(DateTimePlaceholderIfNoValue = DateTimePlaceholderIfNoValue::No) const;
+ 
+     void defaultEventHandler(Event&) final;
++    std::optional<Style::UnadjustedStyle> resolveCustomStyle(const Style::ResolutionContext&, const Style::ComputedStyle*) final;
+ 
+     bool focusOnNextFocusableField(size_t startIndex);
+ 
+diff --git a/Source/WebCore/html/shadow/DateTimeFieldElement.cpp b/Source/WebCore/html/shadow/DateTimeFieldElement.cpp
+index db16eabaab..4ed2352537 100644
+--- a/Source/WebCore/html/shadow/DateTimeFieldElement.cpp
++++ b/Source/WebCore/html/shadow/DateTimeFieldElement.cpp
+@@ -30,14 +30,17 @@
+ #include "CSSPropertyNames.h"
+ #include "DateComponents.h"
+ #include "EventNames.h"
++#include "FontCascade.h"
+ #include "HTMLNames.h"
+ #include "KeyboardEvent.h"
+ #include "LocalizedStrings.h"
+ #include "NodeDocument.h"
+ #include "PlatformLocale.h"
+ #include "PlatformRenderTheme.h"
++#include "RenderBlock.h"
+ #include "RenderTheme.h"
+ #include "ResolvedStyle.h"
++#include "StyleComputedStyle+GettersInlines.h"
+ #include "StyleComputedStyle+SettersInlines.h"
+ #include "StyleResolver.h"
+ #include "Text.h"
+@@ -62,8 +65,12 @@ std::optional<Style::UnadjustedStyle> DateTimeFieldElement::resolveCustomStyle(c
+ {
+     auto elementStyle = resolveStyle(resolutionContext);
+ 
++    // browser-lite: a part with a value is as wide as its widest value, so it keeps its width while
++    // the user types; an empty one as its placeholder. Neither has gaps around its text, the space
++    // for the widest text is kept by DateTimeEditElement.
+     CheckedRef elementStyleStyle = *elementStyle.style;
+-    adjustMinInlineSize(elementStyleStyle.get());
++    if (hasValue())
++        elementStyleStyle->setLogicalMinWidth(Style::MinimumSize::Fixed { maximumValueWidth(elementStyleStyle.get()) / elementStyleStyle->usedZoomForLength().value });
+ 
+     if (!hasValue() && shadowHostStyle) {
+         auto textColor = shadowHostStyle->visitedDependentColorApplyingColorFilter();
+@@ -74,6 +81,13 @@ std::optional<Style::UnadjustedStyle> DateTimeFieldElement::resolveCustomStyle(c
+     return elementStyle;
+ }
+ 
++float DateTimeFieldElement::maximumWidth(const Style::ComputedStyle& style) const
++{
++    CheckedRef font = style.fontCascade();
++    auto placeholderRun = RenderBlock::constructTextRun(placeholderValue(), style);
++    return std::max(maximumValueWidth(style), font->width(protect(placeholderRun)));
++}
++
+ void DateTimeFieldElement::defaultEventHandler(Event& event)
+ {
+     if (event.type() == eventNames().blurEvent)
+diff --git a/Source/WebCore/html/shadow/DateTimeFieldElement.h b/Source/WebCore/html/shadow/DateTimeFieldElement.h
+index 8667d0d843..f8c21e03cb 100644
+--- a/Source/WebCore/html/shadow/DateTimeFieldElement.h
++++ b/Source/WebCore/html/shadow/DateTimeFieldElement.h
+@@ -90,12 +90,15 @@ public:
+     virtual ValueOrReference<String> value() const = 0;
+     virtual String placeholderValue() const = 0;
+ 
++    // browser-lite: the inline size of the widest text the part shows, a value or its placeholder.
++    float maximumWidth(const Style::ComputedStyle&) const;
++
+ protected:
+     DateTimeFieldElement(Document&, DateTimeFieldElementFieldOwner&);
+     Locale& localeForOwner() const;
+     AtomString localeIdentifier() const;
+     void updateVisibleValue(EventBehavior);
+-    virtual void adjustMinInlineSize(Style::ComputedStyle&) const = 0;
++    virtual float maximumValueWidth(const Style::ComputedStyle&) const = 0;
+     virtual int valueAsInteger() const = 0;
+     virtual int placeholderValueAsInteger() const = 0;
+     virtual void handleKeyboardEvent(KeyboardEvent&) = 0;
+diff --git a/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp b/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp
+index e967b34aa1..3900b760b3 100644
+--- a/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp
++++ b/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp
+@@ -65,7 +65,7 @@ DateTimeNumericFieldElement::DateTimeNumericFieldElement(Document& document, Dat
+ {
+ }
+ 
+-void DateTimeNumericFieldElement::adjustMinInlineSize(Style::ComputedStyle& style) const
++float DateTimeNumericFieldElement::maximumValueWidth(const Style::ComputedStyle& style) const
+ {
+     CheckedRef font = style.fontCascade();
+ 
+@@ -83,10 +83,7 @@ void DateTimeNumericFieldElement::adjustMinInlineSize(Style::ComputedStyle& styl
+         auto textRun = RenderBlock::constructTextRun(numberString, style);
+         inlineSize = std::max(inlineSize, font->width(protect(textRun)));
+     }
+-    auto placeholderRun = RenderBlock::constructTextRun(m_placeholder, style);
+-    inlineSize = std::max(inlineSize, font->width(protect(placeholderRun)));
+-
+-    style.setLogicalMinWidth(Style::MinimumSize::Fixed { inlineSize / style.usedZoomForLength().value });
++    return inlineSize;
+ }
+ 
+ int DateTimeNumericFieldElement::maximum() const
+diff --git a/Source/WebCore/html/shadow/DateTimeNumericFieldElement.h b/Source/WebCore/html/shadow/DateTimeNumericFieldElement.h
+index bbb07d98b3..70fb255977 100644
+--- a/Source/WebCore/html/shadow/DateTimeNumericFieldElement.h
++++ b/Source/WebCore/html/shadow/DateTimeNumericFieldElement.h
+@@ -62,7 +62,7 @@ protected:
+ 
+ private:
+     // DateTimeFieldElement functions:
+-    void adjustMinInlineSize(Style::ComputedStyle&) const final;
++    float maximumValueWidth(const Style::ComputedStyle&) const final;
+     ValueOrReference<String> value() const final;
+     String placeholderValue() const final;
+     void handleKeyboardEvent(KeyboardEvent&) final;
+diff --git a/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.cpp b/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.cpp
+index 4962995c17..6feeaeaceb 100644
+--- a/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.cpp
++++ b/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.cpp
+@@ -62,7 +62,7 @@ DateTimeSymbolicFieldElement::DateTimeSymbolicFieldElement(Document& document, D
+     ASSERT(!m_symbols.isEmpty());
+ }
+ 
+-void DateTimeSymbolicFieldElement::adjustMinInlineSize(Style::ComputedStyle& style) const
++float DateTimeSymbolicFieldElement::maximumValueWidth(const Style::ComputedStyle& style) const
+ {
+     CheckedRef font = style.fontCascade();
+ 
+@@ -71,9 +71,7 @@ void DateTimeSymbolicFieldElement::adjustMinInlineSize(Style::ComputedStyle& sty
+         auto textRun = RenderBlock::constructTextRun(symbol, style);
+         inlineSize = std::max(inlineSize, font->width(protect(textRun)));
+     }
+-    auto placeholderRun = RenderBlock::constructTextRun(m_placeholder, style);
+-    inlineSize = std::max(inlineSize, font->width(protect(placeholderRun)));
+-    style.setLogicalMinWidth(Style::MinimumSize::Fixed { inlineSize / style.usedZoomForLength().value });
++    return inlineSize;
+ }
+ 
+ bool DateTimeSymbolicFieldElement::hasValue() const
+diff --git a/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.h b/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.h
+index c891edab08..c9289b21cb 100644
+--- a/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.h
++++ b/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.h
+@@ -46,7 +46,7 @@ private:
+     static constexpr int invalidIndex = -1;
+ 
+     // DateTimeFieldElement functions:
+-    void adjustMinInlineSize(Style::ComputedStyle&) const final;
++    float maximumValueWidth(const Style::ComputedStyle&) const final;
+     void stepDown() final;
+     void stepUp() final;
+     ValueOrReference<String> value() const final;

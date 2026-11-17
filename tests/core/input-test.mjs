@@ -56,6 +56,10 @@ const PAGE = `<!doctype html>
   #phtime, #phnoon { top: 600px; }
   #phdate, #phtime { left: 20px; }
   #phtoday, #phnoon { left: 220px; }
+  .gap { position: absolute; top: 630px; margin: 0; border: 0; padding: 0; background: none; font: 16px sans-serif; }
+  #gapempty, #gapph { top: 660px; }
+  #gapdate, #gapempty { left: 20px; }
+  #gaptext, #gapph { left: 220px; }
   #blob { position: absolute; left: 600px; top: 20px; width: 120px; height: 30px; }
   #data { position: absolute; left: 600px; top: 70px; }
   #missing { position: absolute; left: 600px; top: 110px; }
@@ -85,6 +89,8 @@ const PAGE = `<!doctype html>
 <input id="ttime" type="time">
 <input id="phdate" class="ph" type="date"><input id="phtoday" class="ph" type="date">
 <input id="phtime" class="ph" type="time"><input id="phnoon" class="ph" type="time" value="12:30">
+<input id="gapdate" class="gap" type="date" value="2026-10-20"><span id="gaptext" class="gap">10/20/2026</span>
+<input id="gapempty" class="gap" type="date"><span id="gapph" class="gap">mm/dd/yyyy</span>
 <div id="own-menu" style="position:absolute;left:400px;top:20px;width:150px;height:60px;background:#ddd">own menu</div>
 <button id="blob">Save blob</button>
 <a id="data" download="data.csv" href="data:text/csv,a%2Cb%0A1%2C2%0A">data:</a>
@@ -1018,6 +1024,47 @@ for (const [name, top] of [
     `${differ} of ${dark} dark pixels differ`,
   );
 }
+
+// 6c4) The text of a date field, set or empty, has no gaps like in Chrome: its ink is as wide as the
+// same text in a span plus the padding inside (1 px on each side of a part). With the placeholder's
+// width on each part (patch 0144 alone) "10" sat centered in the width of "mm" and "yyyy" in that
+// of four digits. The field keeps its width when it gets a value (patch 0156)
+const inkExtent = async (left, top) => {
+  let first = Infinity;
+  let last = -1;
+  for (let y = top; y < top + 22; y++)
+    (await host((y) => window.blTest.pageRow(y), y))
+      .slice(left, left + 180)
+      .forEach(([r, g, b], x) => {
+        if (Math.min(r, g, b) >= 200) return;
+        first = Math.min(first, x);
+        last = Math.max(last, x);
+      });
+  return last - first + 1;
+};
+for (const [name, top] of [
+  ['a set', 630],
+  ['an empty', 660],
+]) {
+  const field = await inkExtent(20, top);
+  const text = await inkExtent(220, top);
+  check(
+    `the text of ${name} date field has no gaps`,
+    text > 40 && field - text >= 3 && field - text <= 5,
+    `field ${field} px, text ${text} px`,
+  );
+}
+await evalPage(
+  page,
+  `console.log('RESULT gapwidths=' + ['gapdate', 'gapempty'].map((id) => document.getElementById(id).getBoundingClientRect().width).join())`,
+);
+const gapWidths = await result('gapwidths');
+const [setWidth, emptyWidth] = String(gapWidths).split(',').map(Number);
+check(
+  'a date field keeps its width when it gets a value',
+  setWidth > 0 && Math.abs(setWidth - emptyWidth) < 0.5,
+  String(gapWidths),
+);
 
 // 6d) A click focuses checkboxes, buttons and links like in Chrome and Firefox on Linux, without
 // :focus-visible (Safari on macOS focuses none of them, patch 0093): Space then toggles the
