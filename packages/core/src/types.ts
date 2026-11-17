@@ -499,7 +499,10 @@ export interface View {
   setVisible(visible: boolean): void;
   /** Keyboard focus into the page. */
   focus(): void;
-  /** Moves focus to the first (forward) or last element, like Tab from outside. */
+  /**
+   * Moves focus to the first (forward) or last element of the page, like Tab from outside: the
+   * search starts at the start or end of the main frame, not at the element focused before.
+   */
   focusFirstElement(forward: boolean): void;
   /** Page zoom factor (> 0), emits `zoom` when it changes. */
   setZoom(zoom: number): void;

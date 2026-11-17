@@ -6,7 +6,7 @@ import {
   showContextMenu,
   slotMenuItems,
 } from '@browser-lite/ui';
-import { enterAddress, focusAddress, leaveAddress } from './address-bar.js';
+import { enterAddress, leaveAddress } from './address-bar.js';
 import { addBlockedPopup, type BlockedPopup, updatePopupsButton } from './blocked-popups.js';
 import { rememberClosed, takeClosed } from './closed-tabs.js';
 import { engineRunning, openOnStart, restartAfterCrash } from './engine-state.js';
@@ -289,10 +289,6 @@ export class Tab implements SessionTab {
     this.on('focus-request', () => {
       window.focus();
       activate(this);
-    });
-    // Tab past the last element of the page: to the address bar
-    this.on('take-focus', () => {
-      if (this.isActive) focusAddress();
     });
     this.on('find', (event) => showFindCount(view, event));
     this.on('context-menu', (info) => {

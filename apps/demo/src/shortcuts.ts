@@ -1,6 +1,7 @@
 import { focusAddress, focusSearch } from './address-bar.js';
 import { openBookmarkBubble } from './bookmark-bubble.js';
 import { findAgain, openFind } from './find-bar.js';
+import { focusNextPane } from './focus-order.js';
 import { closePreview, previewOpen } from './print-preview.js';
 import { runtime } from './runtime.js';
 import { openClearData, settingsOpen } from './settings-page.js';
@@ -148,7 +149,7 @@ function shortcutAction(e: Key): (() => void) | null {
       case 'F5':
         return () => tab && reloadTab(tab);
       case 'F6':
-        return focusAddress;
+        return focusNextPane;
       case 'F3':
         return () => findAgain(e.shiftKey);
     }

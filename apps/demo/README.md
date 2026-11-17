@@ -127,6 +127,12 @@ select popup) are in the same sheet.
   page (#507). Escape stops a
   loading page like Chrome's Stop, but only when nothing else takes the key: not the page
   (closing its own dialog), the address bar (restores the address) or the find bar (#437).
+- **Keyboard focus** (`focus-order.ts`): like Chrome Tab and Shift+Tab go through the controls
+  of the top bar in their order (Shift+Tab from the address bar to Reload, Forward, Back, Tab to
+  the star and the menu), Tab from the last control enters the page at its first element,
+  Shift+Tab before the page's first element comes back to that control and Tab past its last
+  element goes to the address bar. F6 and Shift+F6 go from the top bar to the page, where its
+  focus was, and from anywhere else to the address bar (#593).
 - **Failed navigations**: like Chrome the engine's error page is the only message; the status
   line and the phone layout's message stay empty instead of repeating it with the network
   layer's text (#427).
@@ -344,4 +350,4 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `settings.ts`, `settings-page.ts` | settings and what applies at the start, the search engine and its search addresses (address bar, context menu); the settings page |
 | `extensions.ts` | extension host with the UI slots as `app` (toolbar, side panel, context menu, settings), built-in extensions (none yet), switches and data in the profile pref `extensions` ([docs/extensions.md](../../docs/extensions.md)) |
 | `dialogs.ts`, `prompts.ts`, `permissions.ts` | dialogs of the pages in the page with background suppression; prompts only of the tab in front; permission decisions in the profile |
-| `shortcuts.ts`, `engine-message.ts`, `reload.ts`, `test-hooks.ts`, `util.ts` | shortcuts, messages over the page area, reloads, `window.blTest`, helpers |
+| `shortcuts.ts`, `focus-order.ts`, `engine-message.ts`, `reload.ts`, `test-hooks.ts`, `util.ts` | shortcuts, Tab and F6 between the top bar and the page, messages over the page area, reloads, `window.blTest`, helpers |

@@ -481,14 +481,6 @@ address.addEventListener('blur', () => {
   if (!edited) address.value = shownText(current);
 });
 address.addEventListener('keydown', (e) => {
-  // Tab in the address bar: into the page (first or last element)
-  if (e.key === 'Tab') {
-    const tab = activeTab();
-    if (!tab || tab.newTab) return;
-    e.preventDefault();
-    tab.view.focusFirstElement(!e.shiftKey);
-    return;
-  }
   if (e.key === 'Escape') {
     e.preventDefault();
     onEscape();

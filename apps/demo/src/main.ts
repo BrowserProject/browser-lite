@@ -30,6 +30,7 @@ import { hideMessage, showMessage, showStartProgress } from './engine-message.js
 import { restartAfterCrash, setCrashRestart, takeOpenOnStart } from './engine-state.js';
 import { builtInExtensions, extensions, ui } from './extensions.js';
 import { initFindBar, openFind } from './find-bar.js';
+import { installFocusOrder } from './focus-order.js';
 import { onHistoryRemove, readHistory } from './history.js';
 import { initHistoryMenu } from './history-menu.js';
 import { followHostHistory } from './host-history.js';
@@ -420,6 +421,7 @@ onBookmarksChange(() => {
   if (tab) updateStar(tab.url);
 });
 installShortcuts();
+installFocusOrder();
 fitVisualViewport();
 keepPageSizeWhileEditing(byId('pages'));
 followRotation();

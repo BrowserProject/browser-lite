@@ -403,7 +403,9 @@ Two fingers zoom the view (`touch-pinch.ts`) once the page answered both touchst
 up with it, also after the fingers lifted, so a pinch while the page keeps the engine thread busy
 is not lost, like Chrome replays the queued touch moves (#505).
 Tab moves the focus to links too, like in Chrome and Firefox (`ChromeClient::keyboardUIMode`, #372);
-past the last element it goes back to the host (`take-focus`).
+past the last element it goes back to the host (`take-focus`), and `View.focusFirstElement`
+enters the page from outside at the first or last element of the main frame, whatever it had
+focused before, like Chrome's `SetInitialFocus` (#593).
 Space, PageDown and PageUp, of the page and of scrolling boxes, step by 87.5 % of the view like
 Chrome (`kMinFractionToStepWhenPaging`, truncated), not Safari's 80 %: a 706 px view pages by
 617 px (patch 0151, `Scrollbar::pageStep`, #588). WebKit still leaves out fixed headers and

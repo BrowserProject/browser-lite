@@ -2004,11 +2004,19 @@ void WebView::updateActivityState()
     m_page->setActivityState(state);
 }
 
-// Tab from the address bar into the page: focus the first or last element
+// Tab from the host into the page: focus the first or last element of the main frame, like
+// SetInitialFocus of Chrome and WebKit, which clear the focused element first (else the search
+// went on from the element the page had focused before)
 void WebView::focusInitial(bool forward)
 {
     setFocused(true);
-    m_page->focusController().setInitialFocus(forward ? FocusDirection::Forward : FocusDirection::Backward, nullptr);
+    CheckedRef focus { m_page->focusController() };
+    if (RefPtr frame = focus->focusedOrMainFrame()) {
+        if (RefPtr document = frame->document())
+            document->setFocusedElement(nullptr);
+    }
+    focus->setFocusedFrame(mainFrame());
+    focus->setInitialFocus(forward ? FocusDirection::Forward : FocusDirection::Backward, nullptr);
 }
 
 // Zoom like Ctrl +/- in Chrome (page including images, new layout)
