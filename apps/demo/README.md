@@ -258,11 +258,15 @@ select popup) are in the same sheet.
   page area, only the tab in front shows them (#338, #149); dialogs, permission prompts and
   sign-in dialogs of a tab behind are hidden until it is in front. Escape dismisses the
   permission prompt. Declining buttons come before accepting ones everywhere.
-- **Zoom**: per site like Chrome (`zoom.ts`): Ctrl +/-, Ctrl + mouse wheel and Ctrl+0 change
-  the zoom of the host (the host name of an http(s) address, without the port) in all its tabs; a
+- **Zoom**: per site like Chrome (`zoom.ts`): Ctrl +/-, Ctrl + mouse wheel, Ctrl+0 and the
+  menu's zoom row change the zoom of the host (the host name of an http(s) address, without the port) in all its tabs; a
   tab that shows another host gets that host's zoom, else the default zoom of the settings. The
   zoom of a page without a host (new tab page, `data:`, `file:`) stays with its tab. The zoom
   applies when the new page has committed, so its first layout can still have the old one (#385).
+  The zoom row of the menu is Chrome's: minus, the zoom of the tab in front and plus keep the menu
+  open (and the focus of the arrow keys), the button after them puts the demo page into full
+  screen or out of it and closes the menu; it is missing where the host has no full screen
+  (iPhone Safari, #594).
 - **Icons of sites**: the tab shows the icon the engine reports for every page (as soon as its
   head names one, else once it has loaded) and every later change of it; until then the last one
   stays within the site, it goes when the tab leaves the site. `favicons.ts` keeps a 32 px copy per host in localStorage (at most 120, cleared with the

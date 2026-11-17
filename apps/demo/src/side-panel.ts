@@ -19,7 +19,9 @@ import {
 } from './history.js';
 import { type IconName, icon } from './icons.js';
 import { compactLayout } from './layout.js';
+import { ZOOM_LEVELS } from './settings.js';
 import { byId, element } from './util.js';
+import { zoomLabel } from './zoom.js';
 
 /** Panel names; 'menu' is the menu of the toolbar, `extension:<id>` a panel of an extension. */
 export type PanelName = 'menu' | 'history' | 'bookmarks' | 'downloads' | `extension:${string}`;
@@ -33,6 +35,8 @@ export interface PanelActions {
   /** Save page as (Ctrl+S). */
   savePage(): void;
   print(): void;
+  /** One zoom level of the page in front up (1) or down (-1), like Ctrl+= and Ctrl+-. */
+  zoom(direction: 1 | -1): void;
   /** The settings page, at the profile and site data with 'profile'. */
   openSettings(section?: 'profile'): void;
 }
@@ -55,6 +59,8 @@ const leave: (() => void)[] = [];
 let renderList: (() => void) | null = null;
 /** Ends the registration of the open menu or sheet with the close requests. */
 let stopWatch: (() => void) | null = null;
+/** Zoom of the tab in front, for the zoom row of the menu. */
+let zoomShown = 1;
 
 /**
  * Menu and side panel like Chrome: the menu drops down from its button (a bottom sheet on a
@@ -125,10 +131,28 @@ function refresh(name: PanelName): void {
   panel.scrollTop = top;
 }
 
-/** Arrow keys, Home and End move between the items of the menu. */
+/**
+ * The zoom of the tab in front changed or another tab came in front: the zoom row of the open
+ * menu shows it, its buttons stay where they are (and keep the focus).
+ */
+export function showMenuZoom(zoom: number): void {
+  zoomShown = zoom;
+  const level = panel.querySelector('.panel-zoom-level');
+  if (!level) return;
+  level.textContent = zoomLabel(zoom);
+  const out = panel.querySelector('[data-item="zoom-out"]');
+  const into = panel.querySelector('[data-item="zoom-in"]');
+  // aria-disabled rather than disabled, so a button pressed to the last level keeps the focus
+  out?.setAttribute('aria-disabled', String(zoom <= (ZOOM_LEVELS[0] ?? 0) + 0.001));
+  into?.setAttribute('aria-disabled', String(zoom >= (ZOOM_LEVELS.at(-1) ?? 0) - 0.001));
+}
+
+/** Arrow keys, Home and End move between the items of the menu that show. */
 function moveInMenu(e: KeyboardEvent): void {
   if (current !== 'menu' || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
-  const items = [...panel.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+  const items = [...panel.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')].filter(
+    (button) => button.getClientRects().length > 0,
+  );
   const index = items.indexOf(document.activeElement as HTMLButtonElement);
   const next =
     e.key === 'Home'
@@ -267,6 +291,12 @@ function renderMenu(): void {
   list.setAttribute('role', 'menu');
   for (const [id, label, name, key, action] of items) {
     if (id === 'profile') list.append(element('hr', { className: 'panel-separator' }));
+    if (id === 'find')
+      list.append(
+        element('hr', { className: 'panel-separator' }),
+        zoomRow(close),
+        element('hr', { className: 'panel-separator' }),
+      );
     const button = element(
       'button',
       { className: 'panel-menu-item', type: 'button' },
@@ -280,6 +310,58 @@ function renderMenu(): void {
     list.append(button);
   }
   panel.append(list);
+  showMenuZoom(zoomShown);
+}
+
+/** A button of the zoom row: an icon with `label` for screen readers and as tooltip. */
+function zoomButton(id: string, label: string, name: IconName, action: () => void) {
+  const button = element(
+    'button',
+    { className: 'panel-zoom-button', type: 'button', title: label },
+    icon(name),
+  );
+  button.dataset.item = id;
+  button.setAttribute('role', 'menuitem');
+  button.setAttribute('aria-label', label);
+  button.addEventListener('click', action);
+  return button;
+}
+
+/**
+ * Chrome's zoom row: Zoom, minus, the zoom of the page in front, plus (the menu stays open, so
+ * one can press again) and full screen of the browser, which closes the menu. Full screen is
+ * missing where the host has none (iPhone Safari, a frame without it).
+ */
+function zoomRow(close: (run: () => void) => () => void): HTMLElement {
+  const fullscreen = !!document.fullscreenElement;
+  const level = element('span', { className: 'panel-zoom-level' });
+  level.setAttribute('aria-live', 'polite');
+  const row = element(
+    'div',
+    { className: 'panel-zoom' },
+    icon('zoom'),
+    element('span', { className: 'panel-menu-label', textContent: 'Zoom' }),
+    zoomButton('zoom-out', 'Zoom out', 'minus', () => actions.zoom(-1)),
+    level,
+    zoomButton('zoom-in', 'Zoom in', 'plus', () => actions.zoom(1)),
+  );
+  row.setAttribute('role', 'group');
+  row.setAttribute('aria-label', 'Zoom');
+  if (document.fullscreenEnabled)
+    row.append(
+      zoomButton(
+        'fullscreen',
+        fullscreen ? 'Exit full screen' : 'Full screen',
+        fullscreen ? 'exit-fullscreen' : 'fullscreen',
+        close(() => {
+          const done = fullscreen
+            ? document.exitFullscreen()
+            : document.documentElement.requestFullscreen();
+          done.catch(() => {});
+        }),
+      ),
+    );
+  return row;
 }
 
 /** "Today", "Yesterday" or the date of a day in the history. */

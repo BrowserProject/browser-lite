@@ -381,7 +381,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   click menu like Chrome (#544), Ctrl+D and the star open Chrome's bookmark bubble (Bookmark added
   or Edit bookmark with the name, Remove and Done) and never remove a bookmark by themselves
   (#579), Chrome's Ctrl+K and Ctrl+E (a search after `?` in the address
-  bar), Ctrl+S (Save page as, also in the menu), Ctrl+Shift+Delete (profile and site data) and
+  bar), Chrome's zoom row in the menu (minus, the zoom, plus and full screen of the demo, so the
+  zoom no longer needs a key, #594), Ctrl+S (Save page as, also in the menu), Ctrl+Shift+Delete (profile and site data) and
   Alt+Home (home page or new tab page) (#545), internationalized hosts in Unicode like Chrome in the
   address bar (also while editing and in the phone layout), tabs, history, suggestions, menus and
   the engine's error page unless they could pass for another host, stored addresses in ASCII

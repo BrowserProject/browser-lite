@@ -22,6 +22,9 @@ export function changeZoom(view: View, direction: 1 | -1 | 0): void {
   if (next !== undefined) view.setZoom(next);
 }
 
+/** A zoom as the toolbar and the menu show it: "110 %". */
+export const zoomLabel = (zoom: number): string => `${Math.round(zoom * 100)} %`;
+
 /** Zoom per host in the pref `site-zoom` of the profile: { host: factor }, none at the default. */
 const levels = () => profile.prefs<Record<string, number>>('site-zoom') ?? {};
 

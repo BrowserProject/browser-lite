@@ -391,6 +391,10 @@ initSidePanel({
   find: openFind,
   savePage: () => activeTab()?.view.savePage(),
   print: () => printTab(activeTab()),
+  zoom: (direction) => {
+    const tab = activeTab();
+    if (tab) changeZoom(tab.view, direction);
+  },
   openSettings: (section) => openSettings(section),
 });
 initFindBar({ view: () => activeTab()?.view ?? null, focusPage });

@@ -209,6 +209,7 @@ svg.favicon {
 #popups,
 .panel-close,
 .panel-remove,
+.panel-zoom-button,
 #find-bar button,
 .settings-close,
 .print-close {
@@ -1149,6 +1150,43 @@ svg.favicon {
 .panel-menu-item kbd {
   color: var(--muted);
   font-size: var(--text-xs);
+}
+/* Chrome's zoom row: Zoom, minus, the zoom, plus and full screen after a line */
+.panel-zoom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 40px;
+  padding: 0 var(--space-2) 0 18px;
+  color: var(--on-surface);
+}
+.panel-zoom > .ui-icon {
+  margin-right: var(--space-3);
+  color: var(--on-surface-variant);
+}
+.panel-zoom .panel-zoom-button {
+  width: 32px;
+  height: 32px;
+}
+.panel-zoom-button[aria-disabled="true"] {
+  opacity: 0.38;
+}
+.panel-zoom-level {
+  min-width: 52px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.panel-zoom [data-item="fullscreen"] {
+  margin-left: var(--space-2);
+  position: relative;
+}
+.panel-zoom [data-item="fullscreen"]::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--space-1) - 1px);
+  top: 6px;
+  bottom: 6px;
+  border-left: 1px solid var(--outline-variant);
 }
 .panel-separator {
   margin: var(--space-2) 0;
@@ -2286,6 +2324,15 @@ svg.favicon {
     border-radius: var(--radius-md);
     font-size: var(--text-lg);
   }
+  .panel-zoom {
+    min-height: 52px;
+    padding: 0 var(--space-1) 0 var(--space-3);
+    font-size: var(--text-lg);
+  }
+  .panel-zoom .panel-zoom-button {
+    width: 44px;
+    height: 44px;
+  }
   .panel-separator {
     margin: var(--space-2) var(--space-3);
   }
@@ -2555,8 +2602,12 @@ svg.favicon {
     display: none;
   }
   .panel-menu-item,
-  .panel-icon {
+  .panel-icon,
+  .panel-zoom {
     min-height: 44px;
+  }
+  .panel-zoom {
+    grid-column: 1 / -1;
   }
   .panel-toolbar .panel-icon {
     flex-direction: row;

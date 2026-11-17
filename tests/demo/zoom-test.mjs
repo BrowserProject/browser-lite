@@ -1,6 +1,7 @@
 // Zoom per site like Chrome: Ctrl + changes the zoom of the host, another host loads at the
 // default zoom, back to the host and a new tab of it get its zoom again, Ctrl+0 in one tab resets
-// all its tabs, and the zoom of the host stays after the demo opens again.
+// all its tabs, the zoom row of the menu changes it with the mouse alone and puts the demo into
+// full screen like Chrome's, and the zoom of the host stays after the demo opens again.
 //
 //   node tests/demo/zoom-test.mjs [engine-dir]
 import {
@@ -109,7 +110,55 @@ await page.keyboard.press('Control+0');
 check('Ctrl+0: no zoom indicator', await indicatorIs(''), await indicator());
 check('Ctrl+0: all tabs of the host at 100 %', (await viewZooms()) === '1 1', await viewZooms());
 
-// 5) The zoom of the host stays after the demo opens again
+// 5) The zoom row of the menu: minus, the zoom, plus and full screen; the menu stays open for plus
+// and minus, full screen closes it
+const menuZoom = () =>
+  page.evaluate(() => document.querySelector('#side-panel .panel-zoom-level')?.textContent ?? '');
+const menuOpen = () => page.evaluate(() => !document.getElementById('side-panel').hidden);
+await page.click('#menu-button');
+check('menu has a zoom row', (await menuZoom()) === '100 %', await menuZoom());
+await page.click('#side-panel [data-item="zoom-in"]');
+check('menu plus: 110 %', await indicatorIs('110 %'), await indicator());
+check('menu plus: the menu stays open', await menuOpen());
+check('menu plus: the row shows 110 %', (await menuZoom()) === '110 %', await menuZoom());
+check('menu plus: all tabs of the host', (await viewZooms()) === '1.1 1.1', await viewZooms());
+check('menu plus: the page is narrower', (await width()) === zoomed);
+await page.click('#side-panel [data-item="zoom-out"]');
+await page.click('#side-panel [data-item="zoom-out"]');
+check('menu minus twice: 90 %', await indicatorIs('90 %'), await indicator());
+check('menu minus: the row shows 90 %', (await menuZoom()) === '90 %', await menuZoom());
+await page.click('#side-panel [data-item="zoom-in"]');
+check('menu plus: back at 100 %', await indicatorIs(''), await indicator());
+// The arrow keys reach the row's buttons; Enter on plus keeps the focus there
+const focused = () => page.evaluate(() => document.activeElement?.dataset.item ?? '');
+await page.focus('#side-panel [data-item="new-tab"]');
+await page.keyboard.press('ArrowUp');
+check('ArrowUp from the first item: the last', (await focused()) === 'settings', await focused());
+await page.keyboard.press('Home');
+for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowDown');
+check('ArrowDown reaches plus', (await focused()) === 'zoom-in', await focused());
+await page.keyboard.press('Enter');
+check('Enter on plus: 110 %', await indicatorIs('110 %'), await indicator());
+check('Enter on plus: the focus stays', (await focused()) === 'zoom-in', await focused());
+await page.keyboard.press('ArrowUp');
+await page.keyboard.press('Enter');
+check('Enter on minus: back at 100 %', await indicatorIs(''), await indicator());
+const until = (fn) =>
+  page.waitForFunction(fn, null, { timeout: 10000 }).then(
+    () => true,
+    () => false,
+  );
+await page.click('#side-panel [data-item="fullscreen"]');
+check('full screen', await until(() => document.fullscreenElement === document.documentElement));
+check('full screen closes the menu', !(await menuOpen()));
+await page.click('#menu-button');
+const label = await page.getAttribute('#side-panel [data-item="fullscreen"]', 'aria-label');
+check('the menu offers to exit full screen', label === 'Exit full screen', label);
+await page.click('#side-panel [data-item="fullscreen"]');
+check('full screen ends', await until(() => !document.fullscreenElement));
+check('the page still shows the zoom of the host', (await width()) === base);
+
+// 6) The zoom of the host stays after the demo opens again
 await page.keyboard.press('Control+=');
 check('Ctrl + again', await indicatorIs('110 %'), await indicator());
 check('both tabs of the host follow', (await viewZooms()) === '1.1 1.1', await viewZooms());

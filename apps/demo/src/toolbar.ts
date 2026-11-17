@@ -5,8 +5,10 @@ import { isBookmarked } from './bookmarks.js';
 import { setIcon } from './icons.js';
 import { compactLayout } from './layout.js';
 import { startSettings } from './settings.js';
+import { showMenuZoom } from './side-panel.js';
 import type { Tab } from './tabs.js';
 import { byId, element, isInternal } from './util.js';
+import { zoomLabel } from './zoom.js';
 
 let snackbarTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -104,7 +106,8 @@ export function updateToolbar(tab: Tab): void {
   reload.setAttribute('aria-label', reload.title);
   const zoom = byId('zoom');
   zoom.hidden = tab.zoom === startSettings().zoom;
-  zoom.textContent = `${Math.round(tab.zoom * 100)} %`;
+  zoom.textContent = zoomLabel(tab.zoom);
+  showMenuZoom(tab.zoom);
   showAddress(tab.address);
   updateSecurity(tab);
   updatePopupsButton(tab);
