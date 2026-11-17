@@ -759,9 +759,27 @@ browser (Safari keeps Cmd+L, T and W for itself).
    about 35 s. Now (2026-11-17, local, 2 interleaved runs each) a tab opened 45 s after 20min.ch
    shows news.ycombinator.com after 0.7 to 0.8 s (before: nothing within 60 s, no pointer move
    arrived) with pointer moves at 3 to 6 ms (median); 20min.ch's own timers run through 120 s
-   instead of stopping for good. What is left there is one task of 13 to 16 s while it loads
-   (Chromium at most 0.9 s): Swiper's `update` for every image of a carousel that loads, each
-   with two or three full forced layouts of the page (see above).
+   instead of stopping for good.
+   Each of Swiper's forced layouts was still one of the whole page (patch 0154, #600): an image
+   with `height: 100%` registered itself as a percentage height descendant of every ancestor of
+   auto or percentage height up to the body, so each layout of an ancestor laid out every such
+   image again and the chain above it (20min.ch's cards: a picture with an aspect ratio in flex
+   columns, 147 of them in carousels), also in native WebKit. Now it is a descendant only of the
+   containers its height depends on. A slide's margin that changes on a snapshot of 20min.ch
+   costs 2 to 3 ms instead of 65 to 73 ms (2026-11-17, local, interleaved A/B, Chromium 0.2 ms),
+   no `getComputedStyle` read of the page takes 20 ms or more any longer (before: 69 to 249
+   reads of 40 to 130 ms each, one per image that loads), and the finding's repro
+   (`stall.mjs`, 120 s) reaches the load event after about 30 s with every eval answered within
+   0.1 s afterwards, before after 110 s with no answer for up to 29 s at a time (Firefox as host:
+   load after about 30 s, before about 125 s). What is left
+   is one task of about 12 s while 20min.ch loads (Chromium at most 0.9 s), spread over the
+   page's JS in the interpreter, style recalculation and layer positions for Swiper's writes;
+   Swiper calls `update` 4 times as often in some loads (75352 reads instead of 17932, same
+   number in both builds), then up to 25 s.
+   Open, also in native WebKit, not in Chromium: a grid or wrapping flex item sized in `fr` or
+   percent keeps its old size after its container's width changes when it holds a chain like
+   20min.ch's cards (`height: 100%` flex columns, a box with an aspect ratio, a `height: 100%`
+   picture and image); a fresh layout gives the new size.
 4. GC 5 to 7 % on JS-heavy sites (#60, #122).
 5. Video and animations: with compositing Chromium shows the video itself behind the view canvas
    (#232); videos with opacity, blend modes, filters or 3D transforms keep frames painted into the

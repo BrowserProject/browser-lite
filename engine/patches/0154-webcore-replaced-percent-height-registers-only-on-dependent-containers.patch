@@ -1,0 +1,44 @@
+diff --git a/Source/WebCore/rendering/RenderReplaced.cpp b/Source/WebCore/rendering/RenderReplaced.cpp
+index 9a3b01c0f6..a053097eb4 100644
+--- a/Source/WebCore/rendering/RenderReplaced.cpp
++++ b/Source/WebCore/rendering/RenderReplaced.cpp
+@@ -145,6 +145,26 @@ void RenderReplaced::styleDidChange(Style::Difference diff, const Style::Compute
+     }
+ }
+ 
++// browser-lite: whether the available height of |block| (RenderBox::availableLogicalHeightUsing) comes from its
++// containing block. It does not when the block is a flex item with a used size for percentage resolution, a grid
++// item with a grid area, or a box of auto height that takes it from its aspect ratio, unless a percentage minimum or
++// maximum height constrains it against the containing block.
++static bool availableLogicalHeightDependsOnContainingBlock(RenderBlock& block)
++{
++    auto& style = block.style();
++    if (style.logicalMinHeight().isPercentOrCalculated() || style.logicalMaxHeight().isPercentOrCalculated())
++        return true;
++    if (block.isFlexItem() && downcast<RenderFlexibleBox>(*block.parent()).usedFlexItemOverridingLogicalHeightForPercentageResolution(block))
++        return false;
++    if (block.isGridItem()) {
++        if (auto gridAreaContentLogicalHeight = block.gridAreaContentLogicalHeight(); gridAreaContentLogicalHeight && *gridAreaContentLogicalHeight)
++            return false;
++    }
++    if (style.logicalHeight().isAuto() && !block.isOutOfFlowPositioned() && block.shouldComputeLogicalHeightFromAspectRatio())
++        return false;
++    return true;
++}
++
+ static bool shouldRepaintOnSizeChange(RenderReplaced& renderer)
+ {
+     if (is<RenderHTMLCanvas>(renderer))
+@@ -1436,6 +1456,12 @@ LayoutUnit RenderReplaced::computeReplacedLogicalHeightUsingGeneric(const SizeTy
+                         return Style::evaluate<LayoutUnit>(logicalHeight, availableHeight - borderAndPaddingLogicalHeight(), style().usedZoomForLength());
+                 }
+                 downcast<RenderBlock>(*container).addPercentHeightDescendant(const_cast<RenderReplaced&>(*this));
++                // browser-lite: the containers above one whose available height does not come from its own
++                // containing block do not change the height this box resolves against, so it is not their
++                // percentage height descendant. Otherwise every layout of an ancestor (up to the body) lays out
++                // all such images again, and the whole chain above each of them.
++                if (!availableLogicalHeightDependsOnContainingBlock(downcast<RenderBlock>(*container)))
++                    break;
+                 container = container->containingBlock();
+             }
+         }

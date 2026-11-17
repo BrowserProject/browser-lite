@@ -45,6 +45,10 @@
 //                  on top as a fresh layout, also for out of flow descendants, floats, inline
 //                  blocks and table cells; toggling a slide's transform costs about as much as
 //                  changing it
+//   replaced-percent-heights.html  an image with a percentage height is a percentage height
+//                  descendant only of the containers its height depends on (patch 0154): same
+//                  geometry as a fresh layout, a margin that changes on one slide next to many
+//                  cards with an aspect ratio picture costs a fraction of a full relayout
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -81,6 +85,7 @@ const CASES = [
   { name: 'word-boundaries', size: [800, 600], wait: 'WORDS done' },
   { name: 'font-loads', size: [800, 600], wait: 'FONTLOADS done' },
   { name: 'transform-presence', size: [800, 600], wait: 'TRANSFORM done' },
+  { name: 'replaced-percent-heights', size: [1280, 800], wait: 'REPLACED done' },
   {
     name: 'cookies',
     label: 'cookies (public suffix host)',

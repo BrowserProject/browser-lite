@@ -1,0 +1,134 @@
+<!doctype html>
+<title>Replaced percentage heights</title>
+<!-- An image with a percentage height is a percentage height descendant only of the containers
+     whose height it resolves against, up to the first one whose height does not come from its
+     containing block (aspect ratio, stretched flex item, grid area), not of every ancestor up to
+     the body (patch 0154). Every change below must give the same geometry as a fresh layout of
+     the whole tree; a margin that changes on one slide next to many cards (a picture with an
+     aspect ratio in a stretched flex column, like the carousels of 20min.ch) costs a fraction of
+     a full relayout. -->
+<style>
+  body { margin: 0; font: 12px/16px sans-serif; }
+  #app { display: flex; flex-direction: column; }
+  #row { display: flex; }
+  #side { flex: 1 1 0%; width: 120px; overflow: clip; }
+  #main { flex: 1 1 0%; max-width: 900px; min-height: 700px; position: relative; margin: 0 12px; }
+  .swiper { overflow: hidden; position: relative; }
+  .wrapper { display: flex; height: 100%; position: relative; }
+  .slide { flex: 0 0 auto; width: 200px; margin-right: 20px; position: relative; }
+  .list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .list > div { flex: 0 0 calc(33.3% - 6px); }
+  article { height: 100%; }
+  .link { display: flex; flex-direction: column; height: 100%; }
+  .card { display: flex; flex-direction: column; height: 100%; position: relative; }
+  .ratio { aspect-ratio: 5 / 4; position: relative; }
+  picture { display: flex; height: 100%; position: relative; }
+  img { display: block; width: 100%; height: 100%; }
+  p { margin: 4px; }
+  #cases > div { margin: 4px 0; }
+  #fixed { height: 120px; }
+  #fixed > div, #fixed > div > div { height: 100%; }
+  #fixed img, #stretched img, #area img, #abs img, #cell img { width: 40px; height: 50%; }
+  #stretched { display: flex; height: 100px; }
+  #stretched > div > div { height: 100%; }
+  #area { display: grid; grid-template-rows: 90px; grid-template-columns: 100px 1fr; }
+  #area > div > div { height: 100%; }
+  #absbox { position: relative; height: 80px; }
+  #abs { position: absolute; top: 0; bottom: 10px; left: 0; width: 60px; }
+  #abs > div { height: 100%; }
+  table { height: 70px; }
+  #minmax { height: 200px; }
+  #minmax > .ratio { width: 100px; min-height: 50%; }
+</style>
+<div id="app">
+  <div id="row">
+    <div id="main">
+      <div id="cases">
+        <div id="fixed"><div><div><img alt=""></div></div></div>
+        <div id="stretched"><div><div><img alt=""></div></div><div id="tall" style="height: 60px">Tall</div></div>
+        <div id="area"><div><div><img alt=""></div></div><div>Area</div></div>
+        <div id="absbox"><div id="abs"><div><img alt=""></div></div></div>
+        <table><tr><td id="cell"><div><img alt=""></div></td></tr></table>
+        <div id="minmax"><div class="ratio"><picture><img alt=""></picture></div></div>
+      </div>
+      <div id="cards"></div>
+    </div>
+    <div id="side">Side</div>
+  </div>
+</div>
+<script>
+const pixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==';
+const card = (i) => '<article><a class="link"><div class="card"><div class="ratio"><picture><img alt="" src="' + pixel + '"></picture></div><p>Title ' + i + ' with some words</p></div></a></article>';
+let html = '';
+for (let s = 0; s < 3; s++) {
+  html += '<section><div class="swiper"><div class="wrapper">';
+  for (let i = 0; i < 23; i++) html += '<div class="slide">' + card(i) + '</div>';
+  html += '</div></div></section><section><div class="list">';
+  for (let i = 0; i < 30; i++) html += '<div>' + card(i) + '</div>';
+  html += '</div></section>';
+}
+document.getElementById('cards').innerHTML = html;
+for (const img of document.querySelectorAll('#cases img')) img.src = pixel;
+
+addEventListener('load', () => {
+  const app = document.getElementById('app');
+  const $ = (id) => document.getElementById(id);
+  const geometry = () =>
+    [...app.querySelectorAll('*')].map((element) => {
+      const r = element.getBoundingClientRect();
+      return [r.left, r.top, r.width, r.height].map((v) => Math.round(v * 64)).join(',');
+    });
+  // A fresh layout: the renderers of the whole tree are made again
+  const fresh = () => {
+    app.style.display = 'none';
+    app.offsetHeight;
+    app.style.display = '';
+    return geometry();
+  };
+  const slide = document.querySelector('.slide');
+
+  const changes = [
+    ['slide margin', () => { slide.style.marginRight = '21px'; }],
+    ['slide width', () => { slide.style.width = '260px'; }],
+    ['aspect ratio', () => { slide.querySelector('.ratio').style.aspectRatio = '1 / 1'; }],
+    ['aspect ratio to height', () => { slide.querySelector('.ratio').style.aspectRatio = 'auto'; slide.querySelector('.ratio').style.height = '90px'; }],
+    ['list item width', () => { document.querySelector('.list > div').style.flexBasis = '50%'; }],
+    ['fixed ancestor height', () => { $('fixed').style.height = '160px'; }],
+    ['stretched line height', () => { $('tall').style.height = '140px'; }],
+    ['stretched container height', () => { $('stretched').style.height = '30px'; }],
+    ['grid area height', () => { $('area').style.gridTemplateRows = '130px'; }],
+    ['positioned box height', () => { $('absbox').style.height = '120px'; }],
+    ['table height', () => { document.querySelector('table').style.height = '110px'; }],
+    ['percentage minimum height', () => { $('minmax').style.height = '400px'; }],
+    ['side wider', () => { $('side').style.width = '200px'; }],
+  ];
+
+  const results = [];
+  for (const [name, change] of changes) {
+    change();
+    const incremental = geometry();
+    const expected = fresh();
+    const differ = incremental.filter((value, index) => value !== expected[index]).length;
+    if (differ) results.push(name + ':' + differ);
+  }
+
+  // Cost of a margin that changes on one slide against a full relayout
+  const median = (run) => {
+    const times = [];
+    for (let i = 0; i < 9; i++) {
+      const start = performance.now();
+      run(i);
+      getComputedStyle(slide).getPropertyValue('width');
+      times.push(performance.now() - start);
+    }
+    times.sort((a, b) => a - b);
+    return times[4];
+  };
+  const small = median((i) => { slide.style.marginRight = i % 2 ? '20px' : '22px'; });
+  const full = median((i) => { $('main').style.maxWidth = i % 2 ? '900px' : '880px'; });
+  const ratio = small / full;
+  console.log('REPLACED small=' + small.toFixed(2) + 'ms full=' + full.toFixed(2) + 'ms');
+  if (ratio > 0.25) results.push('small change costs ' + Math.round(ratio * 100) + '% of a full relayout');
+  console.log('REPLACED done=' + (results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'));
+});
+</script>

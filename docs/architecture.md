@@ -68,7 +68,11 @@ layer that paints itself either way, is handled like a transform that changes (a
 `translate`, `rotate` and `scale`): the overflow of its ancestors is computed again instead of a
 layout of everything around it; the stacking context it makes or a `z-index` that comes or goes
 on such a box only reorders the layers. Out of flow descendants whose containing block changes
-move as before (patch 0153, #596). A cell at the left or right edge of a table with collapsed borders
+move as before (patch 0153, #596). An image or other replaced box with a percentage height is a
+percentage height descendant only of the containers its height depends on, up to the first one
+whose height does not come from its own containing block (an aspect ratio, a stretched flex item, a
+grid area), instead of every ancestor of auto or percentage height up to the body, which laid out
+every such image and the chain above it again in each layout of an ancestor (patch 0154). A cell at the left or right edge of a table with collapsed borders
 paints its background inside the widest border half at that edge, which the table works out once
 until its collapsed borders change (patch 0106, #485). The balancing passes of a multicol (one
 column set, no spanners, not inside another fragmentation context) keep the layout of a block
