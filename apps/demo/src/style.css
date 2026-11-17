@@ -1887,7 +1887,7 @@ svg.favicon {
   align-content: start;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-3);
-  overflow-y: auto;
+  overflow: hidden auto;
 }
 .overview-card {
   position: relative;
@@ -1895,6 +1895,11 @@ svg.favicon {
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--elev-1);
+  /* Sideways is the swipe that closes the tab (swipe-away.ts) */
+  touch-action: pan-y;
+}
+.overview-card.swiping {
+  z-index: 1;
 }
 .overview-card.active {
   box-shadow:

@@ -292,7 +292,9 @@ from the status bar; forward, reload and the star move into a row of tonal butto
 the top of the menu (so the empty bookmarks sheet names the Bookmark button there, #428); the address shows only the host until it is tapped, then it takes the whole
 bar; the suggestions span the width and open upwards above the toolbar; the tab count opens the
 tab overview (a card per tab with title, the site's icon and host: tap to switch, cross to close,
-new tab and Done at the bottom); menu, panels and the permission prompt are bottom sheets on the
+new tab and Done at the bottom; like Chrome on Android and Safari a card swiped sideways past a
+good third of its width, or flung, slides out and closes its tab, a shorter swipe slides it back,
+`swipe-away.ts`); menu, panels and the permission prompt are bottom sheets on the
 toolbar over a backdrop, as high as the visible part at most and scrolling (in landscape the menu
 has two columns and the toolbar is 44 px high); like mobile Chrome the bar slides away while the
 user scrolls a page down and comes back when they scroll up, the page is at its top, a page
@@ -351,7 +353,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
 | `host-history.ts`, `history-menu.ts` | the back and forward of the host browser act on the tab in front; the list of the tab's pages on Back and Forward |
 | `tab-drag.ts`, `tab-menu.ts`, `tab-drop.ts`, `dropped-text.ts` | reordering tabs by dragging them in the strip; the menu of a right click on the strip; links and text dropped on the strip and the address bar |
-| `tab-overview.ts`, `layout.ts`, `visual-viewport.ts`, `page-size.ts`, `bar-hiding.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard; the page keeps its size under the keyboard of the demo's own fields; the bar slides away while the user scrolls down |
+| `tab-overview.ts`, `swipe-away.ts`, `layout.ts`, `visual-viewport.ts`, `page-size.ts`, `bar-hiding.ts` | tab overview and tab count of the phone layout; swiping its cards away; whether it applies; following the iOS keyboard; the page keeps its size under the keyboard of the demo's own fields; the bar slides away while the user scrolls down |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited pages |
 | `blocked-popups.ts`, `bookmark-bubble.ts`, `bubble.ts` | icon of the address bar for popups the page could not open (`popup-blocked`), its bubble opens one in a new tab or allows popups for the site (permission `popups`); the bubble of the star that adds and edits a bookmark; placing both bubbles at their button |
 | `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps and zoom per site, print preview (the engine's PDF in a frame; where the host shows no PDF in a frame, `navigator.pdfViewerEnabled` false like Chrome on Android, a hint and Save as PDF) |

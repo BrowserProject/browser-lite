@@ -1,6 +1,7 @@
 import { displayHost, displayURL, watchClose } from '@browser-lite/ui';
 import { favicon, hostOf } from './favicons.js';
 import { icon } from './icons.js';
+import { swipeAway } from './swipe-away.js';
 import {
   activate,
   activeTab,
@@ -20,7 +21,7 @@ let stopWatch: (() => void) | null = null;
 
 /**
  * Tab overview of the phone layout, like the tab switcher of mobile Chrome and Safari: a card
- * per tab with icon, title and address, a tap switches, the cross closes; the toolbar button
+ * per tab with icon, title and address, a tap switches, the cross or a swipe sideways closes; the toolbar button
  * shows the number of tabs and opens it. Like there the back of the phone closes it.
  */
 export function initTabOverview(): void {
@@ -53,7 +54,22 @@ export function toggleOverview(open: boolean): void {
   grid.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
 }
 
+// The card of each tab: it stays while only its content changes, so a swipe survives a new title
+const cards = new WeakMap<Tab, HTMLElement>();
+
 function card(tab: Tab): HTMLElement {
+  let node = cards.get(tab);
+  if (!node) {
+    node = element('div', { className: 'overview-card' });
+    swipeAway(node, () => requestClose(tab));
+    cards.set(tab, node);
+  }
+  node.replaceChildren(...content(tab));
+  node.classList.toggle('active', tab === activeTab());
+  return node;
+}
+
+function content(tab: Tab): HTMLElement[] {
   // The engine's icon of the tab, else the remembered one of the site
   let preview: Element = favicon(tab.url, 'overview-icon');
   if (tab.iconUrl) {
@@ -88,14 +104,14 @@ function card(tab: Tab): HTMLElement {
   close.setAttribute('aria-label', `Close ${tab.label}`);
   close.append(icon('close'));
   close.addEventListener('click', () => requestClose(tab));
-  const node = element('div', { className: 'overview-card' }, open, close);
-  node.classList.toggle('active', tab === activeTab());
-  return node;
+  return [open, close];
 }
 
 function render(): void {
   const tabs = allTabs();
   const label = overview.querySelector('.overview-count');
   if (label) label.textContent = `${tabs.length} ${tabs.length === 1 ? 'tab' : 'tabs'}`;
-  grid.replaceChildren(...tabs.map(card));
+  const nodes = tabs.map(card);
+  if (nodes.length !== grid.children.length || nodes.some((node, i) => grid.children[i] !== node))
+    grid.replaceChildren(...nodes);
 }

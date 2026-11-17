@@ -152,7 +152,7 @@ export class Tab implements SessionTab {
     this.element.addEventListener('auxclick', (e) => {
       if (e.button !== 1) return;
       e.preventDefault();
-      requestClose(this);
+      void requestClose(this);
     });
     this.part('.close').addEventListener('click', () => requestClose(this));
     this.updateTitle();
@@ -758,7 +758,7 @@ export function duplicateTab(tab: Tab): Tab | null {
  */
 export function closeTabs(tabs: readonly Tab[], keep: Tab): void {
   if (active && tabs.includes(active)) activate(keep);
-  for (const tab of tabs) requestClose(tab);
+  for (const tab of tabs) void requestClose(tab);
 }
 
 /** Moves tab to index of the strip (clamped to its ends), like dragging it in Chrome. */
@@ -786,18 +786,19 @@ export function switchTab(offset: number): void {
 /**
  * Closing by the user: a page with a beforeunload listener may ask first. Like Chrome the tab
  * comes to the front only when a question can come (WebCore asks only after a user action);
- * afterwards the tab before becomes active again.
+ * afterwards the tab before becomes active again. Resolves whether the tab closed.
  */
-export function requestClose(tab: Tab): void {
-  if (tab.closing) return;
+export function requestClose(tab: Tab): Promise<boolean> {
+  if (tab.closing) return tab.view.close();
   if (tab.hasBeforeUnload) {
     tab.closing = true;
     tab.closeReturn = active !== tab ? active : null;
     if (tab.userActivated) activate(tab);
   }
-  void tab.view.close().then(() => {
+  return tab.view.close().then((closed) => {
     tab.closing = false;
     tab.closeReturn = null;
+    return closed;
   });
 }
 
@@ -816,7 +817,7 @@ export function closeToParent(tab: Tab): void {
   if (!parent || !backClosesTab(tab)) return;
   if (tab.isActive && tab.hasBeforeUnload && tab.userActivated) tab.opener = parent;
   else activate(parent);
-  requestClose(tab);
+  void requestClose(tab);
 }
 
 // The view closed (by the user, window.close() or a discard)

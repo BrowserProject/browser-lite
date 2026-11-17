@@ -398,7 +398,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Demo on phones**: a phone layout below 640 px of width or 500 px of height like mobile
   Chrome with the address bar at the bottom (back, only the host in the address, tab count, menu;
   above the home indicator and the keyboard, suggestions upwards above it), tab overview with
-  cards, menu and panels as bottom sheets on the bar with icon rows, touch targets of 44 px, safe
+  cards that close with a sideways swipe like Chrome on Android and Safari (#599), menu and panels as bottom sheets on the bar with icon rows, touch targets of 44 px, safe
   areas, sheets above the iOS keyboard, the context menu inside the page above the bar (#361),
   a link opened from the context menu with a message that offers to switch to it (#391),
   the settings' close button at the top while they scroll (#379),
