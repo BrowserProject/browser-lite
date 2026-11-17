@@ -94,7 +94,9 @@ from `patches/`.
   - Views: `WebView.cpp` (also Copy image and Save as of the context menu, paint holding: the page
     left stays in view until the new one paints), `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
     restore, Tab to links, the popup blocker: a gesture or 5 s of transient activation, the link
-    address and tooltip of the mouse, none after a tap), `EditorClient.cpp`, `BackForwardList.cpp`,
+    address and tooltip of the mouse, none after a tap), `EditorClient.cpp` (the focused field's
+    input mode and keyboard hints and the text before the caret for the host's IME field),
+    `BackForwardList.cpp`,
     `Choosers.cpp` (the host shows the `<select>` list, color and date pickers and the
     suggestions of `<input list>`), `VisitedLinks.cpp` (`:visited`: the addresses the views
     loaded and those of the host's history), `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while

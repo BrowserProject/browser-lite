@@ -11,7 +11,13 @@ import { defaultEffect } from '../dist/drag-out.js';
 import { checkEngine, ENGINE_ABI_VERSION } from '../dist/engine.js';
 import { requestHandler } from '../dist/handlers.js';
 import { KeyQueue, mayBeShortcut } from '../dist/key-queue.js';
-import { enterKeyHintOf, opensNextField, textEdit, textInputOf } from '../dist/keyboard.js';
+import {
+  enterKeyHintOf,
+  imeTraitsOf,
+  opensNextField,
+  textEdit,
+  textInputOf,
+} from '../dist/keyboard.js';
 import { PendingNavigation } from '../dist/pending.js';
 import { MemoryPermissionStore } from '../dist/permissions.js';
 import { redirectPopup } from '../dist/popups.js';
@@ -768,6 +774,31 @@ test('IME field edits: Backspaces per grapheme cluster, then the new text', () =
   });
   assert.deepEqual(textEdit('\u0915\u093F', '\u0915'), { backspaces: 1, insert: '\u0915' });
   assert.deepEqual(textEdit('same', 'same'), { backspaces: 0, insert: '' });
+});
+
+test('IME field traits: the text hints of the page field', () => {
+  const text = textInputOf({
+    mode: 'text',
+    singleLine: true,
+    autocapitalize: 'sentences',
+    autocorrect: true,
+    spellcheck: true,
+  });
+  assert.deepEqual(imeTraitsOf(text, true), {
+    enterKeyHint: 'go',
+    autocapitalize: 'sentences',
+    autocorrect: true,
+    spellcheck: true,
+  });
+  const email = textInputOf({ mode: 'email', autocapitalize: 'none' });
+  assert.deepEqual(imeTraitsOf(email, true), {
+    enterKeyHint: '',
+    autocapitalize: 'none',
+    autocorrect: false,
+    spellcheck: false,
+  });
+  // An engine event without hints: none of them
+  assert.equal(textInputOf({ mode: '' }).autocapitalize, 'none');
 });
 
 test('IME field enter key: the page field hint, else the key of Chrome on Android', () => {

@@ -1,9 +1,12 @@
 // Text from input methods through the IME field of the core, like an Android keyboard (Gboard)
 // sends it: committed text, a Backspace as a deletion inside the field (keydown 229 and
 // deleteContentBackward, no Backspace key), a suggestion that replaces the word, a composition
-// and a composition on the word again. A click or a plain key empties the field. The enter key
-// of the keyboard like in Chrome on Android: next in a field that a field of its form follows,
-// where Gboard's Next key moves to that field, go in the last one, return in a text area.
+// and a composition on the word again. After a click or a plain key the field shows the page's
+// text before the caret (nothing of a password). The enter key of the keyboard like in Chrome on
+// Android: next in a field that a field of its form follows, where Gboard's Next key moves to
+// that field, go in the last one, return in a text area. The keyboard's text hints are the page
+// field's: autocapitalize, autocorrect and spellcheck, inherited from the form, none in email,
+// URL and password fields.
 //
 //   node tests/core/ime-test.mjs [engine-dir]
 import {
@@ -32,11 +35,18 @@ const PAGE = `<!doctype html>
   #t { position: absolute; left: 20px; top: 80px; width: 300px; height: 60px; font-size: 16px; }
 </style></head>
 <body>
+<!-- Before the other fields, so none of them is the next field of a field below -->
+<input id="caps" autocapitalize="characters" style="position: absolute; left: 20px; top: 360px; width: 300px; height: 30px">
+<form autocapitalize="off" autocorrect="off" spellcheck="false">
+  <input id="inherit" style="position: absolute; left: 20px; top: 400px; width: 300px; height: 30px">
+</form>
+<input id="mail" type="email" style="position: absolute; left: 20px; top: 440px; width: 300px; height: 30px">
+<div id="ed" contenteditable autocapitalize="words" style="position: absolute; left: 20px; top: 480px; width: 300px; height: 30px">Hi. there</div>
 <input id="a" value="hello world" autocomplete="off">
 <textarea id="t">abc</textarea>
 <form id="login" action="/login">
   <input id="user" style="position: absolute; left: 20px; top: 160px; width: 300px; height: 30px">
-  <input id="pass" type="password" style="position: absolute; left: 20px; top: 200px; width: 300px; height: 30px">
+  <input id="pass" type="password" value="secret" style="position: absolute; left: 20px; top: 200px; width: 300px; height: 30px">
   <button style="position: absolute; left: 340px; top: 200px">Sign in</button>
 </form>
 <input id="solo" style="position: absolute; left: 20px; top: 240px; width: 300px; height: 30px">
@@ -102,7 +112,11 @@ await page.keyboard.insertText('x');
 await page.keyboard.insertText('y');
 let text = await valueIs('a', 'hello worldxy');
 check('committed text reaches the page', text === 'hello worldxy', JSON.stringify(text));
-check('the IME field keeps the typed text', (await imeValue()) === 'xy', await imeValue());
+check(
+  'the IME field keeps the typed text after the text before the caret',
+  (await imeValue()) === 'hello worldxy',
+  await imeValue(),
+);
 
 await keyboardBackspace();
 await keyboardBackspace();
@@ -117,23 +131,33 @@ check(
 await page.keyboard.insertText(' helo');
 await page.evaluate(() => {
   const ime = document.querySelector('[data-bl-ime]');
-  ime.setSelectionRange(1, ime.value.length);
+  ime.setSelectionRange(ime.value.length - 4, ime.value.length);
 });
 await page.keyboard.insertText('hello ');
 text = await valueIs('a', 'hello world hello ');
 check('a suggestion replaces the typed word', text === 'hello world hello ', JSON.stringify(text));
 
-// A plain key moves the caret: the field forgets the text, the keyboard sends a real Backspace
+// A plain key moves the caret: the field shows the page's text before it again, the keyboard
+// sends a real Backspace
+await page.keyboard.press('Home');
+await page.keyboard.press('ArrowRight');
+const imeValueIs = async (expected) => {
+  await waitFor(async () => (await imeValue()) === expected, 10000);
+  return imeValue();
+};
+let ime = await imeValueIs('h');
+check('after a plain key the IME field shows the text before the caret', ime === 'h', ime);
 await page.keyboard.press('End');
-check('a plain key empties the IME field', (await imeValue()) === '', await imeValue());
+ime = await imeValueIs('hello world hello ');
+check('the IME field follows the caret', ime === 'hello world hello ', ime);
 await page.keyboard.press('Backspace');
 text = await valueIs('a', 'hello world hello');
 check('a Backspace key still deletes', text === 'hello world hello', JSON.stringify(text));
 
-// A click into the textarea: the field starts empty again
+// A click into the textarea: the field shows its text before the caret
 await page.mouse.click(...(await at(300, 130)));
-await page.waitForTimeout(300);
-check('a click empties the IME field', (await imeValue()) === '', await imeValue());
+ime = await imeValueIs('abc');
+check('a click into another field shows its text before the caret', ime === 'abc', ime);
 await page.keyboard.insertText('de');
 await keyboardBackspace();
 text = await valueIs('t', 'abcd');
@@ -148,14 +172,18 @@ if (chromiumOnly('compositions through CDP')) {
   await page.keyboard.insertText('world');
   text = await valueIs('t', 'abcdworld');
   check('a committed composition reaches the page', text === 'abcdworld', JSON.stringify(text));
-  check('the IME field keeps the composed word', (await imeValue()) === 'dworld', await imeValue());
+  check(
+    'the IME field keeps the composed word',
+    (await imeValue()) === 'abcdworld',
+    await imeValue(),
+  );
   await keyboardBackspace();
   text = await valueIs('t', 'abcdworl');
   check('Backspace of the keyboard after a composition', text === 'abcdworl', JSON.stringify(text));
   // Android keyboards compose the word before the caret again (setComposingRegion): the page
   // ends up with the new word once, not after the old one
   const length = (await imeValue()).length;
-  await compose({ text: 'dwor', replacementStart: 0, replacementEnd: length });
+  await compose({ text: 'dwor', replacementStart: length - 5, replacementEnd: length });
   await page.keyboard.insertText('dwarf');
   text = await valueIs('t', 'abcdwarf');
   check('a composition over typed text replaces it', text === 'abcdwarf', JSON.stringify(text));
@@ -242,6 +270,40 @@ check(
 );
 enter = await tapField(110, '');
 check('enter key: return in a text area', enter === '', JSON.stringify(enter));
+
+// The text hints of the page's field
+const traits = () =>
+  page.evaluate(() => {
+    const ime = document.querySelector('[data-bl-ime]');
+    return [ime.getAttribute('autocapitalize'), ime.getAttribute('autocorrect'), ime.spellcheck]
+      .map(String)
+      .join(' ');
+  });
+const traitsAt = async (x, y, expected) => {
+  await page.mouse.click(...(await at(x, y)));
+  await waitFor(async () => (await traits()) === expected, 10000);
+  return traits();
+};
+let hints = await traitsAt(150, 255, 'sentences on true');
+check(
+  'hints: a text field starts sentences with a capital and corrects',
+  hints === 'sentences on true',
+  hints,
+);
+hints = await traitsAt(150, 215, 'none off false');
+check('hints: none in a password field', hints === 'none off false', hints);
+ime = await imeValueIs('');
+check('the IME field shows nothing of a password', ime === '', JSON.stringify(ime));
+hints = await traitsAt(150, 375, 'characters on true');
+check("hints: the field's autocapitalize", hints === 'characters on true', hints);
+hints = await traitsAt(150, 415, 'none off false');
+check("hints: those of the field's form", hints === 'none off false', hints);
+hints = await traitsAt(150, 455, 'none off false');
+check('hints: no capital and correction in an email field', hints === 'none off false', hints);
+hints = await traitsAt(300, 495, 'words on true');
+check('hints: those of an editable element', hints === 'words on true', hints);
+ime = await imeValueIs('Hi. there');
+check('the IME field shows the text of an editable element', ime === 'Hi. there', ime);
 
 await browser.close();
 finish();

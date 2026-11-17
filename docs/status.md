@@ -69,7 +69,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   has no working `https://`, and localhost, IP addresses and ports over `http://` like Chrome
   (httpforever.com, 127.0.0.1:7650 and localhost:7650 ended on ERR_SSL_PROTOCOL_ERROR, #435).
 - **Input**: keyboard incl. dead keys and IME preview (#127), Backspace and suggestions of
-  Android keyboards after typing (#411), clipboard with HTML and files
+  Android keyboards (#411), on-screen keyboards with the page field's `autocapitalize`,
+  `autocorrect` and `spellcheck` and its text before the caret, so an empty name field starts
+  with a capital and a tap after "hello wor" offers "world" (#598), clipboard with HTML and files
   (#126), copy buttons of sites through `navigator.clipboard.writeText()` and `write()` (text
   and HTML, #469; before, the promise resolved and nothing reached the clipboard), Paste buttons
   of sites through `navigator.clipboard.readText()` and `read()` after Chrome's question (text,
@@ -455,7 +457,12 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   a single line field without `enterkeyhint` gets Chrome's keys instead of the textarea's return
   key: next when a field of its form follows, whose Enter moves the page's focus there, else go,
   go on iPhone and iPad (#495; covered in Chromium and Firefox by `core/ime-test.mjs`, not yet
-  checked with Gboard on a device, the one BrowserStack session was taken);
+  checked with Gboard on a device, the one BrowserStack session was taken); on an iPhone 16
+  (iOS 18.6) and a Pixel 9 (Gboard) on 2026-11-17 an empty name field starts with a capital
+  ("Anna", before "anna"), "Hi. an" becomes "Hi. An", `autocapitalize=characters` and `words`
+  hold, an email field gets no capital, a tap at the end of "hello wor" keeps the keyboard lower
+  case and Gboard offers "world" and replaces the word with its suggestion (#598; autocorrect
+  itself is off on these devices);
   muted autoplay video on iPhone, Galaxy S23 and macOS Safari, video with sound after a tap on
   iPhone (#295); on 2026-11-01 with the JIT and the slabs of #329 two rounds of YouTube, GitHub,
   BBC, Stack Overflow and Wikipedia in one tab on an iPhone 16 without a crash or restart. Firefox

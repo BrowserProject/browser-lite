@@ -219,6 +219,26 @@ check(
   focus.focus.at(-1) === 'search/search' && focus.active,
   JSON.stringify(focus),
 );
+// iOS decides the keyboard's capital from the text before the caret only at a focus: typing does
+// not focus the IME field again, a tap that moves the caret afterwards does
+const imeText = () => page.evaluate(() => document.querySelector('[data-bl-ime]').value);
+mode = await tapAndMode(35, 'text/send');
+await imeFocus();
+await page.keyboard.type('Hi');
+await waitFor(async () => (await imeText()) === 'Hi', 10000);
+focus = await imeFocus();
+check(
+  'keyboard (iOS): not focused again while typing',
+  focus.focus.length === 0 && focus.active && (await imeText()) === 'Hi',
+  JSON.stringify(focus),
+);
+await page.mouse.click(box.x + 22, box.y + 35);
+await waitFor(async () => (await imeFocus().then((f) => (focus = f))).focus.length > 0, 10000);
+check(
+  'keyboard (iOS): focused again when a tap moves the caret after typing',
+  focus.focus.length === 1 && focus.active && (await imeText()) === '',
+  JSON.stringify(focus),
+);
 mode = await tapAndMode(235, 'none/');
 check('keyboard: none after a button', mode === 'none/', mode);
 

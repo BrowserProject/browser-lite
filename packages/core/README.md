@@ -45,8 +45,13 @@ next when a field of its form follows and go otherwise, like in Chrome on Androi
 then moves the page's focus to that field; go on iPhone and iPad, where the keyboard's Enter looks
 like a hardware one), so phones show the fitting on-screen keyboard; in Chrome the view focuses it once more after a tap
 into a field, which opens the keyboard there, on iPhone and iPad when the hint changes, which
-gives the keyboard the hint. It keeps the text an input method entered until the caret moves
-otherwise, so an on-screen keyboard's Backspace and suggestions after typing reach the page.
+gives the keyboard the hint. It also carries the page field's `autocapitalize`, `autocorrect` and
+`spellcheck` (sentences and on by default, none and off in URL, email and password fields), and
+holds the page's text before the caret (up to 100 characters of its paragraph, nothing of a
+password) followed by what an input method enters, so the keyboard starts a sentence with a
+capital, offers its suggestions, and its Backspace and suggestions reach the page. iPhone and iPad
+decide the capital only at a focus and after their own typing: the view focuses the field once
+more when the hints or that text change after a tap, and lets the keyboard's characters enter it.
 On iPhone and iPad two more hidden fields lie right before and after it while it has the focus,
 on the top left pixels of the view: the keyboard's previous and next field arrows focus them,
 and the view turns that into Shift+Tab or Tab in the page instead of leaving it for your own

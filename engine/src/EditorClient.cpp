@@ -9,6 +9,7 @@
 #include <WebCore/FocusController.h>
 #include <WebCore/HTMLFormElement.h>
 #include <WebCore/HTMLInputElement.h>
+#include <WebCore/HTMLNames.h>
 #include <WebCore/HTMLSelectElement.h>
 #include <WebCore/HTMLTextFormControlElement.h>
 #include <WebCore/InputMode.h>
@@ -32,6 +33,8 @@
 #include <WebCore/PlatformKeyboardEvent.h>
 #include <WebCore/RenderObjectInlines.h>
 #include <WebCore/SecurityOrigin.h>
+#include <WebCore/TextIterator.h>
+#include <WebCore/VisibleUnits.h>
 #include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
@@ -115,8 +118,50 @@ static RefPtr<Element> nextFieldOf(Page& page, HTMLInputElement& input)
     return nullptr;
 }
 
+// URL, email and password fields get no capitals, corrections or suggestions (HTML spec)
+static bool takesWords(const HTMLInputElement* input)
+{
+    return !input || !(input->isPasswordField() || input->isEmailField() || input->isURLField());
+}
+
+// The attribute of the element, else of its form owner like the HTML spec's
+// autocapitalize-and-autocorrect inheriting elements; null without one
+static AtomString ownOrFormAttribute(const Element& element, const QualifiedName& name, bool emptyInherits)
+{
+    auto& own = element.attributeWithoutSynchronization(name);
+    if (!own.isNull() && !(emptyInherits && own.isEmpty()))
+        return own;
+    RefPtr control = dynamicDowncast<HTMLFormControlElement>(element);
+    RefPtr form = control ? control->form() : nullptr;
+    return form ? form->attributeWithoutSynchronization(name) : nullAtom();
+}
+
+// The used autocapitalization hint of the HTML spec. Its default state (no hint) is sentences, as
+// Chrome and Safari start a text field or editable element with a capital
+static ASCIILiteral autocapitalizeOf(const Element& element)
+{
+    if (!takesWords(dynamicDowncast<HTMLInputElement>(element)))
+        return "none"_s;
+    auto value = ownOrFormAttribute(element, HTMLNames::autocapitalizeAttr, true);
+    if (equalLettersIgnoringASCIICase(value, "off"_s) || equalLettersIgnoringASCIICase(value, "none"_s))
+        return "none"_s;
+    if (equalLettersIgnoringASCIICase(value, "words"_s))
+        return "words"_s;
+    if (equalLettersIgnoringASCIICase(value, "characters"_s))
+        return "characters"_s;
+    return "sentences"_s;
+}
+
+// The used autocorrection state of the HTML spec: on unless the attribute says off
+static bool autocorrectOf(const Element& element)
+{
+    if (!takesWords(dynamicDowncast<HTMLInputElement>(element)))
+        return false;
+    return !equalLettersIgnoringASCIICase(ownOrFormAttribute(element, HTMLNames::autocorrectAttr, false), "off"_s);
+}
+
 // Text input of the focused frame for "text-input": mode "" while nothing takes text, so the
-// host shows no on-screen keyboard
+// host shows no on-screen keyboard. The hints of an editable element are those of its editing host.
 static String textInputState(LocalFrame& frame)
 {
     RefPtr page = frame.page();
@@ -127,8 +172,38 @@ static String textInputState(LocalFrame& frame)
     String hint = html ? attributeValueForEnterKeyHint(html->canonicalEnterKeyHint()) : String();
     RefPtr field = dynamicDowncast<HTMLInputElement>(*element);
     bool nextField = field && nextFieldOf(*page, *field);
+    RefPtr<Element> hinted = element;
+    if (!is<HTMLTextFormControlElement>(*element)) {
+        if (RefPtr host = element->rootEditableElement())
+            hinted = host;
+    }
+    bool spellcheck = takesWords(field.get()) && hinted->isSpellCheckingEnabled();
     return makeString("{\"mode\":\""_s, inputModeOf(element.get()), "\",\"enterKeyHint\":\""_s, hint,
-        "\",\"singleLine\":"_s, field ? "true"_s : "false"_s, ",\"nextField\":"_s, nextField ? "true"_s : "false"_s, '}');
+        "\",\"singleLine\":"_s, field ? "true"_s : "false"_s, ",\"nextField\":"_s, nextField ? "true"_s : "false"_s,
+        ",\"autocapitalize\":\""_s, autocapitalizeOf(*hinted), "\",\"autocorrect\":"_s, autocorrectOf(*hinted) ? "true"_s : "false"_s,
+        ",\"spellcheck\":"_s, spellcheck ? "true"_s : "false"_s, '}');
+}
+
+// The text before the caret in its paragraph, at most the last 100 UTF-16 code units: the host's
+// input method reads it like the text of a native field (the keyboard's automatic capital, its
+// suggestions). Nothing from a password field.
+static String textBeforeCaret(const VisibleSelection& selection)
+{
+    constexpr unsigned maxLength = 100;
+    RefPtr input = dynamicDowncast<HTMLInputElement>(enclosingTextFormControl(selection.start()));
+    if (input && input->isPasswordField())
+        return emptyString();
+    auto caret = selection.visibleStart();
+    auto range = makeSimpleRange(startOfParagraph(caret), caret);
+    if (!range)
+        return emptyString();
+    auto text = plainTextReplacingNoBreakSpace(*range);
+    if (text.length() <= maxLength)
+        return text;
+    unsigned start = text.length() - maxLength;
+    if (U16_IS_TRAIL(text[start]))
+        start++;
+    return text.substring(start);
 }
 
 void focusNextField(Page& page)
@@ -169,14 +244,18 @@ void EditorClient::respondToChangedSelection(LocalFrame* frame)
     if (!frame)
         return;
     updateTextInput(*frame);
-    if (!frame->view() || !frame->selection().selection().isContentEditable())
+    auto& selection = frame->selection().selection();
+    if (!frame->view() || !selection.isContentEditable())
         return;
     // End of the selection or caret, in view coordinates (CSS pixels)
     auto caret = frame->view()->contentsToRootView(frame->selection().absoluteCaretBounds());
-    if (caret.isEmpty() || caret == m_caret)
+    auto before = textBeforeCaret(selection);
+    if (caret.isEmpty() || (caret == m_caret && before == m_textBeforeCaret))
         return;
     m_caret = caret;
-    notifyHost(m_viewId, "caret", makeString("{\"x\":"_s, caret.x(), ",\"y\":"_s, caret.y(), ",\"height\":"_s, caret.height(), '}'));
+    m_textBeforeCaret = before;
+    notifyHost(m_viewId, "caret", makeString("{\"x\":"_s, caret.x(), ",\"y\":"_s, caret.y(), ",\"height\":"_s, caret.height(),
+        ",\"before\":\""_s, jsonEscape(before), "\"}"_s));
 }
 
 void EditorClient::registerUndoStep(UndoStep& step)

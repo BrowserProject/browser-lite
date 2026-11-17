@@ -10,10 +10,10 @@ import { KeyQueue } from './key-queue.js';
 import {
   attachFieldArrows,
   createImeField,
-  enterKeyHintOf,
-  enterKeyHintSetter,
   focusOpensKeyboard,
   hasNextKey,
+  type ImeTraits,
+  imeTraitsOf,
   opensNextField,
   textInputOf,
   unhandledKey,
@@ -106,7 +106,8 @@ export class ViewImpl implements View {
   private menuByTouch = false;
   private readonly ime: HTMLTextAreaElement;
   private readonly forgetImeText: () => void;
-  private readonly setEnterKeyHint: (hint: string) => void;
+  private readonly setImeContext: (before: string) => void;
+  private readonly setImeTraits: (traits: ImeTraits) => void;
   private readonly fieldArrows: { place: () => void; remove: () => void };
   private imeModeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly events = new Emitter<ViewEvents>();
@@ -155,7 +156,8 @@ export class ViewImpl implements View {
     this.ime = ime.field;
     if (worker) this.tiles = new ViewTiles(this.canvas, this.ime, worker, id);
     this.forgetImeText = ime.forget;
-    this.setEnterKeyHint = enterKeyHintSetter(this.ime, this.lifetime.signal);
+    this.setImeContext = ime.setContext;
+    this.setImeTraits = ime.setTraits;
     this.fieldArrows = attachFieldArrows(this, this.ime, this.lifetime.signal);
     attachPointerInput(this, this.lifetime.signal);
     this.resizeObserver = new ResizeObserver(() => this.measure());
@@ -806,8 +808,13 @@ export class ViewImpl implements View {
         this.canvas.style.cursor = String(data.cursor ?? '');
         return;
       case 'caret':
-        this.caret = data as unknown as Caret;
+        this.caret = {
+          x: Number(data.x) || 0,
+          y: Number(data.y) || 0,
+          height: Number(data.height) || 0,
+        };
         this.placeIme();
+        this.setImeContext(String(data.before ?? ''));
         return;
       case 'text-input': {
         // The on-screen keyboard follows the focused field of the page, none without one. A page
@@ -821,7 +828,7 @@ export class ViewImpl implements View {
         const apply = () => {
           const opens = mode !== 'none' && this.ime.inputMode === 'none';
           this.ime.inputMode = mode;
-          this.setEnterKeyHint(enterKeyHintOf(input, this.nextKey));
+          this.setImeTraits(imeTraitsOf(input, this.nextKey));
           this.nextFieldOnEnter = opensNextField(input, this.nextKey);
           if (opens) this.showKeyboard();
         };

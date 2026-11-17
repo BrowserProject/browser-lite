@@ -35,6 +35,12 @@ export interface TextInput {
   singleLine: boolean;
   /** A single line field that a next field of its form follows. */
   nextField: boolean;
+  /** The field's used `autocapitalize` hint: `none`, `sentences`, `words` or `characters`. */
+  autocapitalize: string;
+  /** The field's used `autocorrect` state. */
+  autocorrect: boolean;
+  /** The field's `spellcheck` state. */
+  spellcheck: boolean;
 }
 
 /** @internal The focused field of the engine event "text-input". */
@@ -44,6 +50,31 @@ export function textInputOf(data: Record<string, unknown>): TextInput {
     enterKeyHint: String(data.enterKeyHint ?? ''),
     singleLine: data.singleLine === true,
     nextField: data.nextField === true,
+    autocapitalize: String(data.autocapitalize ?? '') || 'none',
+    autocorrect: data.autocorrect === true,
+    spellcheck: data.spellcheck === true,
+  };
+}
+
+/**
+ * @internal What the host's on-screen keyboard takes from the IME field for the page's focused
+ * field: its enter key and its text hints. The keyboard gives a field a capital at the start of a
+ * sentence, corrections and suggestions only when the hints allow them.
+ */
+export interface ImeTraits {
+  enterKeyHint: string;
+  autocapitalize: string;
+  autocorrect: boolean;
+  spellcheck: boolean;
+}
+
+/** @internal The traits of the IME field for the page's focused field (`enterKeyHintOf`). */
+export function imeTraitsOf(input: TextInput, nextKey: boolean): ImeTraits {
+  return {
+    enterKeyHint: enterKeyHintOf(input, nextKey),
+    autocapitalize: input.autocapitalize,
+    autocorrect: input.autocorrect,
+    spellcheck: input.spellcheck,
   };
 }
 
@@ -92,34 +123,48 @@ export function isOnScreenEnter(e: KeyLike): boolean {
 }
 
 /**
- * @internal Setter for the enter key hint of the IME field (the `enterkeyhint` of the page's
- * focused field). iOS gives its on-screen keyboard the hint only when an element gains focus, but
- * the IME field has the focus since the user's tap and gets the page field's hint after it
- * ("text-input"): the keyboard showed return instead of search in Google's search box. A blur and
- * focus of the same field in one task is no new focus there, so on iPhone and iPad the focus moves
- * through a second field and back when the hint differs from the one of the last focus. WebKit
- * then starts a new input session with the hint and keeps the keyboard open, as the focus only
- * moves from one field to another.
+ * @internal The traits of the IME field (`ImeTraits`). iOS gives its on-screen keyboard the traits
+ * and decides the automatic capital from the text before the caret only when an element gains
+ * focus, but the IME field has the focus since the user's tap and gets the page field's traits and
+ * text after it ("text-input", "caret"): the keyboard showed return instead of search in Google's
+ * search box. A blur and focus of the same field in one task is no new focus there, so on iPhone
+ * and iPad `refresh` moves the focus through a second field and back when the traits or the text
+ * differ from those of the last focus, or the user typed since (`typed`). WebKit then starts a new
+ * input session with them and keeps the keyboard open, as the focus only moves from one field to
+ * another. Changes within one task lead to one such focus at most.
  */
-export function enterKeyHintSetter(
+export function imeTraits(
   ime: HTMLTextAreaElement,
   signal: AbortSignal,
-): (hint: string) => void {
-  if (!appleMobileHost())
-    return (hint) => {
-      ime.enterKeyHint = hint;
-    };
-  let focusedHint = ime.enterKeyHint;
+): { set: (traits: ImeTraits) => void; refresh: () => void; typed: () => void } {
+  const apply = (traits: ImeTraits) => {
+    ime.enterKeyHint = traits.enterKeyHint;
+    ime.setAttribute('autocapitalize', traits.autocapitalize);
+    ime.setAttribute('autocorrect', traits.autocorrect ? 'on' : 'off');
+    ime.spellcheck = traits.spellcheck;
+  };
+  if (!appleMobileHost()) return { set: apply, refresh: () => {}, typed: () => {} };
+  const state = () =>
+    [
+      ime.enterKeyHint,
+      ime.getAttribute('autocapitalize'),
+      ime.getAttribute('autocorrect'),
+      ime.spellcheck,
+      ime.value,
+    ].join('\n');
+  // The state at the last focus, null once the keyboard typed since
+  let focused: string | null = state();
   ime.addEventListener(
     'focus',
     () => {
-      focusedHint = ime.enterKeyHint;
+      focused = state();
     },
     { signal },
   );
-  return (hint) => {
-    ime.enterKeyHint = hint;
-    if (hint === focusedHint || ime.inputMode === 'none' || document.activeElement !== ime) return;
+  let pending = false;
+  const check = () => {
+    pending = false;
+    if (state() === focused || ime.inputMode === 'none' || document.activeElement !== ime) return;
     const relay = document.createElement('textarea');
     relay.setAttribute('aria-hidden', 'true');
     relay.inputMode = 'none';
@@ -129,6 +174,21 @@ export function enterKeyHintSetter(
     relay.focus({ preventScroll: true });
     ime.focus({ preventScroll: true });
     relay.remove();
+  };
+  const refresh = () => {
+    if (pending) return;
+    pending = true;
+    queueMicrotask(check);
+  };
+  return {
+    set: (traits) => {
+      apply(traits);
+      refresh();
+    },
+    refresh,
+    typed: () => {
+      focused = null;
+    },
   };
 }
 
@@ -243,6 +303,12 @@ export function unhandledKey(data: Record<string, unknown>): UnhandledKey {
   };
 }
 
+// A key that enters a character
+const isCharacter = (e: KeyboardEvent) => !e.ctrlKey && !e.metaKey && e.key.length === 1;
+// A key that types or deletes text: the caret moves along, not elsewhere
+const isTyping = (e: KeyboardEvent) =>
+  isCharacter(e) || ((e.key === 'Backspace' || e.key === 'Delete') && !e.ctrlKey && !e.metaKey);
+
 const isPasteShortcut = (e: KeyboardEvent) =>
   (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
 
@@ -311,24 +377,31 @@ export function textEdit(from: string, to: string): { backspaces: number; insert
  * Japanese, on-screen keyboards) comes through the input and composition events and is
  * inserted as finished text; the composition preview is shown underlined in the page.
  *
- * The field keeps the text the input method entered since the page's caret last moved
- * otherwise, like the text before the caret of a real field: an on-screen keyboard deletes and
- * replaces within it (Gboard's Backspace after typing, a suggestion that replaces the word), and
- * every change of the field reaches the page as Backspaces and inserted text. In an emptied
- * field Gboard's Backspace changed nothing, so it never reached the page.
+ * The field holds the text before the page's caret like a real field: the page's text in the
+ * caret's paragraph (the engine's "caret" event, at most 100 characters) whenever the caret moved
+ * otherwise (a key, a tap, another field), then what the input method enters there. The keyboard
+ * reads it for its automatic capital and its suggestions; it deletes and replaces within it
+ * (Gboard's Backspace, a suggestion that replaces the word), and every change of the field reaches
+ * the page as Backspaces and inserted text. In an emptied field Gboard's Backspace changed
+ * nothing, so it never reached the page. The field's traits are the page field's (`imeTraits`).
  */
 export function createImeField(
   view: ViewImpl,
   signal: AbortSignal,
-): { field: HTMLTextAreaElement; forget: () => void } {
+): {
+  field: HTMLTextAreaElement;
+  forget: () => void;
+  setContext: (before: string) => void;
+  setTraits: (traits: ImeTraits) => void;
+} {
   const ime = document.createElement('textarea');
   ime.setAttribute('data-bl-ime', '');
   ime.setAttribute('aria-hidden', 'true');
   ime.autocomplete = 'off';
-  // Safari and on-screen keyboards would change the text before the page gets it
-  ime.setAttribute('autocorrect', 'off');
-  ime.setAttribute('autocapitalize', 'off');
-  ime.spellcheck = false;
+  const traits = imeTraits(ime, signal);
+  // Until the page has a field: Safari and on-screen keyboards would change the text before the
+  // page gets it
+  traits.set({ enterKeyHint: '', autocapitalize: 'none', autocorrect: false, spellcheck: false });
   // On-screen keyboards only while the page has an editable element focused ("text-input")
   ime.inputMode = 'none';
   ime.tabIndex = -1;
@@ -339,6 +412,18 @@ export function createImeField(
   let composing = false;
   // Text of the field that the page has before its caret
   let entered = '';
+  // iOS decides the capital of the next letter only after text its keyboard entered itself: a
+  // character of the keyboard also enters the field (the page gets it as the key, its input
+  // event finds no change), so it keeps capitals for words and characters and starts a
+  // sentence with one, like in a native field
+  const keyboardTypes = appleMobileHost();
+  // The page's text before its caret as the engine reported it last
+  let context = '';
+  // The field shows that text: the caret moved otherwise and the input method has not changed
+  // the field since
+  let following = true;
+  // The caret moved without typing (a tap, an arrow key): iOS decides the capital anew at a focus
+  let moved = false;
   // Entered text when the composition began: the engine shows the composition after it
   let compositionBase: string | null = null;
   // The Enter key down moved to the next field: its key up stays out of the page as well
@@ -354,17 +439,33 @@ export function createImeField(
     type: K,
     listener: (event: HTMLElementEventMap[K]) => void,
   ) => ime.addEventListener(type, (event) => view.alive && listener(event), { signal });
-  // The page's caret moved without the field (a key, a tap, another field): start empty, which
-  // also tells the input method that there is no text before the caret
-  const forget = () => {
+  const show = (text: string) => {
+    entered = text;
+    if (ime.value !== text) ime.value = text;
+  };
+  // The page's caret moved without the field (a key, a tap, another field): the field shows the
+  // page's text before the caret, the last one known until the engine reports the new one
+  const forget = (typing = false) => {
     if (composing) return;
-    entered = '';
-    if (ime.value) ime.value = '';
+    following = true;
+    if (typing) traits.typed();
+    else moved = true;
+    show(context);
+  };
+  const setContext = (before: string) => {
+    context = before;
+    if (!following || composing) return;
+    show(before);
+    if (!moved) return;
+    moved = false;
+    traits.refresh();
   };
   const sync = () => {
     const { backspaces, insert } = textEdit(entered, ime.value);
     entered = ime.value;
     if (!backspaces && !insert) return;
+    following = false;
+    traits.typed();
     view.userInput(false);
     view.keys.run({
       page: () => {
@@ -381,7 +482,13 @@ export function createImeField(
     // Paste: wait for the paste event, it carries the content
     if (isPasteShortcut(e) || isTextInput(e)) return;
     view.userInput(false);
-    forget();
+    // The keyboard's character enters the field: it no longer follows the page's text, whose
+    // next "caret" may come before that input
+    const entersField = keyboardTypes && ime.inputMode !== 'none' && isCharacter(e);
+    if (entersField) {
+      following = false;
+      traits.typed();
+    } else forget(isTyping(e));
     if (view.nextFieldOnEnter && isOnScreenEnter(e)) {
       nextFieldKey = true;
       e.preventDefault();
@@ -389,6 +496,11 @@ export function createImeField(
       return;
     }
     view.keys.run({ page: () => sendKey(view, 0, e), host: () => keyToHost('keydown', e) });
+    if (entersField) {
+      const { value, selectionStart, selectionEnd } = ime;
+      entered = value.slice(0, selectionStart) + e.key + value.slice(selectionEnd);
+      return;
+    }
     // Browser shortcuts like Tab, Backspace and Space stay in the page
     if (e.key !== 'F5' && e.key !== 'F12') e.preventDefault();
   });
@@ -409,6 +521,7 @@ export function createImeField(
   // keyboards compose the word again on Backspace): the end corrects the text
   on('compositionupdate', (e) => {
     compositionBase ??= entered;
+    following = false;
     const text = e.data || '';
     view.keys.run({
       page: () =>
@@ -457,5 +570,5 @@ export function createImeField(
       host: () => editHostField(0, String(data.text)),
     });
   });
-  return { field: ime, forget };
+  return { field: ime, forget: () => forget(), setContext, setTraits: traits.set };
 }

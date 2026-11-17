@@ -130,6 +130,7 @@ private:
 
     int m_viewId;
     WebCore::IntRect m_caret;
+    String m_textBeforeCaret;
     String m_textInput;
 };
 

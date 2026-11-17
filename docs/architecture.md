@@ -336,9 +336,19 @@ flush of every later frame).
 Mouse, wheel, touch, touchpad pinch and keyboard go from the canvas to `bl_*` exports
 (`packages/core/src/input.ts`, `keyboard.ts`). Text arrives through a hidden IME field placed at
 the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finished text. The field
-keeps the text the input method entered since the caret last moved otherwise (a key, a click, a
-new field), and every change of it reaches the page as Backspaces and inserted text, so an
-Android keyboard's Backspace and suggestions, which edit that text, work after typing (#411). In Chrome
+holds the text before the caret like a native field: whenever the caret moved otherwise (a key, a
+click, a new field) the page's text before it in its paragraph (the engine's `caret` event, at most
+100 characters, nothing of a password), then what the input method enters there. Every change of
+it reaches the page as Backspaces and inserted text, so an Android keyboard's Backspace and
+suggestions, which edit that text, work (#411), also on text that was there before. The field
+carries the page field's `autocapitalize`, `autocorrect` and `spellcheck` as the engine resolves
+them in `text-input` (the HTML spec's used hints with the form's as fallback, sentences and on
+without one, none and off in URL, email and password fields), so keyboards start a sentence or a
+name with a capital and offer suggestions like in a native field. iOS decides the capital only at
+a focus and after text its keyboard entered itself: there the core focuses the field again
+through a second one when the hints or that text changed after a tap or since typing, and a
+character of the keyboard enters the field as well as the page (the field's input then finds no
+change, #598). In Chrome
 the core opens the on-screen keyboard after a tap by focusing that field again once it has the
 page field's input mode, and Chrome closes it for none (#360). iOS gives its keyboard the
 field's enter key hint only at a focus, so on iPhone and iPad the core moves the focus through a
