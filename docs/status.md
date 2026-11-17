@@ -743,6 +743,18 @@ browser (Safari keeps Cmd+L, T and W for itself).
    percentage descendants with it; Chromium keeps a layout result per set of constraints for
    that, which WebKit has no place for. Wikipedia (no percentage heights) is unchanged. A window
    drag is coalesced: 3 resize events for 20 steps (native WebKit 20).
+   A transform that comes or goes on a positioned box no longer lays out the page (patch 0153,
+   #596): Swiper (20min.ch's carousels) takes the 3D transform off every slide, reads its width
+   and puts the transform back, for each image that loads in a carousel. WebKit laid the whole
+   page out for each slide (native WebKit 56 ms, Chromium 0.1 ms), 2505 reads took 140 s in
+   native WebKit (Playwright's) and minutes here: the engine thread never got free, every other
+   tab stopped loading and answering, and 20min.ch itself stopped running its scripts after
+   about 35 s. Now (2026-11-17, local, 2 interleaved runs each) a tab opened 45 s after 20min.ch
+   shows news.ycombinator.com after 0.7 to 0.8 s (before: nothing within 60 s, no pointer move
+   arrived) with pointer moves at 3 to 6 ms (median); 20min.ch's own timers run through 120 s
+   instead of stopping for good. What is left there is one task of 13 to 16 s while it loads
+   (Chromium at most 0.9 s): Swiper's `update` for every image of a carousel that loads, each
+   with two or three full forced layouts of the page (see above).
 4. GC 5 to 7 % on JS-heavy sites (#60, #122).
 5. Video and animations: with compositing Chromium shows the video itself behind the view canvas
    (#232); videos with opacity, blend modes, filters or 3D transforms keep frames painted into the

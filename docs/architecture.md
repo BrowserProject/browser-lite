@@ -63,7 +63,12 @@ messages, the file input's "2 files", time labels of media controls) are formatt
 GLib ports (patch 0076, #363). Layout lays a box with a percentage height out again only when
 what its percentages resolve against changed, not on every layout of its parent or of the block
 they resolve against, and a flex item with such descendants only after it was measured in the
-same layout (patch 0098, #461). A cell at the left or right edge of a table with collapsed borders
+same layout (patch 0098, #461). A transform that comes or goes on a positioned box, which has a
+layer that paints itself either way, is handled like a transform that changes (and like
+`translate`, `rotate` and `scale`): the overflow of its ancestors is computed again instead of a
+layout of everything around it; the stacking context it makes or a `z-index` that comes or goes
+on such a box only reorders the layers. Out of flow descendants whose containing block changes
+move as before (patch 0153, #596). A cell at the left or right edge of a table with collapsed borders
 paints its background inside the widest border half at that edge, which the table works out once
 until its collapsed borders change (patch 0106, #485). The balancing passes of a multicol (one
 column set, no spanners, not inside another fragmentation context) keep the layout of a block

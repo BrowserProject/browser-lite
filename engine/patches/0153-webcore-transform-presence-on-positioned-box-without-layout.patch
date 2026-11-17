@@ -1,0 +1,65 @@
+diff --git a/Source/WebCore/rendering/RenderElement.cpp b/Source/WebCore/rendering/RenderElement.cpp
+index 477e2e38f6..46cbdacd65 100644
+--- a/Source/WebCore/rendering/RenderElement.cpp
++++ b/Source/WebCore/rendering/RenderElement.cpp
+@@ -607,6 +607,10 @@ void RenderElement::setStyle(Style::ComputedStyle&& style, Style::DifferenceResu
+ 
+     diff.result = std::max(diff.result, minimalStyleDifference);
+     diff = adjustStyleDifference(diff);
++    // browser-lite: a transform that comes or goes changes the overflow of the ancestors also
++    // when the layer is composited (Style::difference)
++    if (m_hasInitializedStyle && m_style.transform().isNone() != style.transform().isNone())
++        diff.result = std::max(diff.result, diff.result == Style::DifferenceResult::LayoutOutOfFlowMovementOnly ? Style::DifferenceResult::OverflowAndOutOfFlowMovement : Style::DifferenceResult::Overflow);
+ 
+     Style::loadPendingResources(style, protect(document()), protect(element()).get());
+ 
+diff --git a/Source/WebCore/style/StyleDifference.cpp b/Source/WebCore/style/StyleDifference.cpp
+index b2ba8f0482..23a7dff670 100644
+--- a/Source/WebCore/style/StyleDifference.cpp
++++ b/Source/WebCore/style/StyleDifference.cpp
+@@ -171,7 +171,7 @@ public:
+         return false;
+     }
+ 
+-    static bool miscDataChangeRequiresLayout(const NonInheritedMiscData& a, const NonInheritedMiscData& b, OptionSet<DifferenceContextSensitiveProperty>& changedContextSensitiveProperties)
++    static bool miscDataChangeRequiresLayout(const NonInheritedMiscData& a, const NonInheritedMiscData& b, bool positioned, OptionSet<DifferenceContextSensitiveProperty>& changedContextSensitiveProperties)
+     {
+         ASSERT(&a != &b);
+ 
+@@ -198,7 +198,13 @@ public:
+             return true;
+ 
+         if (a.transform.ptr() != b.transform.ptr()) {
+-            if (a.transform->hasTransform() != b.transform->hasTransform())
++            // browser-lite: on a positioned box, which has a layer that paints itself either way
++            // (for example a slide of a carousel), a transform that comes or goes is a transform
++            // change like one of translate, rotate and scale: the overflow of its ancestors is
++            // computed again (RenderElement::adjustStyleDifference and setStyle) instead of a
++            // layout of everything around it. Out of flow descendants whose containing block
++            // changes are moved and laid out (removeOutOfFlowBoxesIfNeededOnStyleChange).
++            if (a.transform->hasTransform() != b.transform->hasTransform() && !positioned)
+                 return true;
+             if (*a.transform != *b.transform) {
+                 changedContextSensitiveProperties.add(DifferenceContextSensitiveProperty::Transform);
+@@ -420,7 +426,11 @@ public:
+                 if (a.nonInheritedData().boxData->boxSizing != b.nonInheritedData().boxData->boxSizing)
+                     return true;
+ 
+-                if (a.nonInheritedData().boxData->hasAutoUsedZIndex != b.nonInheritedData().boxData->hasAutoUsedZIndex)
++                // browser-lite: a positioned box has a layer that paints itself either way, a
++                // stacking context it gains or loses only changes the order of the layers
++                // (changeRequiresLayerRepaint). A transform that comes or goes makes one.
++                if (a.nonInheritedData().boxData->hasAutoUsedZIndex != b.nonInheritedData().boxData->hasAutoUsedZIndex
++                    && (a.position() == PositionType::Static || b.position() == PositionType::Static))
+                     return true;
+             }
+ 
+@@ -460,7 +470,7 @@ public:
+ 
+         if (&a.nonInheritedData() != &b.nonInheritedData()) {
+             SUPPRESS_UNCOUNTED_ARG if (a.nonInheritedData().miscData.ptr() != b.nonInheritedData().miscData.ptr()
+-                && miscDataChangeRequiresLayout(*a.nonInheritedData().miscData, *b.nonInheritedData().miscData, changedContextSensitiveProperties))
++                && miscDataChangeRequiresLayout(*a.nonInheritedData().miscData, *b.nonInheritedData().miscData, a.position() != PositionType::Static && b.position() != PositionType::Static, changedContextSensitiveProperties))
+                 return true;
+ 
+             SUPPRESS_UNCOUNTED_ARG if (a.nonInheritedData().rareData.ptr() != b.nonInheritedData().rareData.ptr()

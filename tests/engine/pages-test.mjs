@@ -40,6 +40,11 @@
 //                  without restyling the document (patch 0148): same computed style and geometry
 //                  as a fresh style, also for font metric units, pseudo-elements and shadow trees,
 //                  an added face next to 2000 elements costs a fraction of a full restyle
+//   transform-presence.html  a transform that comes or goes on a positioned box recomputes only the
+//                  overflow of its ancestors (patch 0153): same geometry, scroll sizes and layer
+//                  on top as a fresh layout, also for out of flow descendants, floats, inline
+//                  blocks and table cells; toggling a slide's transform costs about as much as
+//                  changing it
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -75,6 +80,7 @@ const CASES = [
   { name: 'storage-quota', wait: 'QUOTA done', env: { RENDER_URL: 'https://example.com/' } },
   { name: 'word-boundaries', size: [800, 600], wait: 'WORDS done' },
   { name: 'font-loads', size: [800, 600], wait: 'FONTLOADS done' },
+  { name: 'transform-presence', size: [800, 600], wait: 'TRANSFORM done' },
   {
     name: 'cookies',
     label: 'cookies (public suffix host)',

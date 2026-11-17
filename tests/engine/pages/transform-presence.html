@@ -1,0 +1,137 @@
+<!doctype html>
+<title>Transform presence</title>
+<!-- A transform that comes or goes on a box that has a layer anyway (positioned, translucent)
+     only recomputes the overflow of its ancestors, like a transform that changes (patch 0153).
+     Every change below must give the same geometry and scroll sizes as a fresh layout, also for
+     out of flow descendants whose containing block the transform changes; toggling a transform
+     on a slide next to a big layout costs about as much as changing it. -->
+<style>
+  body { margin: 0; font: 12px/16px sans-serif; }
+  #app { display: flex; flex-direction: column; }
+  .scroller { overflow: auto; width: 400px; grid-column: 1 / -1; }
+  .wrapper { display: flex; }
+  .slide { position: relative; flex: 0 0 150px; height: 100px; margin-right: 8px; }
+  .slide p { margin: 0; }
+  .pinned { position: fixed; left: 5px; top: 7px; width: 20px; height: 10px; }
+  .abs { position: absolute; right: 3px; bottom: 4px; width: 15px; height: 12px; }
+  #static, #translucent { margin: 6px 20px; width: 200px; height: 50px; }
+  #translucent { opacity: 0.5; }
+  #floater { float: left; position: relative; width: 60px; height: 40px; }
+  .inline { display: inline-block; position: relative; width: 40px; height: 14px; }
+  table { border-collapse: collapse; }
+  td { position: relative; width: 80px; height: 30px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .card { display: flex; flex-direction: column; height: 100%; }
+  .card > div { height: 50%; }
+  #stack { position: relative; height: 40px; }
+  #stack > div { position: absolute; top: 0; width: 60px; height: 30px; }
+  #under { left: 0; } #under > div { position: relative; z-index: 2; width: 60px; height: 30px; }
+  #over { left: 30px; z-index: 1; }
+</style>
+<div id="app">
+  <div id="static"><div class="abs"></div><div class="pinned"></div>Static</div>
+  <div id="translucent"><div class="abs"></div><div><div class="pinned"></div></div>Translucent</div>
+  <div><div id="floater"><div class="abs"></div></div><p>Text next to a float, <span class="inline" id="inline"><span class="abs"></span></span> and more text that wraps around the float.</p></div>
+  <div id="stack"><div id="under"><div id="inner"></div></div><div id="over"></div></div>
+  <table><tr><td id="cell"><div class="abs"></div>Cell</td><td>Next</td></tr></table>
+  <div class="grid" id="grid">
+    <div class="scroller" id="scroller"><div class="wrapper" id="wrapper"></div></div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const slides = [];
+for (let i = 0; i < 30; i++) {
+  const slide = document.createElement('div');
+  slide.className = 'slide';
+  slide.innerHTML = '<p>Slide ' + i + '</p>' + (i === 2 ? '<div class="pinned"></div><div class="abs"></div>' : '');
+  $('wrapper').append(slide);
+  slides.push(slide);
+}
+const cards = [];
+for (let i = 0; i < 400; i++)
+  cards.push('<div class="card"><div><p>Card ' + i + ' with a title that wraps</p></div><div><p>text</p></div></div>');
+$('grid').insertAdjacentHTML('beforeend', cards.join(''));
+
+const app = $('app');
+const geometry = () => {
+  const values = [...app.querySelectorAll('*')].map((element) => {
+    const r = element.getBoundingClientRect();
+    return [r.left, r.top, r.width, r.height].map((v) => Math.round(v * 64)).join(',');
+  });
+  for (const element of [document.documentElement, $('scroller')])
+    values.push(element.scrollWidth + 'x' + element.scrollHeight);
+  // The layer on top where two positioned boxes overlap: stacking contexts and z-order
+  const stack = $('stack').getBoundingClientRect();
+  values.push(document.elementFromPoint(stack.left + 45, stack.top + 15)?.id);
+  return values;
+};
+// A fresh layout: the renderers of the whole tree are made again
+const fresh = () => {
+  app.style.display = 'none';
+  app.offsetHeight;
+  app.style.display = '';
+  return geometry();
+};
+
+const set = (element, transform) => () => { element.style.transform = transform; };
+const changes = [
+  ['slide gets a transform', set(slides[1], 'translateX(300px)')],
+  ['slide gets a 3D transform', set(slides[29], 'translateX(400px) translateZ(-20px) rotateY(14deg) scale(0.85)')],
+  ['slide changes its transform', set(slides[1], 'translateX(40px)')],
+  ['slide loses its transform', set(slides[1], 'none')],
+  ['3D slide loses its transform', set(slides[29], '')],
+  ['slide with out of flow boxes gets a transform', set(slides[2], 'translateY(10px)')],
+  ['slide with out of flow boxes loses it', set(slides[2], 'none')],
+  ['static box gets a transform', set($('static'), 'translate(5px, 6px)')],
+  ['static box loses it', set($('static'), 'none')],
+  ['translucent box gets a transform', set($('translucent'), 'rotate(3deg)')],
+  ['translucent box loses it', set($('translucent'), 'none')],
+  ['float gets a transform', set($('floater'), 'scale(1.5)')],
+  ['float loses it', set($('floater'), 'none')],
+  ['inline block gets a transform', set($('inline'), 'translateX(30px)')],
+  ['inline block loses it', set($('inline'), 'none')],
+  ['positioned box gets a z-index', () => { $('under').style.zIndex = '0'; }],
+  ['positioned box gets a transform over a z-index', set($('under'), 'translateX(1px)')],
+  ['positioned box loses both', () => { $('under').style.zIndex = ''; $('under').style.transform = ''; }],
+  ['table cell gets a transform', set($('cell'), 'translateY(4px)')],
+  ['table cell loses it', set($('cell'), 'none')],
+  ['all slides get one', () => slides.forEach((slide, i) => { slide.style.transform = 'translateX(' + i * 3 + 'px) translateZ(-' + i + 'px) rotateY(-14deg)'; })],
+  ['all slides lose it, one by one with a read', () => slides.forEach((slide) => { slide.style.transform = 'none'; slide.offsetWidth; })],
+];
+
+const results = [];
+const onTop = () => geometry().at(-1);
+const before = onTop();
+for (const [name, change] of changes) {
+  change();
+  const incremental = geometry();
+  const expected = fresh();
+  const differ = incremental.filter((value, index) => value !== expected[index]).length;
+  if (differ) results.push(name + ':' + differ);
+  if (name === 'positioned box gets a z-index' && (before !== 'inner' || onTop() !== 'over')) results.push('z-order check broken: ' + before + ' ' + onTop());
+}
+
+// Swiper measures every slide without its transform (updateSlides): toggling the transform of a
+// slide next to 400 grid cards against changing it
+const median = (run) => {
+  const times = [];
+  for (let i = 0; i < 9; i++) {
+    const start = performance.now();
+    for (let j = 0; j < 10; j++) {
+      run(j);
+      getComputedStyle(slides[5]).getPropertyValue('width');
+    }
+    times.push((performance.now() - start) / 10);
+  }
+  times.sort((a, b) => a - b);
+  return times[4];
+};
+slides[5].style.transform = 'translateX(1px)';
+const changed = median((i) => { slides[5].style.transform = i % 2 ? 'translateX(1px)' : 'translateX(2px)'; });
+const toggled = median((i) => { slides[5].style.transform = i % 2 ? 'translateX(1px)' : 'none'; });
+const ratio = toggled / Math.max(changed, 0.05);
+console.log('TRANSFORM toggled=' + toggled.toFixed(2) + 'ms changed=' + changed.toFixed(2) + 'ms');
+if (ratio > 4 && toggled - changed > 1) results.push('toggling a transform costs ' + ratio.toFixed(1) + ' times changing it');
+console.log('TRANSFORM done=' + (results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'));
+</script>
