@@ -497,6 +497,11 @@ engine has no load for (answered by a service worker or WebKit's memory cache), 
 (Save link as, Save image as, the demo's Download again: the page's cookies and the referrer its
 policy allows, #511) and `bl_save_page` (Save page as, the main frame's address named after its
 title) send a request of their own (#412).
+A download is named like in Chrome (`Download::announce`, #601): the `download` attribute, else
+the `Content-Disposition` file name (patch 0155: RFC 6266 with quoted strings and parameter names
+in any case, `filename*` of RFC 8187 before `filename`, which may be raw UTF-8, RFC 2047 encoded
+words or percent-encoded UTF-8), else the last path segment of the address, percent-decoded when
+that gives UTF-8; path separators and control characters become `_`.
 The engine hands the bytes of a download to the host as they arrive (`sendDownloadData`). With
 `Download.save()` the core streams them into the host browser's downloads (#577): the page posts
 them to `download-sw.js`, which answers the navigation of a hidden frame to `bl-download/...` with

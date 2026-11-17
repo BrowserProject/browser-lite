@@ -1,0 +1,235 @@
+diff --git a/Source/WebCore/platform/network/HTTPParsers.cpp b/Source/WebCore/platform/network/HTTPParsers.cpp
+index 05771adb29..5cc1f8d077 100644
+--- a/Source/WebCore/platform/network/HTTPParsers.cpp
++++ b/Source/WebCore/platform/network/HTTPParsers.cpp
+@@ -40,10 +40,13 @@
+ #include "RFC7230.h"
+ #include "ResourceResponse.h"
+ #include "SecurityOrigin.h"
++#include <pal/text/DecodeEscapeSequences.h>
++#include <pal/text/TextEncoding.h>
+ #include <wtf/CheckedArithmetic.h>
+ #include <wtf/DateMath.h>
+ #include <wtf/NeverDestroyed.h>
+ #include <wtf/OptionSet.h>
++#include <wtf/text/Base64.h>
+ #include <wtf/text/MakeString.h>
+ #include <wtf/text/ParsingUtilities.h>
+ #include <wtf/text/StringBuilder.h>
+@@ -332,33 +335,165 @@ std::optional<WallTime> parseHTTPDate(const String& value)
+     return WallTime::fromRawSeconds(dateInMillisecondsSinceEpoch / 1000.0);
+ }
+ 
+-// FIXME: This function doesn't comply with RFC 6266.
+-// For example, this function doesn't handle the interaction between " and ;
+-// that arises from quoted-string, nor does this function properly unquote
+-// attribute values. Further this function appears to process parameter names
+-// in a case-sensitive manner. (There are likely other bugs as well.)
+-StringView filenameFromHTTPContentDisposition(StringView value LIFETIME_BOUND)
++// An RFC 2047 encoded word (=?charset?B|Q?text?=) like Chrome and Firefox decode them in a
++// filename parameter; null if the word is none or does not decode.
++static String decodeRFC2047Word(StringView word)
+ {
+-    for (auto keyValuePair : value.split(';')) {
+-        size_t valueStartPos = keyValuePair.find('=');
+-        if (valueStartPos == notFound)
+-            continue;
+-
+-        auto key = keyValuePair.left(valueStartPos).trim(isUnicodeCompatibleASCIIWhitespace<char16_t>);
++    if (word.length() < 8 || !word.startsWith("=?"_s) || !word.endsWith("?="_s))
++        return { };
++    auto inner = word.substring(2, word.length() - 4);
++    size_t charsetEnd = inner.find('?');
++    if (charsetEnd == notFound || charsetEnd + 2 >= inner.length() || inner[charsetEnd + 2] != '?')
++        return { };
++    PAL::TextEncoding encoding { inner.left(charsetEnd) };
++    if (!encoding.isValid())
++        return { };
++    auto text = inner.substring(charsetEnd + 3);
++    std::optional<Vector<uint8_t>> bytes;
++    switch (toASCIILower(inner[charsetEnd + 1])) {
++    case 'b':
++        bytes = base64Decode(text);
++        break;
++    case 'q': {
++        Vector<uint8_t> decoded;
++        for (size_t i = 0; i < text.length(); ++i) {
++            if (text[i] == '_')
++                decoded.append(' ');
++            else if (text[i] == '=' && i + 2 < text.length() && isASCIIHexDigit(text[i + 1]) && isASCIIHexDigit(text[i + 2])) {
++                decoded.append(toASCIIHexValue(text[i + 1], text[i + 2]));
++                i += 2;
++            } else
++                decoded.append(static_cast<uint8_t>(text[i]));
++        }
++        bytes = WTF::move(decoded);
++        break;
++    }
++    default:
++        return { };
++    }
++    if (!bytes)
++        return { };
++    bool sawError = false;
++    auto decoded = encoding.decode(bytes->span(), true, sawError);
++    return sawError ? String { } : decoded;
++}
+ 
+-        if (key.isEmpty() || key != "filename"_s)
++// The value of a filename parameter like Chrome: each word (separated by white space) may be an
++// RFC 2047 encoded word or percent-encoded UTF-8 (what IE sent); white space between two encoded
++// words goes, a word that does not decode stays as it is.
++static String decodeFilenameParameter(StringView value)
++{
++    StringBuilder result;
++    bool afterEncodedWord = false;
++    size_t position = 0;
++    while (position < value.length()) {
++        size_t spaceStart = position;
++        while (position < value.length() && isASCIIWhitespace(value[position]))
++            ++position;
++        auto space = value.substring(spaceStart, position - spaceStart);
++        size_t wordStart = position;
++        while (position < value.length() && !isASCIIWhitespace(value[position]))
++            ++position;
++        auto word = value.substring(wordStart, position - wordStart);
++        if (word.isEmpty()) {
++            result.append(space);
++            break;
++        }
++        if (!word.containsOnlyASCII()) {
++            result.append(space, word);
++            afterEncodedWord = false;
+             continue;
++        }
++        if (auto decoded = decodeRFC2047Word(word); !decoded.isNull()) {
++            if (!afterEncodedWord)
++                result.append(space);
++            result.append(decoded);
++            afterEncodedWord = true;
++            continue;
++        }
++        auto unescaped = String::fromUTF8(PAL::decodeURLEscapeSequencesAsData(word).span());
++        result.append(space);
++        if (unescaped.isNull())
++            result.append(word);
++        else
++            result.append(unescaped);
++        afterEncodedWord = false;
++    }
++    return result.isEmpty() ? emptyString() : result.toString();
++}
+ 
+-        auto value = keyValuePair.substring(valueStartPos + 1).trim(isUnicodeCompatibleASCIIWhitespace<char16_t>);
+-
+-        // Remove quotes if there are any
+-        if (value.length() > 1 && value[0] == '\"')
+-            value = value.substring(1, value.length() - 2);
++// An RFC 8187 ext-value (charset'language'percent-encoded bytes) of filename*; null if invalid.
++static String decodeExtValue(StringView value)
++{
++    size_t charsetEnd = value.find('\'');
++    if (charsetEnd == notFound)
++        return { };
++    size_t languageEnd = value.find('\'', charsetEnd + 1);
++    if (languageEnd == notFound)
++        return { };
++    auto encoded = value.substring(languageEnd + 1);
++    if (!encoded.containsOnlyASCII())
++        return { };
++    PAL::TextEncoding encoding { value.left(charsetEnd) };
++    if (!encoding.isValid())
++        return { };
++    bool sawError = false;
++    auto decoded = encoding.decode(PAL::decodeURLEscapeSequencesAsData(encoded).span(), true, sawError);
++    return sawError ? String { } : decoded;
++}
+ 
+-        return value;
++// The file name of a Content-Disposition header like Chrome (RFC 6266): parameter names in any
++// case, values as tokens or quoted strings (backslash escapes, a ';' inside the quotes belongs to
++// the value), the first valid filename* (RFC 8187) before the first filename. Raw bytes of the
++// header are UTF-8, else Latin-1. Null without a file name parameter.
++String filenameFromHTTPContentDisposition(StringView header)
++{
++    String decodedHeader;
++    if (header.is8Bit() && !header.containsOnlyASCII()) {
++        decodedHeader = String::fromUTF8WithLatin1Fallback(header.span8());
++        header = decodedHeader;
+     }
+-
+-    return { };
++    String filename;
++    String extFilename;
++    size_t position = 0;
++    size_t length = header.length();
++    while (position < length) {
++        size_t nameStart = position;
++        while (position < length && header[position] != '=' && header[position] != ';')
++            ++position;
++        auto name = header.substring(nameStart, position - nameStart).trim(isASCIIWhitespace<char16_t>);
++        if (position == length || header[position] == ';') {
++            ++position;
++            continue;
++        }
++        ++position;
++        while (position < length && isASCIIWhitespace(header[position]))
++            ++position;
++        bool quoted = position < length && header[position] == '"';
++        String value;
++        if (quoted) {
++            StringBuilder unquoted;
++            for (++position; position < length && header[position] != '"'; ++position) {
++                if (header[position] == '\\' && position + 1 < length)
++                    ++position;
++                unquoted.append(header[position]);
++            }
++            value = unquoted.toString();
++            while (position < length && header[position] != ';')
++                ++position;
++        } else {
++            size_t valueStart = position;
++            while (position < length && header[position] != ';')
++                ++position;
++            value = header.substring(valueStart, position - valueStart).trim(isASCIIWhitespace<char16_t>).toString();
++        }
++        ++position;
++        if (filename.isNull() && equalLettersIgnoringASCIICase(name, "filename"_s))
++            filename = decodeFilenameParameter(value);
++        else if (extFilename.isNull() && !quoted && equalLettersIgnoringASCIICase(name, "filename*"_s))
++            extFilename = decodeExtValue(value);
++    }
++    return extFilename.isEmpty() ? filename : extFilename;
+ }
+ 
+ String extractMIMETypeFromMediaType(const String& mediaType)
+diff --git a/Source/WebCore/platform/network/HTTPParsers.h b/Source/WebCore/platform/network/HTTPParsers.h
+index a3eaca6caa..a723c2b1b0 100644
+--- a/Source/WebCore/platform/network/HTTPParsers.h
++++ b/Source/WebCore/platform/network/HTTPParsers.h
+@@ -90,7 +90,7 @@ WEBCORE_EXPORT bool isValidUserAgentHeaderValue(const String&);
+ bool NODELETE isValidHTTPToken(const String&);
+ bool isValidHTTPToken(StringView);
+ std::optional<WallTime> parseHTTPDate(const String&);
+-StringView filenameFromHTTPContentDisposition(StringView value LIFETIME_BOUND);
++String filenameFromHTTPContentDisposition(StringView);
+ WEBCORE_EXPORT String extractMIMETypeFromMediaType(const String&);
+ WEBCORE_EXPORT StringView extractCharsetFromMediaType(StringView mediaType LIFETIME_BOUND);
+ XSSProtectionDisposition parseXSSProtectionHeader(const String& header, String& failureReason, unsigned& failurePosition, String& reportURL);
+diff --git a/Source/WebCore/platform/network/curl/ResourceResponseCurl.cpp b/Source/WebCore/platform/network/curl/ResourceResponseCurl.cpp
+index b354f4b3a2..e76edb7c8a 100644
+--- a/Source/WebCore/platform/network/curl/ResourceResponseCurl.cpp
++++ b/Source/WebCore/platform/network/curl/ResourceResponseCurl.cpp
+@@ -133,11 +133,7 @@ void ResourceResponse::appendHTTPHeaderField(const String& header)
+ 
+ String ResourceResponse::platformSuggestedFilename() const
+ {
+-    auto value = httpHeaderField(HTTPHeaderName::ContentDisposition);
+-    StringView contentDisposition = filenameFromHTTPContentDisposition(value);
+-    if (contentDisposition.is8Bit())
+-        return String::fromUTF8WithLatin1Fallback(contentDisposition.span8());
+-    return contentDisposition.toString();
++    return filenameFromHTTPContentDisposition(httpHeaderField(HTTPHeaderName::ContentDisposition));
+ }
+ 
+ }

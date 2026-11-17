@@ -55,6 +55,7 @@
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/SubresourceLoader.h>
 #include <WebCore/UserAgent.h>
+#include <pal/text/DecodeEscapeSequences.h>
 #include <wtf/Deque.h>
 #include <wtf/Expected.h>
 #include <wtf/FileSystem.h>
@@ -839,15 +840,25 @@ private:
     }
 
     // download-start: name like in Chrome from download=, Content-Disposition
-    // or the address. A data: address has no name and is often huge.
+    // or the address (its last path segment, percent-encoded UTF-8 decoded), with
+    // path separators and control characters replaced. A data: address has no
+    // name and is often huge.
     void announce(const ResourceResponse& response)
     {
         bool isData = response.url().protocolIsData();
         String filename = m_filename;
         if (filename.isEmpty())
             filename = response.suggestedFilename();
-        if (filename.isEmpty() && !isData)
-            filename = response.url().lastPathComponent().toString();
+        if (filename.isEmpty() && !isData) {
+            auto segment = response.url().lastPathComponent();
+            filename = String::fromUTF8(PAL::decodeURLEscapeSequencesAsData(segment).span());
+            if (filename.isNull())
+                filename = segment.toString();
+        }
+        StringBuilder safeName;
+        for (auto character : StringView(filename).codeUnits())
+            safeName.append(character < 0x20 || character == 0x7F || character == '/' || character == '\\' ? u'_' : character);
+        filename = safeName.toString();
         if (filename.isEmpty())
             filename = "download"_s;
         notifyHost(m_viewId, "download-start", makeString("{\"id\":"_s, m_id, ",\"url\":\""_s, isData ? String { "data:"_s } : jsonEscape(response.url().string()),

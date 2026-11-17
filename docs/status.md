@@ -45,7 +45,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   in Chromium, Firefox and WebKit), and Download again and Retry request the address as a
   download, #511; a download streams into the host browser's downloads while it arrives instead of
   waiting in the tab's memory: a 588 MB file raised the renderers by 1105 to 1167 MB before, by
-  89 to 197 MB (bounded, garbage of the passed chunks) now, at the same speed, #577),
+  89 to 197 MB (bounded, garbage of the passed chunks) now, at the same speed, #577; named like in
+  Chrome: `filename*` before `filename`, a `;` inside a quoted name, the address percent-decoded,
+  before the `filename` fallback, a name cut at the `;` or percent escapes, #601),
   uploads,
   find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150), also while the
   page is busy (#505),
