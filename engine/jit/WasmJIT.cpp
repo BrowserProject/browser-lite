@@ -40,15 +40,18 @@
 #include "JSInternalFieldObjectImpl.h"
 #include "JSLexicalEnvironment.h"
 #include "JSObject.h"
+#include "JSObjectInlines.h"
 #include "JSString.h"
 #include "LLIntData.h"
 #include "LLIntSlowPaths.h"
 #include "MathObjectInlines.h"
+#include "MegamorphicCache.h"
 #include "NativeExecutable.h"
 #include "Options.h"
 #include "SlowPathCall.h"
 #include "StackAlignment.h"
 #include "StructureChain.h"
+#include "Symbol.h"
 #include "VMTraps.h"
 #include "Watchpoint.h"
 #include "WasmModule.h"
@@ -846,6 +849,201 @@ UGPRPair getByIdFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, 
     return result;
 }
 
+// Reads and writes with a string or symbol key (o[key], an obfuscated VM's handlers for every
+// property access of its program) go through JSC's megamorphic cache of the VM, like in JSC's own
+// JITs: entries by structure and key, for an own or prototype data property, its absence, a
+// replacement and a transition without a new butterfly. Its epoch moves at every GC and every
+// change of a prototype chain (VM::invalidateStructureChainIntegrity), which empties it. Compiled
+// code looks it up in WASM (emitKeyedLoadFunction, emitKeyedStoreFunction), these fill it.
+
+// Names JSC's megamorphic caches take (canUseMegamorphicGetById and canUseMegamorphicPutById of
+// InlineCacheCompiler.h, which needs ENABLE(JIT)): no index, and for reads none of the names that
+// functions, arrays and strings answer themselves
+bool keyedReadIsCacheable(VM& vm, UniquedStringImpl* uid)
+{
+    return !parseIndex(PropertyName(uid)) && uid != vm.propertyNames->length.impl() && uid != vm.propertyNames->name.impl()
+        && uid != vm.propertyNames->prototype.impl() && uid != vm.propertyNames->underscoreProto.impl();
+}
+
+bool keyedWriteIsCacheable(VM& vm, UniquedStringImpl* uid)
+{
+    return !parseIndex(PropertyName(uid)) && uid != vm.propertyNames->underscoreProto.impl();
+}
+
+template<typename Entry>
+Entry* megamorphicEntry(MegamorphicCache& cache, ptrdiff_t entriesOffset, uint32_t index)
+{
+    return reinterpret_cast<Entry*>(reinterpret_cast<uint8_t*>(&cache) + entriesOffset) + index;
+}
+
+uint16_t megamorphicEpoch(MegamorphicCache& cache)
+{
+    return *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(&cache) + MegamorphicCache::offsetOfEpoch());
+}
+
+// The current load entry of the structure and key, or null (the lookup of JSC's JITs, which
+// read the cache at its offsets too)
+MegamorphicCache::LoadEntry* findLoadEntry(MegamorphicCache& cache, StructureID structureID, UniquedStringImpl* uid)
+{
+    using Entry = MegamorphicCache::LoadEntry;
+    uint16_t epoch = megamorphicEpoch(cache);
+    auto* entry = megamorphicEntry<Entry>(cache, MegamorphicCache::offsetOfLoadCachePrimaryEntries(), MegamorphicCache::primaryHash(structureID, uid) & MegamorphicCache::loadCachePrimaryMask);
+    if (entry->m_structureID == structureID && entry->m_uid.get() == uid)
+        return entry->m_epoch == epoch ? entry : nullptr;
+    entry = megamorphicEntry<Entry>(cache, MegamorphicCache::offsetOfLoadCacheSecondaryEntries(), MegamorphicCache::secondaryHash(structureID, uid) & MegamorphicCache::loadCacheSecondaryMask);
+    if (entry->m_structureID == structureID && entry->m_uid.get() == uid && entry->m_epoch == epoch)
+        return entry;
+    return nullptr;
+}
+
+// JSC's megamorphic read (getByValMegamorphic of JITOperations.cpp, which needs ENABLE(JIT)): the
+// prototype chain walked like a get, and an own or prototype data property or its absence cached
+JSValue getMegamorphic(VM& vm, JSGlobalObject* globalObject, JSObject* baseObject, UniquedStringImpl* uid)
+{
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    PropertySlot slot(baseObject, PropertySlot::InternalMethodType::Get);
+    JSObject* object = baseObject;
+    bool cacheable = true;
+    while (true) {
+        if (TypeInfo::overridesGetOwnPropertySlot(object->inlineTypeFlags()) && object->type() != ArrayType && object->type() != JSFunctionType && object != globalObject->arrayPrototype()) [[unlikely]] {
+            bool found = object->getNonIndexPropertySlot(globalObject, uid, slot);
+            RETURN_IF_EXCEPTION(scope, { });
+            if (found)
+                RELEASE_AND_RETURN(scope, slot.getValue(globalObject, uid));
+            return jsUndefined();
+        }
+        Structure* structure = object->structure();
+        bool found = object->getOwnNonIndexPropertySlot(vm, structure, uid, slot);
+        // Static property tables may have transitioned it
+        structure = object->structure();
+        if (!structure->propertyAccessesAreCacheable())
+            cacheable = false;
+        if (found) {
+            if (cacheable && slot.isCacheableValue() && slot.cachedOffset() <= MegamorphicCache::maxOffset && (slot.slotBase() == baseObject || !baseObject->structure()->isDictionary()))
+                vm.ensureMegamorphicCache().initAsHit(baseObject->structureID(), uid, slot.slotBase(), slot.cachedOffset(), slot.slotBase() == baseObject);
+            RELEASE_AND_RETURN(scope, slot.getValue(globalObject, uid));
+        }
+        if (!structure->propertyAccessesAreCacheableForAbsence())
+            cacheable = false;
+        cacheable &= structure->hasMonoProto();
+        JSValue prototype = object->getPrototypeDirect();
+        if (!prototype.isObject()) {
+            if (cacheable && !baseObject->structure()->isDictionary())
+                vm.ensureMegamorphicCache().initAsMiss(baseObject->structureID(), uid);
+            return jsUndefined();
+        }
+        object = asObject(prototype);
+    }
+}
+
+// op_get_by_val after the fast paths missed: a string or symbol key of an object through the
+// megamorphic cache (a string not an atom yet becomes the atom of its text, so the next read with
+// it finds the entry in WASM), everything else the interpreter's slow path
+UGPRPair getByValFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
+{
+    auto bytecode = pc->as<OpGetByVal>();
+    JSValue base = callFrame->r(bytecode.m_base).jsValue();
+    JSValue subscript = callFrame->r(bytecode.m_property).jsValue();
+    if (!base.isObject() || !(subscript.isString() || subscript.isSymbol()))
+        return llint_slow_path_get_by_val(callFrame, pc);
+    CodeBlock* codeBlock = callFrame->codeBlock();
+    VM& vm = codeBlock->vm();
+    JSGlobalObject* globalObject = codeBlock->globalObject();
+    SlowPathFrameTracer tracer(vm, callFrame);
+    callFrame->setCurrentVPC(pc);
+    {
+        auto scope = DECLARE_THROW_SCOPE(vm);
+        // A rope keeps no reference to the atom of its text, and a getter may run
+        RefPtr<UniquedStringImpl> key;
+        if (subscript.isSymbol())
+            key = &asSymbol(subscript)->uid();
+        else {
+            key = asString(subscript)->toExistingAtomString(globalObject).data;
+            if (scope.exception()) [[unlikely]]
+                return encodeResult(exceptionInstructions(), callFrame);
+        }
+        UniquedStringImpl* uid = key.get();
+        if (uid && keyedReadIsCacheable(vm, uid)) {
+            JSObject* object = asObject(base);
+            JSValue result;
+            if (auto* entry = findLoadEntry(vm.ensureMegamorphicCache(), object->structureID(), uid)) {
+                JSCell* holder = entry->m_holder;
+                result = !holder ? jsUndefined() : asObject(holder == JSCell::seenMultipleCalleeObjects() ? object : holder)->getDirect(entry->m_offset);
+            } else {
+                result = getMegamorphic(vm, globalObject, object, uid);
+                if (scope.exception()) [[unlikely]]
+                    return encodeResult(exceptionInstructions(), callFrame);
+            }
+            callFrame->uncheckedR(bytecode.m_dst) = result;
+            return encodeResult(pc, callFrame);
+        }
+    }
+    return llint_slow_path_get_by_val(callFrame, pc);
+}
+
+// op_put_by_val after the fast paths missed: a string or symbol key of an object like JSC's
+// megamorphic write (putByValMegamorphic of JITOperations.cpp), which caches a replacement or a
+// transition; everything else the interpreter's slow path
+UGPRPair putByValFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
+{
+    auto bytecode = pc->as<OpPutByVal>();
+    JSValue base = callFrame->r(bytecode.m_base).jsValue();
+    JSValue subscript = callFrame->r(bytecode.m_property).jsValue();
+    if (!base.isObject() || !(subscript.isString() || subscript.isSymbol()))
+        return llint_slow_path_put_by_val(callFrame, pc);
+    CodeBlock* codeBlock = callFrame->codeBlock();
+    VM& vm = codeBlock->vm();
+    JSGlobalObject* globalObject = codeBlock->globalObject();
+    SlowPathFrameTracer tracer(vm, callFrame);
+    callFrame->setCurrentVPC(pc);
+    {
+        auto scope = DECLARE_THROW_SCOPE(vm);
+        Identifier name = subscript.toPropertyKey(globalObject);
+        if (scope.exception()) [[unlikely]]
+            return encodeResult(exceptionInstructions(), callFrame);
+        UniquedStringImpl* uid = name.impl();
+        JSObject* baseObject = asObject(base);
+        Structure* structure = baseObject->structure();
+        if (keyedWriteIsCacheable(vm, uid) && !structure->typeInfo().overridesPut()) {
+            JSValue value = callFrame->r(bytecode.m_value).jsValue();
+            PutPropertySlot slot(base, bytecode.m_ecmaMode.isStrict());
+            auto done = [&] {
+                return encodeResult(scope.exception() ? exceptionInstructions() : pc, callFrame);
+            };
+            for (JSObject* object = baseObject;;) {
+                if (structure->hasReadOnlyOrGetterSetterPropertiesExcludingProto() || structure->typeInfo().overridesGetPrototype() || structure->typeInfo().overridesPut() || structure->hasPolyProto()) [[unlikely]] {
+                    baseObject->putInlineSlow(globalObject, uid, value, slot);
+                    return done();
+                }
+                JSValue prototype = object->getPrototypeDirect();
+                if (prototype.isNull())
+                    break;
+                object = asObject(prototype);
+                structure = object->structure();
+            }
+            Structure* oldStructure = baseObject->structure();
+            baseObject->putInlineFast(globalObject, uid, value, slot);
+            if (scope.exception() || !slot.isCacheablePut() || !oldStructure->propertyAccessesAreCacheable() || slot.cachedOffset() > MegamorphicCache::maxOffset)
+                return done();
+            Structure* newStructure = baseObject->structure();
+            if (slot.type() == PutPropertySlot::ExistingProperty) {
+                if (oldStructure == newStructure) {
+                    oldStructure->didCachePropertyReplacement(vm, slot.cachedOffset());
+                    vm.ensureMegamorphicCache().initAsReplace(StructureID::encode(oldStructure), uid, slot.cachedOffset());
+                }
+                return done();
+            }
+            // A new property: a dictionary's transition happens once per object
+            if (oldStructure->isDictionary() || newStructure->isDictionary() || oldStructure->mayBePrototype() || newStructure->previousID() != oldStructure || !newStructure->propertyAccessesAreCacheable())
+                return done();
+            bool reallocating = newStructure->outOfLineCapacity() != oldStructure->outOfLineCapacity();
+            vm.ensureMegamorphicCache().initAsTransition(StructureID::encode(oldStructure), StructureID::encode(newStructure), uid, slot.cachedOffset(), reallocating);
+            return done();
+        }
+    }
+    return llint_slow_path_put_by_val(callFrame, pc);
+}
+
 bool equalsNull(CodeBlock* codeBlock, JSValue value)
 {
     return value.isUndefinedOrNull() || (value.isCell() && value.asCell()->structure()->masqueradesAsUndefined(codeBlock->globalObject()));
@@ -1021,10 +1219,22 @@ private:
     void emitInlineHostCall(VirtualRegister callee, unsigned argv, VirtualRegister dst);
     void emitCompiledCall(const JSInstructionStream::Ref&, VirtualRegister callee, unsigned argc, unsigned argv, VirtualRegister dst, bool isConstruct);
     void emitCompiledCallFunction();
-    // The function of the module that emitCompiledCall calls, emitted when a site needs it
-    static constexpr uint32_t compiledCallFunction = 1;
     static constexpr int32_t compiledCallNotDone = 2;
-    bool m_usesCompiledCall { false };
+    // Lookups of the VM's megamorphic cache for string keys (keyed reads and writes)
+    void emitKeyedLoadFunction();
+    void emitKeyedStoreFunction();
+    // Functions of the module beside the compiled one: index of each, numbered in the order the
+    // sites first need them (the module emits them in that order)
+    enum class Helper : uint8_t { CompiledCall, KeyedLoad, KeyedStore };
+    uint32_t helper(Helper);
+    void emitHelpers();
+    Vector<Helper> m_helpers;
+    // Pushes the address of the cache entry for the base's structure ID in `structureLocal` and
+    // the key in `uidLocal`, or returns 0 from the helper function when neither table has a current
+    // one (JSC's lookup: the primary table, then the secondary one)
+    void findMegamorphicEntry(uint32_t structureLocal, uint32_t uidLocal, uint32_t hashShift, uint32_t primaryMask, ptrdiff_t primaryOffset, uint32_t secondaryShift, uint32_t secondaryMask, ptrdiff_t secondaryOffset, size_t entrySize, ptrdiff_t structureOffset, ptrdiff_t uidOffset, ptrdiff_t epochOffset);
+    // The uid of a string key that is no rope into the local, else returns 0 from the helper
+    void stringKeyUid(uint32_t keyLocal, uint32_t uidLocal);
     // After a helper's call: its result into m_next, an exception to the handler or out
     void checkException(const JSInstructionStream::Ref&);
     // There is an exception: to the instruction's handler or out
@@ -1071,8 +1281,9 @@ private:
     template<typename Bytecode> void emitSwitch(const JSInstructionStream::Ref&, unsigned block);
     template<typename Bytecode> void emitGenericJump(const JSInstructionStream::Ref&, unsigned block, SlowPath);
     // Address of a property at the offset in the local, of the object in the local: inline storage
-    // or the butterfly's (uses m_c)
-    void propertyAddress(uint32_t objectLocal, uint32_t offsetLocal);
+    // or the butterfly's (through the address local, m_c by default)
+    void propertyAddress(uint32_t objectLocal, uint32_t offsetLocal) { propertyAddress(objectLocal, offsetLocal, m_c); }
+    void propertyAddress(uint32_t objectLocal, uint32_t offsetLocal, uint32_t addressLocal);
     // Loads the property into m_a (tag) and m_b (payload)
     void loadProperty(uint32_t objectLocal, uint32_t offsetLocal);
 
@@ -1301,7 +1512,7 @@ void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
 // other callees, too few arguments, deep nesting, a full stack) is left to callFromCompiledCode.
 void Compiler::emitCompiledCall(const JSInstructionStream::Ref& instruction, VirtualRegister callee, unsigned argc, unsigned argv, VirtualRegister dst, bool isConstruct)
 {
-    m_usesCompiledCall = true;
+    uint32_t compiledCallFunction = helper(Helper::CompiledCall);
     beginFastPaths();
     m_body->localGet(cfr);
     loadTag(callee);
@@ -1572,6 +1783,237 @@ void Compiler::emitCompiledCallFunction()
     m_body = main;
 }
 
+uint32_t Compiler::helper(Helper kind)
+{
+    auto index = m_helpers.find(kind);
+    if (index == notFound) {
+        m_helpers.append(kind);
+        index = m_helpers.size() - 1;
+    }
+    return index + 1;
+}
+
+void Compiler::emitHelpers()
+{
+    for (auto kind : m_helpers) {
+        switch (kind) {
+        case Helper::CompiledCall: emitCompiledCallFunction(); break;
+        case Helper::KeyedLoad: emitKeyedLoadFunction(); break;
+        case Helper::KeyedStore: emitKeyedStoreFunction(); break;
+        }
+    }
+}
+
+void Compiler::stringKeyUid(uint32_t keyLocal, uint32_t uidLocal)
+{
+    cellType(keyLocal);
+    m_body->i32Const(StringType);
+    m_body->op(Op::I32Ne);
+    m_body->ifThen();
+    m_body->i32Const(0);
+    m_body->returnValue();
+    m_body->end();
+    m_body->localGet(keyLocal);
+    m_body->i32Load(JSString::offsetOfValue());
+    m_body->localTee(uidLocal);
+    m_body->i32Const(JSString::isRopeInPointer);
+    m_body->op(Op::I32And);
+    m_body->ifThen();
+    m_body->i32Const(0);
+    m_body->returnValue();
+    m_body->end();
+}
+
+void Compiler::findMegamorphicEntry(uint32_t structureLocal, uint32_t uidLocal, uint32_t hashShift, uint32_t primaryMask, ptrdiff_t primaryOffset, uint32_t secondaryShift, uint32_t secondaryMask, ptrdiff_t secondaryOffset, size_t entrySize, ptrdiff_t structureOffset, ptrdiff_t uidOffset, ptrdiff_t epochOffset)
+{
+    auto* cache = reinterpret_cast<uint8_t*>(&m_codeBlock->vm().ensureMegamorphicCache());
+    uint32_t epoch = m_body->addLocal(ValueType::I32);
+    uint32_t entry = m_body->addLocal(ValueType::I32);
+    uint32_t key = m_body->addLocal(ValueType::I32);
+    auto matches = [&] {
+        m_body->localGet(entry);
+        m_body->i32Load(structureOffset);
+        m_body->localGet(structureLocal);
+        m_body->op(Op::I32Eq);
+        m_body->localGet(entry);
+        m_body->i32Load(uidOffset);
+        m_body->localGet(uidLocal);
+        m_body->op(Op::I32Eq);
+        m_body->op(Op::I32And);
+    };
+    auto epochDiffers = [&] {
+        m_body->localGet(entry);
+        m_body->i32Load16U(epochOffset);
+        m_body->localGet(epoch);
+        m_body->op(Op::I32Ne);
+    };
+    auto entryAt = [&](uint32_t mask, ptrdiff_t offset) {
+        m_body->i32Const(mask);
+        m_body->op(Op::I32And);
+        m_body->i32Const(entrySize);
+        m_body->op(Op::I32Mul);
+        m_body->i32Const(reinterpret_cast<uintptr_t>(cache + offset));
+        m_body->op(Op::I32Add);
+        m_body->localSet(entry);
+    };
+    m_body->i32Const(reinterpret_cast<uintptr_t>(cache + MegamorphicCache::offsetOfEpoch()));
+    m_body->i32Load16U(0);
+    m_body->localSet(epoch);
+    // ((structure >> shift1) ^ (structure >> shift)) + the key's hash
+    m_body->localGet(structureLocal);
+    m_body->i32Const(MegamorphicCache::structureIDHashShift1);
+    m_body->op(Op::I32ShrU);
+    m_body->localGet(structureLocal);
+    m_body->i32Const(hashShift);
+    m_body->op(Op::I32ShrU);
+    m_body->op(Op::I32Xor);
+    m_body->localGet(uidLocal);
+    m_body->i32Load(StringImpl::flagsOffset());
+    m_body->i32Const(StringImpl::s_flagCount);
+    m_body->op(Op::I32ShrU);
+    m_body->op(Op::I32Add);
+    entryAt(primaryMask, primaryOffset);
+    m_body->block();
+    m_body->block();
+    matches();
+    m_body->op(Op::I32Eqz);
+    m_body->brIf(0);
+    // An entry of the structure and key from an older epoch: the secondary table has none newer
+    epochDiffers();
+    m_body->ifThen();
+    m_body->i32Const(0);
+    m_body->returnValue();
+    m_body->end();
+    m_body->br(1);
+    m_body->end();
+    // key = structure + uid, key + (key >> shift)
+    m_body->localGet(structureLocal);
+    m_body->localGet(uidLocal);
+    m_body->op(Op::I32Add);
+    m_body->localTee(key);
+    m_body->localGet(key);
+    m_body->i32Const(secondaryShift);
+    m_body->op(Op::I32ShrU);
+    m_body->op(Op::I32Add);
+    entryAt(secondaryMask, secondaryOffset);
+    matches();
+    m_body->op(Op::I32Eqz);
+    epochDiffers();
+    m_body->op(Op::I32Or);
+    m_body->ifThen();
+    m_body->i32Const(0);
+    m_body->returnValue();
+    m_body->end();
+    m_body->end();
+    m_body->localGet(entry);
+}
+
+// (base, key) -> the address of the value for a string key that is no rope, from the VM's
+// megamorphic cache (an own or prototype property, or a constant undefined for an absent one), or
+// 0. The base is a cell: only objects have entries.
+void Compiler::emitKeyedLoadFunction()
+{
+    using Entry = MegamorphicCache::LoadEntry;
+    static const EncodedJSValue undefinedValue = JSValue::encode(jsUndefined());
+    auto* main = m_body;
+    m_body = &m_module.addFunction(m_checkType, 2);
+    constexpr uint32_t base = 0, key = 1;
+    uint32_t uid = m_body->addLocal(ValueType::I32);
+    uint32_t structure = m_body->addLocal(ValueType::I32);
+    uint32_t entry = m_body->addLocal(ValueType::I32);
+    uint32_t holder = m_body->addLocal(ValueType::I32);
+    uint32_t offset = m_body->addLocal(ValueType::I32);
+    uint32_t address = m_body->addLocal(ValueType::I32);
+    stringKeyUid(key, uid);
+    m_body->localGet(base);
+    m_body->i32Load(JSCell::structureIDOffset());
+    m_body->localSet(structure);
+    findMegamorphicEntry(structure, uid, MegamorphicCache::structureIDHashShift2,
+        MegamorphicCache::loadCachePrimaryMask, MegamorphicCache::offsetOfLoadCachePrimaryEntries(),
+        MegamorphicCache::structureIDHashShift3, MegamorphicCache::loadCacheSecondaryMask, MegamorphicCache::offsetOfLoadCacheSecondaryEntries(),
+        sizeof(Entry), Entry::offsetOfStructureID(), Entry::offsetOfUid(), Entry::offsetOfEpoch());
+    m_body->localTee(entry);
+    m_body->i32Load(Entry::offsetOfHolder());
+    m_body->localTee(holder);
+    m_body->op(Op::I32Eqz);
+    m_body->ifThen();
+    m_body->i32Const(reinterpret_cast<uintptr_t>(&undefinedValue));
+    m_body->returnValue();
+    m_body->end();
+    // An own property: the base itself
+    m_body->localGet(holder);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(JSCell::seenMultipleCalleeObjects()));
+    m_body->op(Op::I32Eq);
+    m_body->ifThen();
+    m_body->localGet(base);
+    m_body->localSet(holder);
+    m_body->end();
+    m_body->localGet(entry);
+    m_body->i32Load16U(Entry::offsetOfOffset());
+    m_body->localSet(offset);
+    propertyAddress(holder, offset, address);
+    m_body = main;
+}
+
+// (base, key, tag, payload) -> 1 when it stored the value for a string key that is no rope as an
+// entry of the VM's megamorphic cache says (a replacement or a transition without a new butterfly),
+// 2 after such a transition (the base needs the write barrier), 0 when not
+void Compiler::emitKeyedStoreFunction()
+{
+    using Entry = MegamorphicCache::StoreEntry;
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32 };
+    const ValueType status[] = { ValueType::I32 };
+    auto* main = m_body;
+    m_body = &m_module.addFunction(m_module.addType(parameters, status), std::size(parameters));
+    constexpr uint32_t base = 0, key = 1, tag = 2, payload = 3;
+    uint32_t uid = m_body->addLocal(ValueType::I32);
+    uint32_t structure = m_body->addLocal(ValueType::I32);
+    uint32_t entry = m_body->addLocal(ValueType::I32);
+    uint32_t newStructure = m_body->addLocal(ValueType::I32);
+    uint32_t offset = m_body->addLocal(ValueType::I32);
+    uint32_t address = m_body->addLocal(ValueType::I32);
+    stringKeyUid(key, uid);
+    m_body->localGet(base);
+    m_body->i32Load(JSCell::structureIDOffset());
+    m_body->localSet(structure);
+    findMegamorphicEntry(structure, uid, MegamorphicCache::structureIDHashShift4,
+        MegamorphicCache::storeCachePrimaryMask, MegamorphicCache::offsetOfStoreCachePrimaryEntries(),
+        MegamorphicCache::structureIDHashShift5, MegamorphicCache::storeCacheSecondaryMask, MegamorphicCache::offsetOfStoreCacheSecondaryEntries(),
+        sizeof(Entry), Entry::offsetOfOldStructureID(), Entry::offsetOfUid(), Entry::offsetOfEpoch());
+    m_body->localTee(entry);
+    m_body->i32Load8U(Entry::offsetOfReallocating());
+    m_body->ifThen();
+    m_body->i32Const(0);
+    m_body->returnValue();
+    m_body->end();
+    m_body->localGet(entry);
+    m_body->i32Load16U(Entry::offsetOfOffset());
+    m_body->localSet(offset);
+    m_body->localGet(entry);
+    m_body->i32Load(Entry::offsetOfNewStructureID());
+    m_body->localTee(newStructure);
+    m_body->localGet(structure);
+    m_body->op(Op::I32Ne);
+    m_body->ifThen();
+    m_body->localGet(base);
+    m_body->localGet(newStructure);
+    m_body->i32Store(JSCell::structureIDOffset());
+    m_body->end();
+    propertyAddress(base, offset, address);
+    m_body->localTee(address);
+    m_body->localGet(tag);
+    m_body->i32Store(TagOffset);
+    m_body->localGet(address);
+    m_body->localGet(payload);
+    m_body->i32Store(PayloadOffset);
+    m_body->i32Const(1);
+    m_body->localGet(newStructure);
+    m_body->localGet(structure);
+    m_body->op(Op::I32Ne);
+    m_body->op(Op::I32Add);
+    m_body = main;
+}
+
 // Math.imul(a, b) of two numbers inline: sets m_next when it did the call
 void Compiler::emitInlineHostCall(VirtualRegister callee, unsigned argv, VirtualRegister dst)
 {
@@ -1713,7 +2155,7 @@ void Compiler::jumpIfSlowPathReturned(unsigned targetOffset, unsigned fromBlock)
     m_body->end();
 }
 
-void Compiler::propertyAddress(uint32_t objectLocal, uint32_t offsetLocal)
+void Compiler::propertyAddress(uint32_t objectLocal, uint32_t offsetLocal, uint32_t addressLocal)
 {
     m_body->localGet(offsetLocal);
     m_body->i32Const(firstOutOfLineOffset);
@@ -1727,7 +2169,7 @@ void Compiler::propertyAddress(uint32_t objectLocal, uint32_t offsetLocal)
         m_body->i32Const(3);
         m_body->op(Op::I32Shl);
         m_body->op(Op::I32Add);
-        m_body->localSet(m_c);
+        m_body->localSet(addressLocal);
     }
     m_body->elseThen();
     {
@@ -1740,10 +2182,10 @@ void Compiler::propertyAddress(uint32_t objectLocal, uint32_t offsetLocal)
         m_body->i32Const(3);
         m_body->op(Op::I32Shl);
         m_body->op(Op::I32Sub);
-        m_body->localSet(m_c);
+        m_body->localSet(addressLocal);
     }
     m_body->end();
-    m_body->localGet(m_c);
+    m_body->localGet(addressLocal);
 }
 
 void Compiler::loadProperty(uint32_t objectLocal, uint32_t offsetLocal)
@@ -2139,7 +2581,32 @@ void Compiler::emitGetByVal(const JSInstructionStream::Ref& instruction)
         });
     }
     m_body->end();
-    endFastPaths(llint_slow_path_get_by_val, instruction);
+
+    // A string key: the VM's megamorphic cache (emitKeyedLoadFunction)
+    loadTag(bytecode.m_base);
+    m_body->i32Const(cellTag);
+    m_body->op(Op::I32Eq);
+    loadTag(bytecode.m_property);
+    m_body->i32Const(cellTag);
+    m_body->op(Op::I32Eq);
+    m_body->op(Op::I32And);
+    m_body->ifThen();
+    loadPayload(bytecode.m_base);
+    loadPayload(bytecode.m_property);
+    m_body->call(helper(Helper::KeyedLoad));
+    m_body->localTee(m_c);
+    m_body->ifThen();
+    m_body->localGet(m_c);
+    m_body->i32Load(TagOffset);
+    m_body->localSet(m_a);
+    m_body->localGet(m_c);
+    m_body->i32Load(PayloadOffset);
+    m_body->localSet(m_b);
+    storeTagAndPayload(bytecode.m_dst, m_a, m_b);
+    fastPathDone();
+    m_body->end();
+    m_body->end();
+    endFastPaths(getByValFromCompiledCode, instruction);
 }
 
 // For an element of a typed array (not Float16, BigInt or resizable) at an index within its
@@ -2358,7 +2825,35 @@ void Compiler::emitPutByVal(const JSInstructionStream::Ref& instruction)
         m_body->end();
     }
     m_body->end();
-    endFastPaths(llint_slow_path_put_by_val, instruction);
+
+    // A string key: the VM's megamorphic cache (emitKeyedStoreFunction), the write barrier again
+    // after a transition
+    loadTag(bytecode.m_base);
+    m_body->i32Const(cellTag);
+    m_body->op(Op::I32Eq);
+    loadTag(bytecode.m_property);
+    m_body->i32Const(cellTag);
+    m_body->op(Op::I32Eq);
+    m_body->op(Op::I32And);
+    m_body->ifThen();
+    loadPayload(bytecode.m_base);
+    m_body->localTee(m_d);
+    loadPayload(bytecode.m_property);
+    loadTag(bytecode.m_value);
+    loadPayload(bytecode.m_value);
+    m_body->call(helper(Helper::KeyedStore));
+    m_body->localTee(m_e);
+    m_body->ifThen();
+    m_body->localGet(m_e);
+    m_body->i32Const(2);
+    m_body->op(Op::I32Eq);
+    m_body->ifThen();
+    writeBarrier(m_d);
+    m_body->end();
+    fastPathDone();
+    m_body->end();
+    m_body->end();
+    endFastPaths(putByValFromCompiledCode, instruction);
 }
 
 // add, sub, mul: two int32 in 64 bit, the result back if it fits (and is no -0 for mul); other
@@ -4070,8 +4565,7 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     m_body->unreachable();
     m_body->end();
     m_body->i32Const(1);
-    if (m_usesCompiledCall)
-        emitCompiledCallFunction();
+    emitHelpers();
     return m_module.bytes();
 }
 

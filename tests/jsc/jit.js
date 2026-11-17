@@ -265,6 +265,110 @@ for (let round = 0; round < 30; round++) {
 }
 check("GC in callee", keepAcrossGC(3000), 2999 * 3000 / 2);
 check("collections", collections, 6);
+// Reads and writes with string and symbol keys through the VM's megamorphic cache: many shapes
+// and keys at one site (an obfuscated VM's handlers), prototypes, absent keys, getters and setters,
+// read-only properties, and what changes them after the cache has entries
+function readKey(o, k) { return o[k]; }
+function writeKey(o, k, v) { o[k] = v; return o; }
+function writeKeyStrict(o, k, v) { "use strict"; o[k] = v; return o; }
+const keyNames = ["alpha", "beta", "gamma", "delta"];
+function keyedShapes() {
+    const list = [];
+    for (let s = 0; s < 6; s++) {
+        const o = {};
+        for (let k = 0; k < s; k++)
+            o["pad" + k] = k;
+        for (let k = 0; k < keyNames.length; k++)
+            o[keyNames[k]] = s * 10 + k;
+        list.push(o);
+    }
+    return list;
+}
+function keyedSum(list, n) { let s = 0; for (let i = 0; i < n; i++) s += readKey(list[i % list.length], keyNames[i & 3]); return s; }
+function keyedFill(list, n) { for (let i = 0; i < n; i++) writeKey(list[i % list.length], keyNames[i & 3], i); }
+const keyedSymbol = Symbol("keyed");
+const keyedRoot = { inherited: "root", method() { return "m"; } };
+for (let round = 0; round < 200; round++) {
+    const list = keyedShapes();
+    let expected = 0;
+    for (let i = 0; i < 600; i++)
+        expected += (i % 6) * 10 + (i & 3);
+    check("keyed own " + round, keyedSum(list, 600), expected);
+    keyedFill(list, 600);
+    check("keyed replace " + round, readKey(list[5], "delta"), 599);
+    const fresh = writeKey(writeKey({}, "first", 1), "second", 2);
+    check("keyed transition " + round, fresh.first + fresh.second, 3);
+    check("keyed transition shape " + round, Object.keys(fresh).join(), "first,second");
+    const child = Object.create(keyedRoot);
+    check("keyed prototype " + round, readKey(child, "inherited"), "root");
+    check("keyed prototype method " + round, readKey(child, "method").call(child), "m");
+    check("keyed absent " + round, readKey(child, "nothing"), undefined);
+    check("keyed rope " + round, readKey(child, "inher" + keyNames[round & 3].slice(0, 0) + "ited"), "root");
+    check("keyed symbol " + round, readKey(writeKey({}, keyedSymbol, round), keyedSymbol), round);
+    check("keyed index string " + round, readKey([5, 6, 7], "1"), 6);
+    check("keyed array length " + round, readKey([5, 6, 7], "length"), 3);
+    check("keyed string length " + round, readKey("abcd", "length"), 4);
+    check("keyed string method " + round, readKey("abcd", "charAt").call("abcd", 1), "b");
+    check("keyed __proto__ " + round, readKey(child, "__proto__"), keyedRoot);
+    check("keyed function name " + round, readKey(readKey, "name"), "readKey");
+    check("keyed proxy " + round, readKey(new Proxy({}, { get: (t, k) => "trap " + String(k) }), "anything"), "trap anything");
+    let getterCalls = 0;
+    const withGetter = Object.create({ get computed() { return ++getterCalls; } });
+    readKey(withGetter, "computed");
+    check("keyed getter " + round, readKey(withGetter, "computed"), 2);
+    // Writes through a prototype's setter and onto a read-only one stay off the object
+    let setterValue = null;
+    const withSetter = Object.create({ set target(v) { setterValue = v; } });
+    writeKey(withSetter, "target", round);
+    check("keyed setter " + round, setterValue === round && !Object.hasOwn(withSetter, "target"), true);
+    const readOnly = Object.create(Object.defineProperty({}, "fixed", { value: 1, writable: false }));
+    writeKey(readOnly, "fixed", 2);
+    check("keyed read-only " + round, readKey(readOnly, "fixed") === 1 && !Object.hasOwn(readOnly, "fixed"), true);
+    let strictError = null;
+    try {
+        writeKeyStrict(Object.freeze({ fixed: 1 }), "fixed", 2);
+    } catch (e) {
+        strictError = e;
+    }
+    check("keyed frozen strict " + round, strictError instanceof TypeError, true);
+    check("keyed frozen sloppy " + round, readKey(writeKey(Object.freeze({ fixed: 1 }), "fixed", 2), "fixed"), 1);
+    // Changes after the cache has entries: a deleted property, a property added to the
+    // prototype, a setter added to the prototype after transitions were cached, a shadowing one
+    const changing = { a: 1, b: 2 };
+    readKey(changing, "a");
+    delete changing.a;
+    check("keyed deleted " + round, readKey(changing, "a"), undefined);
+    // A dictionary (after a delete): a new property may take the slot of a deleted one
+    const dictionary = { a: 1, b: 2, c: 3, d: 4 };
+    delete dictionary.d;
+    readKey(dictionary, "a");
+    readKey(dictionary, "b");
+    delete dictionary.a;
+    writeKey(dictionary, "e", "new");
+    check("keyed dictionary deleted " + round, readKey(dictionary, "a"), undefined);
+    check("keyed dictionary new " + round, readKey(dictionary, "e") + readKey(dictionary, "b"), "new2");
+    const base = {};
+    const derived = Object.create(base);
+    readKey(derived, "late");
+    base.late = round;
+    check("keyed added to prototype " + round, readKey(derived, "late"), round);
+    const middle = Object.create(keyedRoot);
+    const leaf = Object.create(middle);
+    readKey(leaf, "inherited");
+    middle.inherited = "middle";
+    check("keyed shadowed " + round, readKey(leaf, "inherited"), "middle");
+    const setterLater = {};
+    const viaSetter = Object.create(setterLater);
+    writeKey(Object.create(setterLater), "later", 1);
+    let laterValue = null;
+    Object.defineProperty(setterLater, "later", { set(v) { laterValue = v; }, configurable: true });
+    writeKey(viaSetter, "later", round);
+    check("keyed setter added later " + round, laterValue === round && !Object.hasOwn(viaSetter, "later"), true);
+    if (round % 50 === 49) {
+        gc();
+        check("keyed after GC " + round, keyedSum(keyedShapes(), 6), 0 + 11 + 22 + 33 + 40 + 51);
+    }
+}
 // A function too large to compile (over 100 KB of bytecode) with a hot loop stays interpreted
 const large = new Function("n", "let x = 0; for (let i = 0; i < n; i++) { " + "x = (x + i) | 0; ".repeat(12000) + "} return x;");
 check("too large to compile", large(1500), (1499 * 1500 / 2) * 12000 | 0);

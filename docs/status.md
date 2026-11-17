@@ -925,6 +925,14 @@ browser (Safari keeps Cmd+L, T and W for itself).
    engine thread and up to half of the longest step ([jit.md](jit.md#measured)), open. The debug
    log no longer walks the JS heap around every work item, which made every step about 5 %
    longer with `log=1` (#551).
+   www.tiktok.com (2026-11-17, local, Chromium host, load 6 to 9, 45 s with 5 wheel turns): steps
+   of 5 to 8 s, most of them TikTok's bot defence (`webmssdk.js`, an obfuscated VM run from a
+   timer) whose handlers read and write every property as `o[key]`. Those reads and writes took
+   the interpreter's slow path from compiled code, 14 % of the engine thread; now they go through
+   JSC's megamorphic cache in WASM (#604, [jit.md](jit.md#measured)): 4.4 %, the longest step 5.5
+   to 6.7 s instead of 7.5 to 8.2 s. Still open: the longest task of Chromium on the same page is
+   0.35 to 0.6 s, the rest is compiled and interpreted JS (see above); `typedArray.length` in the
+   VM's dispatch loop still calls its getter through the generic path (about 5 % of such a step).
    www.nytimes.com while it loads (2026-11-15, local, Chromium host, load 3 to 9, 45 s): steps of
    1.5 to 5 s every few seconds. A quarter to a third of the engine thread was style: WebKit
    restyled the whole document from scratch (3000 elements, 0.45 to 0.65 s each with its custom

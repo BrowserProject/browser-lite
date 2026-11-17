@@ -46,6 +46,8 @@ run jit "$here/jit.js"
 [ "$jit" = 0 ] || run jit-tierup "$here/jit-tierup.js"
 # Calls: many callees at one site, compiled callees in WASM
 [ "$jit" = 0 ] || run jit-calls "$here/jit-calls.js"
+# Keyed reads and writes: many keys and shapes at one site through the megamorphic cache
+[ "$jit" = 0 ] || run jit-keyed "$here/jit-keyed.js"
 done
 
 # Compiled code stays through a full GC of old code, code thrown away compiles again

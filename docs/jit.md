@@ -53,6 +53,15 @@ never baked into the code (the GC resets inline caches).
   reads of own properties also from the last 4 structures of the site, until the next GC, looked
   up in C++ after the inline cache missed),
   array elements (int32, double, contiguous, array storage), scopes (closure, global), `switch`.
+  Reads and writes with a string key (`o[key]`, which an obfuscated VM's handlers do for every
+  property access of its program, so one site sees every key and shape) go through JSC's own
+  megamorphic cache of the VM, which this build had but did not use: entries by structure and key
+  for an own or prototype data property, its absence, a replacement and a transition without a new
+  butterfly, emptied by every GC and every change of a prototype chain (its epoch). A helper
+  function of the module looks the key up there in WASM (a string that is no rope: its atom), and
+  the slow path fills it like JSC's JITs (`getByValMegamorphic`, `putByValMegamorphic`), atomizing
+  the key first so the next access finds it; `length`, `name`, `prototype`, `__proto__`, index
+  keys, getters and objects with their own lookup stay with the interpreter's slow path (#604).
   Beyond the interpreter, for hashing code (bot checks, fingerprinting, #424): bit operations
   and `~` also on doubles (ToInt32 inline, `i64.trunc_sat` below 2^63, so uint32 values above
   2^31 stay inline), `op_unsigned` (`x >>> 0`) and `>>>` with any result, elements of typed
@@ -158,6 +167,16 @@ RayTrace 1385 against 1421), and 20min.ch compiles 295 functions into 1.5 MB in 
 instead of 789 into 12.1 MB. Its tap on an article (`tests/engine/jit-warmup-test.mjs` checks
 the warm-up itself): the click handlers 214 to 309 ms instead of 284 to 357, the data fetch of
 the route starts 0.91 to 1.03 s after the click instead of 1.11 to 1.21 s (4 runs each).
+
+Keyed reads and writes (#604, 2026-11-17, in the engine, `tests/jsc/jit-keyed.js`: 8 shapes and 16
+keys at one site): 23 to 26 ms against 58 to 63 ms before, 1.1 to 1.2 times an array element's
+read and write instead of 2.3 to 2.9 times. tiktok.com (local, Chromium host, load 6 to 9, 45 s,
+3 runs each): its bot defence (`webmssdk.js`, an obfuscated VM) and app bundles spent 14 % of the
+engine thread in the slow paths of `get_by_val` and `put_by_val` from compiled code, 4.4 % now
+(what is left: getters such as a typed array's `length`, ropes without an atom, DOM objects); the
+longest step took 5.5 to 6.7 s instead of 7.5 to 8.2 s. Chromium's longest task on the same page
+is 0.35 to 0.6 s: the rest is compiled code (31 % of the engine thread), the interpreter (15 %) and
+the calls between them.
 
 Calls (#459, jsc shell, 2 million calls each, fastest of 3): one callee 84 against 62 ms, 16
 callees at one site 232 against 116 ms, 2 alternating 219 against 100 ms, a VM of 8 handlers 235
