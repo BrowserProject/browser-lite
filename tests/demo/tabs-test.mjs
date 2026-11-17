@@ -261,7 +261,7 @@ check('favicon in the tab', icon > 0, `(width ${icon})`);
 // The demo remembers the icon of the host for history and bookmarks, read back on the CPU
 const remembered = await page
   .waitForFunction(
-    (host) => JSON.parse(localStorage.getItem('bl-favicons') ?? '{}')[host]?.icon,
+    (host) => JSON.parse(localStorage.getItem('bl-favicons') ?? '{}').hosts?.[host]?.icon,
     new URL(siteURL).host,
     { timeout: 10000 },
   )

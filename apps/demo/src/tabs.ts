@@ -104,6 +104,8 @@ export class Tab implements SessionTab {
   iconUrl: string | null = null;
   /** Host of the page the icon belongs to. */
   private iconHost = '';
+  /** The icon the engine reported for the current document (null: none), undefined before. */
+  private pageIcon: Blob | null | undefined = undefined;
   /**
    * Shows the new tab page of the demo: the tab's document is NEW_TAB_URL, a back entry like any
    * page. Like Chrome's new tab page it stays while an address loads, and when the load ends
@@ -181,6 +183,9 @@ export class Tab implements SessionTab {
       if (moved) {
         const entry = event.history?.entries?.[event.history.index];
         recordVisit(event.url, entry && entry.url === event.url ? entry.title : '');
+        // The engine reports the icon once per document: a new address of the same document
+        // (history.pushState) has the icon of the document
+        if (this.pageIcon !== undefined) rememberIcon(event.url, this.pageIcon);
       }
       // The engine reports the icon of every page once it has loaded: until then the last one
       // stays within the site
@@ -234,6 +239,7 @@ export class Tab implements SessionTab {
     });
     this.on('commit', (event) => {
       this.errorPage = event.errorPage;
+      this.pageIcon = undefined;
       this.committed = true;
       if (this.isActive) updateSecurity(this);
       // A new document: dialogs allowed again, no user activation yet
@@ -251,7 +257,8 @@ export class Tab implements SessionTab {
     this.on('error', () => this.loadEnded());
     this.on('icon', (event) => {
       this.useIcon(event.blob && URL.createObjectURL(event.blob), hostOf(this.url));
-      if (this.iconUrl) rememberIcon(this.url, this.iconUrl);
+      this.pageIcon = event.blob;
+      rememberIcon(this.url, event.blob);
     });
     this.on('media-state', () => this.updateAudio());
     this.on('capture-state', (event) => {

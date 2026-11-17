@@ -1,5 +1,5 @@
 import { clearClosed } from './closed-tabs.js';
-import { clearIcons } from './favicons.js';
+import { clearIcons, forgetPageIcon } from './favicons.js';
 import { isInternal, readJSON } from './util.js';
 
 /** A visited page; only on this device (localStorage), never in the profile. */
@@ -48,7 +48,7 @@ export function recordVisit(url: string, title: string): void {
   write(history.slice(-MAX_ENTRIES));
 }
 
-/** Clears the history, the closed tabs and the remembered icons of the sites. */
+/** Clears the history, the closed tabs and the remembered icons of the pages and sites. */
 export function clearHistory(): void {
   clearClosed();
   clearIcons();
@@ -66,6 +66,8 @@ export function removeFromHistory(url: string, time: number): void {
   const kept = history.filter((visit) => visit.url !== url || startOfDay(visit.time) !== day);
   if (kept.length === history.length) return;
   write(kept);
+  // Like Chrome the icon of a page goes with its last visit
+  if (!kept.some((visit) => visit.url === url)) forgetPageIcon(url);
   for (const listener of removeListeners) listener();
 }
 

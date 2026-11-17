@@ -32,7 +32,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   memory releases, so back shows it at once where it was scrolled to, #451), favicons for every loaded page (also after a
   page without one or back to a page whose next page never loaded, #389; like Chrome as soon as
   the head is parsed, following later icon changes of the page and also `data:` and `blob:` icons, #520; in the demo a tab from
-  the last session shows the remembered icon of its site before it loads, #493; like Chrome a
+  the last session shows the remembered icon of its page before it loads, #493, and history,
+  suggestions and those tabs show each page's own icon like Chrome, not the first one of its host, #595; like Chrome a
   tab without an icon shows a globe, so narrow tabs are no longer a row of empty boxes, #510),
   `:visited` for the addresses the views loaded and those of the host's history (before, every
   link kept its unvisited color, in search results and on Wikipedia too, #480),

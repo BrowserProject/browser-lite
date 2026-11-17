@@ -561,7 +561,8 @@ removes one (patch 0119 tells the view, which decides once per task), also after
 goes to the host (`icon`) once per document and icon address; the view keeps its last 4 icons, so
 a page with the same icon address, or one that switches between a few (an unread badge), gets it
 without a new request, and an icon that arrives after its page was left or its link changed is
-dropped (#389, #520).
+dropped (#389, #520). The demo remembers the icon of each page like Chrome's favicon database,
+for its history and suggestions and the tabs that have not loaded yet (#595).
 
 ## Storage
 

@@ -159,7 +159,7 @@ check('keyboard: the moved tab stays active', (await activeTitle()) === 'D', awa
 // The order survives opening the demo again
 const iconRemembered = await page
   .waitForFunction(
-    (host) => JSON.parse(localStorage.getItem('bl-favicons') ?? '{}')[host]?.icon,
+    (host) => JSON.parse(localStorage.getItem('bl-favicons') ?? '{}').hosts?.[host]?.icon,
     new URL(siteURL).host,
     { timeout: 10000 },
   )
