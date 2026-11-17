@@ -2,9 +2,9 @@
 // see visibilityState 'hidden', rAF and CSS animations stop, setInterval runs at most about once
 // per second, the engine does not paint; with sound, sound and timers go on. While the user types
 // in the front view (also through pauses while the focus stays in the field), the front view
-// loads a page or a view was just shown (until its first frame), a busy hidden view waits, also
-// its restyles, relayouts and load events, and a script of it that runs pauses at its next
-// safepoint. With
+// loads a page (until its load event) or a view was just shown (until its first frame), a busy
+// hidden view waits, also its restyles, relayouts and load events, and a script of it that runs
+// pauses at its next safepoint. With
 // and without the compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
 // input (unresponsive, responsive; the engine stops a script only once input waited its limit,
 // keepWaiting() gives the script the limit again) and no hang during a long native dialog of the host page, a
@@ -246,8 +246,24 @@ const MEDIA = {
 };
 // A page whose server takes 1.5 s to answer: the hidden views wait until it commits
 const SLOW_PAGE = `<!doctype html><title>slow</title><p>slow<script>console.log('RESULT loaded=slow:' + Date.now())</script>`;
+// A page with an image that takes 3 s: the hidden views wait until its load event
+const SLOW_IMAGE_PAGE = `<!doctype html><title>slowimage</title><p>slow image<img src="/slow.svg">
+<script>console.log('RESULT loaded=slow:' + Date.now()); addEventListener('load', () => console.log('RESULT pageload=' + Date.now()))</script>`;
 const { url: siteURL } = await serve((req, res) => {
   if (MEDIA[req.url]) return serveBytes(req, res, ...MEDIA[req.url]);
+  if (req.url === '/slow.svg') {
+    setTimeout(() => {
+      res
+        .writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' })
+        .end('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>');
+    }, 3000);
+    return;
+  }
+  if (req.url.startsWith('/slowimage')) {
+    return res
+      .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+      .end(SLOW_IMAGE_PAGE);
+  }
   if (req.url.startsWith('/slow')) {
     setTimeout(() => {
       res
@@ -548,8 +564,8 @@ check(
 );
 
 // The front view loads a page (1.5 s until the response): the hidden view waits until it
-// commits. The load is no input: it may still come after the running task and the one that task
-// queued (500 ms each)
+// committed and loaded. The load is no input: it may still come after the running task and the
+// one that task queued (500 ms each)
 const loadInFront = async (label, start) => {
   const started = Date.now();
   await start();
@@ -563,10 +579,29 @@ const loadInFront = async (label, start) => {
   );
   await typing.page.waitForTimeout(3000);
   const after = chunksBetween(committed, Date.now());
-  check(`${label}: the hidden view goes on after the commit`, after >= 2, `${after} tasks`);
+  check(`${label}: the hidden view goes on after the load`, after >= 2, `${after} tasks`);
 };
 await loadInFront('navigation', () => typing.go(`${siteURL}slow?front`));
 await loadInFront('new tab', () => typing.newTab(`${siteURL}slow?tab`));
+// The page the front view loads waits 3 s for an image: the hidden view waits until its load
+// event, not only until the commit (a task of it that ran on kept the page from loading and
+// painting, the script of a busy page up to the watchdog's limit)
+await typing.go(`${siteURL}slowimage`);
+const imageCommit = Number((await typing.wait('loaded', null, 15000))?.[2].split(':')[1]);
+const pageLoad = Number((await typing.wait('pageload', null, 15000))?.[2]);
+const untilLoad = chunksBetween(imageCommit + 1100, pageLoad);
+check(
+  'image loading: the hidden view waits until the visible page loaded',
+  pageLoad - imageCommit > 2500 && untilLoad === 0,
+  `${untilLoad} tasks in the ${pageLoad - imageCommit} ms from the commit to the load event`,
+);
+await typing.page.waitForTimeout(3000);
+const afterLoad = chunksBetween(pageLoad, Date.now());
+check(
+  'image loading: the hidden view goes on after the load event',
+  afterLoad >= 2,
+  `${afterLoad} tasks`,
+);
 await typing.context.close();
 
 // The hidden view's restyles and relayouts run from timers of their own and image load events

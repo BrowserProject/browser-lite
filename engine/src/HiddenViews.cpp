@@ -11,9 +11,11 @@
 //   for typingQuietTime. A task that runs when a key comes still finishes first, so the pauses
 //   of a writer (more than a second between two words or sentences) must not let hidden views
 //   start one.
-// - a visible view loads a new page: until it commits (at most navigationWait), then quietTime
-//   for its first parsing and layout. A navigation of the host (withNavigation in Exports.cpp)
-//   counts as input as soon as the running task ends.
+// - a visible view loads a new page: until its load event (at most navigationWait), then
+//   quietTime. Until the commit only was not enough: a script of a hidden view that ran on
+//   then kept the new page from parsing, loading its images and painting, up to the watchdog's
+//   limit (the front tab of Chrome loads in a process of its own). A navigation of the host
+//   (withNavigation in Exports.cpp) counts as input as soon as the running task ends.
 // - a view becomes visible (a switch of tabs, bl_set_visible): like input from the end of the
 //   running task on, and until it made the frame that was due, at most firstFrameWait. A tab that
 //   loaded in the background never painted, its first layout and paint come with that frame,
@@ -98,10 +100,16 @@ static void startWaiting(Seconds delay)
     updateViews();
 }
 
-static bool navigates(WebView& view)
+// From the start of a navigation until the load event of the page it brings
+static bool loadsPage(WebView& view)
 {
     RefPtr frame = view.mainFrame();
-    return frame && (frame->loader().provisionalDocumentLoader() || frame->loader().policyDocumentLoader());
+    if (!frame)
+        return false;
+    if (frame->loader().provisionalDocumentLoader() || frame->loader().policyDocumentLoader())
+        return true;
+    RefPtr document = frame->document();
+    return document && !document->loadEventFinished();
 }
 
 // Whether a visible view still needs the engine thread after the quiet time of its last input
@@ -114,7 +122,7 @@ static bool visibleViewHolds(MonotonicTime now)
     WebView::forEach([&](WebView& view) {
         if (holds || !view.isVisible() || !view.mainFrame())
             return;
-        holds = (navigation && navigates(view)) || (typing && takesTextInput(view.page())) || (shown && view.waitsForFrameSinceShown());
+        holds = (navigation && loadsPage(view)) || (typing && takesTextInput(view.page())) || (shown && view.waitsForFrameSinceShown());
     });
     return holds;
 }
@@ -146,7 +154,7 @@ void userWorksInVisibleView(UserInput input)
 
 void visibleViewMayNavigate(WebView& view)
 {
-    if (!view.isVisible() || !navigates(view))
+    if (!view.isVisible() || !loadsPage(view))
         return;
     s_navigationStart = MonotonicTime::now();
     startWaiting(checkInterval);

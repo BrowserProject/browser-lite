@@ -93,7 +93,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   during the load went from 3.5 to 0.8 s; a Moto G71 before the change: median 6 s, up to 23 s.
   Hidden views wait while the user types or taps in a visible one (#364), through the pauses of a
   writer while the focus stays in a text field and while a visible view loads a new page until it
-  commits (#394): with weather.com loading in a background tab, typing in bursts with 2.5 s pauses
+  commits (#394), since #597 until its load event: with weather.com loading in a background tab, typing in bursts with 2.5 s pauses
   went from median 0.42 s (90th percentile 1.1 s, up to 7.5 s) to 2 ms (frame 32 ms), a new tab
   next to two loading heavy tabs commits in 0.3 to 2 s instead of 11 to 17 s. After a pause of
   more than 10 s (or 1 s outside a text field) a key waited for a task that already ran (up to
@@ -925,6 +925,15 @@ browser (Safari keeps Cmd+L, T and W for itself).
    content is encrypted. `performance.timeOrigin` moving between two values was such a visible
    difference, fixed (#547) without changing the rate (5 of 8 before, 6 of 11 after). Open until
    the snapshot can be compared with real Safari's (Safari on BrowserStack with the same video).
+14. A long script of the front tab holds up everything else (2026-11-17, local): the safepoint
+   pause of #585 only takes a hidden view's script, and the host's calls wait behind the script
+   of a visible one until the watchdog stops it, 30 s after the host started waiting. A page that
+   runs a loop of 2 minutes and then a new tab with a simple page: the new tab painted after
+   30.2 s. Chrome runs the tabs in their own processes, Firefox interrupts the script of the
+   front tab to paint a switch of tabs (PaintWhileInterruptingJS). Needed here: a script of a
+   visible view that pauses at its safepoint for the host's calls, with the view's own commands
+   held and its hiding counted as hidden for the pause (the page itself must not see the
+   visibility change while its script is on the stack).
 
 ## Open: features
 

@@ -177,7 +177,7 @@ parser and loads held; also the timers of style and layout, the load events of i
 style elements, a parser that pumps while suspended and the hit test for the element under the
 mouse after a layout, patches 0125 to 0127 and 0131) until no input came
 for 1 s, after keys or text while the focus stays in a text field for up to 10 s, while a visible
-view loads a new page until it commits, and after a view became visible (a switch of tabs, urgent
+view loads a new page until its load event (at most 10 s), and after a view became visible (a switch of tabs, urgent
 like input) until it made the frame that was due, which comes before its own waiting tasks
 (`HiddenViews.cpp`, #364, #394, #419, #531, #537), so a heavy page loading in a background tab does not
 hold up typing in, loading or switching to the front one. A script of a hidden view that already

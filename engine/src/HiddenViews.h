@@ -17,12 +17,12 @@ enum class UserInput : bool { Other, Typing };
 void userWorksInVisibleView(UserInput = UserInput::Other);
 
 // A view started to load a new page: when it is visible, hidden views wait until the new page
-// commits
+// loaded (its load event)
 void visibleViewMayNavigate(WebView&);
 
 // A view became visible (a switch of tabs, the host page shown again): the user waits for it like
 // for input, and hidden views also wait until it made its first frame since (the frame that was
-// due, WebView::waitsForFrameSinceShown) and until a page it loads commits
+// due, WebView::waitsForFrameSinceShown) and until a page it loads loaded
 void visibleViewShown(WebView&);
 
 // Whether hidden views wait for the user right now
