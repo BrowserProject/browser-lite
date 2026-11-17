@@ -45,6 +45,12 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   #snap div { flex: 0 0 300px; scroll-snap-align: start; }
   #pd { position: absolute; left: 20px; top: 360px; width: 200px; height: 40px; }
   #nopan { position: absolute; left: 300px; top: 300px; width: 200px; height: 150px; touch-action: none; }
+  #lpin, #lpta, #lpempty { position: absolute; left: 650px; width: 300px; font: 20px monospace; padding: 0 0 0 4px; border: 1px solid #888; box-sizing: border-box; }
+  #lpin { top: 20px; height: 36px; }
+  #lpta { top: 70px; height: 60px; resize: none; }
+  #lpempty { top: 140px; width: 140px; height: 36px; }
+  #lpbutton { position: absolute; left: 300px; top: 100px; width: 200px; height: 40px; font: 20px monospace; }
+  #lpframe { position: absolute; left: 800px; top: 140px; width: 150px; height: 40px; border: 0; }
 </style></head><body>
 <p id="text">This sentence should be selectable with the mouse.</p>
 <div id="tap">Tap</div>
@@ -56,6 +62,8 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
 <div id="nopan">No panning</div>
 <div id="pd">Keeps the focus</div>
 <div id="snap"><div>1</div><div>2</div><div>3</div><div>4</div></div>
+<input id="lpin" value="Anna maveri"><textarea id="lpta">Line one second</textarea><input id="lpempty"><input id="lpbutton" type="button" value="Press here">
+<iframe id="lpframe" srcdoc="<p style='margin:0;font:20px monospace'>Framed words</p>"></iframe>
 <script>
   const result = (key, value) => console.log('RESULT ' + key + '=' + value);
   document.addEventListener('mouseup', () => {
@@ -501,6 +509,76 @@ if (chromiumOnly('long press (CDP Input.dispatchTouchEvent)')) {
     JSON.stringify(menu && { selection: menu.selection, link: menu.link }),
   );
   check('long press: the menu says it came from a finger', menu?.touch === true);
+
+  // In a text field like Chrome: the word in the field's text (UA shadow content) is selected and
+  // the field focused; on an empty field the caret goes there; in a frame its word
+  const longPress = async (px, py) => {
+    const before = await page.evaluate(() => window.blHost.contextMenus.length);
+    const [lx, ly] = await at(px, py);
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: lx, y: ly }],
+    });
+    await page.waitForTimeout(1000);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await waitFor(() => page.evaluate((n) => window.blHost.contextMenus.length > n, before), 5000);
+    const shown = await page.evaluate((n) => window.blHost.contextMenus[n] ?? null, before);
+    results.delete('lpstate');
+    await evalPage(
+      page,
+      "console.log('RESULT lpstate=' + [document.activeElement.id, lpin.selectionStart, lpin.selectionEnd, lpta.selectionStart, lpta.selectionEnd, lpempty.selectionStart].join(','))",
+    );
+    return {
+      menu: shown && { selection: shown.selection, editable: shown.editable },
+      state: await result('lpstate', 5000),
+    };
+  };
+  // 12 px a character of 20px monospace, the text 5 px from the field's left
+  const field = await longPress(655 + 12 * 7.5, 38);
+  check(
+    'long press on a word of a text field: the word selected, the field focused',
+    field.menu?.selection === 'maveri' &&
+      field.menu.editable &&
+      field.state.startsWith('lpin,5,11,'),
+    JSON.stringify(field),
+  );
+  // The caret of a tap at the end of the text area first (WebKit took the hit to the field, a
+  // range of the body around it)
+  await page.touchscreen.tap(...(await at(655 + 12 * 14, 84)));
+  await page.waitForTimeout(500);
+  const area = await longPress(655 + 12 * 6.5, 84);
+  check(
+    'long press on a word of a focused text area: the word selected in it',
+    area.menu?.selection === 'one' &&
+      area.menu.editable &&
+      area.state.startsWith('lpta,') &&
+      area.state.includes(',5,8,'),
+    JSON.stringify(area),
+  );
+  const empty = await longPress(720, 158);
+  check(
+    'long press on an empty field: focused with the caret, an editable menu',
+    empty.menu?.selection === '' &&
+      empty.menu.editable &&
+      empty.state.startsWith('lpempty,') &&
+      empty.state.endsWith(',0'),
+    JSON.stringify(empty),
+  );
+  await evalPage(page, 'document.activeElement.blur(); getSelection().removeAllRanges()');
+  // The text of a button is no text to select, like a mouse press on it
+  const button = await longPress(400, 120);
+  check(
+    'long press on a button: no word selected',
+    button.menu?.selection === '' && !button.menu.editable,
+    JSON.stringify(button),
+  );
+  const framed = await longPress(800 + 12 * 2.5, 152);
+  check(
+    'long press on a word in a frame: the word selected',
+    framed.menu?.selection === 'Framed',
+    JSON.stringify(framed),
+  );
+  await evalPage(page, 'lpframe.contentWindow.getSelection().removeAllRanges()');
   await cdp.detach();
 }
 

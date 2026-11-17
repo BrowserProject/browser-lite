@@ -430,6 +430,12 @@ On a mobile device (`device.mobile`) the overlay scrollbars of the page and of s
 only show the position, like in mobile Chrome and Safari: they take no hit tests, so taps,
 touches and `elementFromPoint` reach the content under their 21 px. On a desktop, also one with
 a touch screen, they take the press and drag (patch 0082, #413).
+A long press selects the word under the finger at once and opens the context menu when the
+finger lifts (#353), like Chrome's `HandleGestureLongPress` (`selectForLongPress` in
+`WebView.cpp`): the hit goes into the text of a text field (UA shadow content) and into frames,
+the text of a button, a date field or media controls selects nothing (as for a mouse press), the
+pressed frame gets the focus, an editable element first gets the caret there, which focuses it,
+and white space or an empty field keeps only that caret (#607).
 Two fingers zoom the view (`touch-pinch.ts`) once the page answered both touchstarts without
 `preventDefault` and touch-action allows it; the movement until then is kept and the zoom catches
 up with it, also after the fingers lifted, so a pinch while the page keeps the engine thread busy

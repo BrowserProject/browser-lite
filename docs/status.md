@@ -412,7 +412,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   an iPhone (#445),
   the empty bookmarks sheet names the menu's Bookmark button, not the hidden star (#428),
   a long press shows the address of the pressed link or image and only its commands, no page
-  commands (#429), the page keeps its size under the keyboard of the address bar and the demo's
+  commands (#429), a long press on a word in a text field or a frame selects it and focuses the
+  field like Chrome (#607), the page keeps its size under the keyboard of the address bar and the demo's
   other fields instead of being laid out again, like Chrome (#444),
   checked on emulated phones, the tab overview cards also on an iPhone with Safari 18 (#378); Android hosts get the iPhone or iPad identity by default (#332);
   rotating the phone rotates the pages (#336); the host's back (Safari's button and edge swipe,
@@ -1047,9 +1048,10 @@ browser (Safari keeps Cmd+L, T and W for itself).
   as Chrome's Mute site does. No menu on the cards of the phone layout's tab overview. Close other
   tabs and Close tabs to the right put every tab into Reopen closed tab on its own, Chrome brings
   them back together.
-- Touch selection: a long press selects the word, but there are no selection handles to extend
-  it like Chrome and Safari on phones (needs the selection bounds from the engine and commands
-  that move either end).
+- Touch selection: a long press selects the word, also in text fields (focusing them) and frames
+  (#607), but there are no selection handles to extend it like Chrome and Safari on phones (needs
+  the selection bounds from the engine and commands that move either end). The focus of a long
+  press opens no on-screen keyboard; a tap in the field does.
 - `timeZone` applies only at `createBrowser`; the demo restarts the engine for a changed device
   too, although `Browser.setDevice()` could apply it (it uses that only for the rotation, #336).
 - Pinch zoom: `visualViewport` events only at the end of the gesture; two fingers wait for the

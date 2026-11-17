@@ -101,6 +101,7 @@
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/StorageNamespaceProvider.h>
 #include <WebCore/SubstituteData.h>
+#include <WebCore/TextIterator.h>
 #include <WebCore/WindowEventLoop.h>
 #include <pal/SessionID.h>
 #include <optional>
@@ -1719,6 +1720,39 @@ bool WebView::dispatchKeyEvent(int type, const String& key, const String& code, 
     return frame->eventHandler().keyEvent(event);
 }
 
+// Like Chrome's SelectionController::HandleGestureLongPress: the word under the finger, not on a
+// link or image and not white space. The text of a text field is UA shadow content and the hit goes
+// into frames. In an editable element the caret goes there first, which focuses it (FrameSelection
+// focuses the editable root, like a tap) and is all a long press on white space or an empty field
+// does. The frame gets the focus like from a mouse press, so the menu works on its selection.
+static void selectForLongPress(LocalFrame& mainFrame, const LayoutPoint& point)
+{
+    constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::AllowChildFrameContent };
+    auto hit = mainFrame.eventHandler().hitTestResultAtPoint(point, hitType);
+    RefPtr node = hit.targetNode();
+    RefPtr frame = node ? node->document().frame() : nullptr;
+    if (!frame || !node->renderer() || hit.URLElement() || hit.image())
+        return;
+    // Not the text of a button, a date field or media controls, like a mouse press
+    if (!node->canStartSelection() || (node->isInUserAgentShadowTree() && !is<HTMLTextFormControlElement>(node->shadowHost())))
+        return;
+    bool editable = node->hasEditableStyle();
+    if (!editable && !is<Text>(*node))
+        return;
+    VisiblePosition position { node->renderer()->visiblePositionForPoint(hit.localPoint(), HitTestSource::User) };
+    if (position.isNull())
+        return;
+    if (RefPtr page = frame->page())
+        page->focusController().setFocusedFrame(frame.get());
+    if (editable)
+        frame->selection().setSelection(VisibleSelection { position }, FrameSelection::defaultSetSelectionOptions(UserTriggered::Yes));
+    VisibleSelection word { position };
+    word.expandUsingGranularity(TextGranularity::WordGranularity);
+    auto range = word.toNormalizedRange();
+    if (range && !StringView { plainText(*range) }.containsOnly<isASCIIWhitespace<char16_t>>())
+        frame->eventHandler().selectClosestContextualWordOrLinkFromHitTestResult(hit, DontAppendTrailingWhitespace);
+}
+
 void WebView::contextMenu(double x, double y)
 {
     RefPtr frame = mainFrame();
@@ -1726,14 +1760,11 @@ void WebView::contextMenu(double x, double y)
     if (!frame || !view)
         return;
     DoublePoint position { x, y };
-    // A long press: like Chrome on phones the word under the finger is selected at once (not on a
-    // link or image), and the menu, which then offers to copy it, opens when the finger lifts:
-    // WebKit dispatches no contextmenu while a touch pointer is down
+    // A long press: like Chrome on phones the word under the finger is selected at once, and the
+    // menu, which then offers to copy it, opens when the finger lifts: WebKit dispatches no
+    // contextmenu while a touch pointer is down
     if (m_touchPointer) {
-        constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::DisallowUserAgentShadowContent };
-        auto hit = frame->eventHandler().hitTestResultAtPoint(LayoutPoint(view->windowToContents(flooredIntPoint(position))), hitType);
-        if (!hit.URLElement() && !hit.image())
-            frame->eventHandler().selectClosestContextualWordOrLinkFromHitTestResult(hit, DontAppendTrailingWhitespace);
+        selectForLongPress(*frame, LayoutPoint(view->windowToContents(flooredIntPoint(position))));
         m_longPressMenu = position;
         return;
     }
