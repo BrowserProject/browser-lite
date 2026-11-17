@@ -5,7 +5,8 @@
 // locals intact. Input that reaches the paused frame (a click into it) and the frame's resize
 // observer wait for its task instead of running inside it or being dropped; the frame's script
 // is stopped when the page removes the frame meanwhile; a frame of the same site (one event loop
-// with the page) does not pause, its keys wait as before.
+// with the page) does not pause, its keys wait as before. Only a long task pauses: a frame that
+// runs a little script per animation frame keeps running while the user types next to it.
 //
 //   node tests/core/frame-pause-test.mjs [engine-dir]
 import {
@@ -76,14 +77,21 @@ new ResizeObserver(() => { if (observed++) console.log('RESULT resized=' + runni
 channel.port2.postMessage(0);
 </script>`;
 
+// Short tasks: an interval of 16 ms with 6 ms of script each and an animation frame counter,
+// reported every 250 ms (ticks, animation frames, time)
+const tickerPage = `<!doctype html><title>ticker</title><body style="margin:0;background:#cde">ticker<script>
+let ticks = 0, frames = 0;
+setInterval(() => { const end = performance.now() + 6; while (performance.now() < end); ticks++; }, 16);
+const frame = () => { frames++; requestAnimationFrame(frame); };
+requestAnimationFrame(frame);
+setInterval(() => console.log('RESULT ticker=' + ticks + ':' + frames + ':' + Date.now()), 250);
+</script>`;
+
+const pages = { '/frame': framePage, '/ticker': tickerPage };
 const handler = (req, res) => {
   const url = new URL(req.url, 'http://x');
   const page =
-    url.pathname === '/main'
-      ? mainPage(url.searchParams.get('frame'))
-      : url.pathname === '/frame'
-        ? framePage
-        : null;
+    url.pathname === '/main' ? mainPage(url.searchParams.get('frame')) : pages[url.pathname];
   if (!page) return res.writeHead(404).end();
   res
     .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
@@ -107,13 +115,13 @@ const all = (results, key) =>
     return match ? [match[1]] : [];
   });
 
-async function openPage(frame) {
+async function openPage(frame, report = 'task') {
   const tab = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   const results = collect(tab);
   check('host page starts', await openHost(tab, stack.app({ url: 'about:blank' })));
   await load(tab, `${siteURL}main?frame=${encodeURIComponent(frame)}`);
   check('the page loads', (await results.wait('loaded', 30000)) === 'main');
-  check('the frame runs its tasks', !!(await results.wait('task', 30000)));
+  check('the frame runs its tasks', !!(await results.wait(report, 30000)));
   return { tab, results, origin: await canvasOrigin(tab) };
 }
 
@@ -242,6 +250,45 @@ async function typeDuringTask(page, keys) {
     'cross-site frame: removed during its task, its script stops and the page answers',
     !removedReport && latency < 500,
     `report of the task ${removedReport}, next key ${latency} ms`,
+  );
+  await page.tab.close();
+}
+
+// A frame of another site with short tasks does not pause: it keeps running while the user types
+{
+  const page = await openPage(`http://localhost:${port}/ticker`, 'ticker');
+  await page.tab.mouse.click(page.origin.x + 100, page.origin.y + 25);
+  await sleep(1000);
+  const reports = () => all(page.results, 'ticker').map((value) => value.split(':').map(Number));
+  const seen = reports().length;
+  const start = Date.now();
+  const before = all(page.results, 'keydown').length;
+  for (let i = 0; i < 20; i++) {
+    await page.tab.keyboard.press('a');
+    await sleep(150);
+  }
+  const end = Date.now();
+  const during = reports()
+    .slice(seen)
+    .filter(([, , time]) => time <= end);
+  const times = [start, ...during.map(([, , time]) => time), end];
+  const gap = Math.max(...times.slice(1).map((time, i) => time - times[i]));
+  const ticks = during.length > 1 ? during.at(-1)[0] - during[0][0] : 0;
+  const frames = during.length > 1 ? during.at(-1)[1] - during[0][1] : 0;
+  check(
+    'cross-site frame with short tasks: it keeps running while the user types next to it',
+    gap < 1000 && ticks > 20 && frames > 10,
+    `longest gap between its reports ${gap} ms, ${ticks} ticks and ${frames} animation frames in ${end - start} ms`,
+  );
+  for (
+    const until = Date.now() + 20000;
+    Date.now() < until && all(page.results, 'keydown').length < before + 20;
+  )
+    await sleep(100);
+  check(
+    'cross-site frame with short tasks: every key reaches the page',
+    all(page.results, 'keydown').length - before === 20,
+    `${all(page.results, 'keydown').length - before} of 20`,
   );
   await page.tab.close();
 }

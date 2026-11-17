@@ -49,6 +49,9 @@ void clearStackBelow();
 void clearStackAboveForUnwind();
 // Whether the engine thread runs JS in a work item that started at least minimum ago
 bool engineThreadInLongScript(WTF::Seconds minimum);
+// On the engine thread: whether the running script (the outermost entry into JS) has run for
+// 100 ms or more, a long task; until the entry ends
+bool scriptRunsLong();
 // A page dialog or a paused script: runs the work of the engine thread nested
 // until done() returns true, only the urgent work while onlyUrgent() returns
 // true; the views of the waiting page's group hold back (WebView.h)

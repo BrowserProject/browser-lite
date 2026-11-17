@@ -193,7 +193,10 @@ paused frames (`vm.topCallFrame` is empty meanwhile). Not when another view shar
 the page (a document in one of its event loops, which WebKit keeps per site, or its page group),
 and not for work outside JS (style, layout, parsing, compiling a script, the GC). The script of a
 cross-site frame pauses the same way while the user works in its page, like an out-of-process
-frame in Chrome (`FramePause.cpp`, #589): what pauses is its site's event loop, all documents of
+frame in Chrome (`FramePause.cpp`, #589), once it has run for 100 ms (a long task, the script
+watchdog marks it and brings it to a safepoint then): a shorter one ends sooner than a pause would
+help, and pausing it froze a frame with a little script per animation frame for as long as the
+user typed. What pauses is its site's event loop, all documents of
 it, none of which may be a top-level document, with only its frames on the stack. Its documents
 are suspended, their loads deferred and their frames' scripts paused (WebCore runs no listener or
 script of a paused frame, as in its debugger), the rendering update leaves out the steps that run

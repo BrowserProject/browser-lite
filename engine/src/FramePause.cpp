@@ -6,7 +6,10 @@
 //
 // Here the frame's script pauses at its next safepoint (patch 0149), like a hidden view's
 // (HiddenViews.cpp) or a script in WebKit's debugger, while the nested event loop of dialogs does
-// the work of the other frames and views. What pauses is the site's agent: every document of its
+// the work of the other frames and views. Only a long task pauses, a script that has run for
+// 100 ms (scriptRunsLong; the watchdog brings it to a safepoint at the latest then): a short one
+// keeps the user waiting no longer than its end, and pausing it froze a frame with a little
+// script per animation frame (a game, a map, a player's controls) for as long as the user typed. What pauses is the site's agent: every document of its
 // event loop (WebKit keeps one per site, `WindowEventLoop`). A site with a top-level document in
 // any view does not pause (input and calls go to the top-level documents), nor does a script with
 // frames of another site's script below it. Meanwhile the paused documents run nothing: their
@@ -171,7 +174,7 @@ static void scheduleHeldInput()
 
 bool pauseFrameScriptForUser()
 {
-    if (s_paused)
+    if (s_paused || !scriptRunsLong())
         return false;
     auto& vm = commonVM();
     auto* globalObject = dynamicDowncast<JSDOMGlobalObject>(threadGlobalDataSingleton().currentState());

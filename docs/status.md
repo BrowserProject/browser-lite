@@ -669,7 +669,10 @@ browser (Safari keeps Cmd+L, T and W for itself).
    of a cross-site frame (an anti-bot challenge in a frame, Turnstile on srf.ch) pauses while the
    user works in its page, like an out-of-process frame in Chrome (#589): on srf.ch (2026-11-16,
    local, a key every 1.5 s for 90 s, 4 runs) the longest key waited 9.5 to 21.9 s before, with
-   `unresponsive` in 2 runs, now at most 51 ms. Input into the frame itself, the script of a
+   `unresponsive` in 2 runs, now at most 51 ms. Only a long script pauses, one that has run for
+   100 ms (#602): a frame with a little script per animation frame (a map, a player's controls)
+   was frozen while the user typed next to it and 1 s after, now it keeps running (2026-11-17,
+   66 keys in 10 s: 0 ticks before, 33 per second now like idle). Input into the frame itself, the script of a
    challenge page that is the top-level document (canva.com's "Just a moment...") and a debug
    `eval` still wait for the script. Cloudflare Turnstile on kaufland.de (local, Chromium host):
    every challenge brings a VM obfuscated anew (other function names and sizes each run), so its

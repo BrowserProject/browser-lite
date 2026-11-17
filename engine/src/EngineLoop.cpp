@@ -436,16 +436,18 @@ void scheduleRunLoopPump()
 // be caught). The page gets a console message, its timers and the other views
 // keep running. A script nobody waits for runs to its end, such as an anti-bot
 // challenge that takes a minute on a slow phone. The same watchdog stops the
-// script of a page the user leaves (UserNavigation.h). It looks every 100 ms
-// while an entry runs, at the trap points of the interpreter and of compiled
-// code; the timer runs in the VM traps thread.
+// script of a page the user leaves (UserNavigation.h) and tells which script
+// runs long (scriptRunsLong). It looks every 100 ms while an entry runs, at the
+// trap points of the interpreter and of compiled code; the timer runs in the VM
+// traps thread.
 // BL_SCRIPT_TIMEOUT: seconds, 0 = off.
 static double scriptTimeLimit()
 {
     return engineConfig().scriptTimeoutSeconds;
 }
 
-// A navigation of the user waits at most this long for the watchdog
+// A navigation of the user waits at most this long for the watchdog, and from this long on a
+// script runs long
 static constexpr WTF::Seconds watchdogInterval = 100_ms;
 
 // The host's wait the watchdog saw last and since when it sees it
@@ -479,8 +481,22 @@ static bool hostWaitedTooLong()
     return wait && WTF::MonotonicTime::now() - s_seenHostWaitSince >= WTF::Seconds(limit);
 }
 
+// Whether the running entry into JS (the outermost) ran for the watchdog's interval, a long task:
+// set when the watchdog looks, until the entry ends
+static bool s_scriptRunsLong;
+
+bool scriptRunsLong()
+{
+    return s_scriptRunsLong;
+}
+
 static bool stopScript(JSC::JSGlobalObject* entryGlobalObject, void*, void*)
 {
+    if (!std::exchange(s_scriptRunsLong, true)) {
+        entryGlobalObject->vm().whenIdle([] {
+            s_scriptRunsLong = false;
+        });
+    }
     // The running script, also when it runs nested below a dialog (the VM entry is the dialog's)
     auto* globalObject = WebCore::threadGlobalDataSingleton().currentState();
     if (!globalObject)
@@ -504,10 +520,9 @@ static bool stopScript(JSC::JSGlobalObject* entryGlobalObject, void*, void*)
     return true;
 }
 
+// Also without a limit and with navigationStopsScripts off: it tells which script runs long
 static void installScriptWatchdog()
 {
-    if (scriptTimeLimit() <= 0 && !engineConfig().navigationStopsScripts)
-        return;
     auto& vm = WebCore::commonVM();
     JSC::JSLockHolder lock(vm);
     armScriptWatchdog(vm);
@@ -621,9 +636,10 @@ void runNestedEventLoop(const Function<bool()>& done, const Function<bool()>& on
 // while urgent work waits
 extern "C" void bl_wtf_set_run_loop_yield_check(bool (*)());
 
-// At a safepoint of the running script (patch 0149), also one that requestSafepoint brought
-// it to: a hidden view's script (HiddenViews.h) or a cross-site frame's (FramePause.h) pauses
-// while urgent work waits. Not inside a nested event loop, whose work goes on where it was.
+// At a safepoint of the running script (patch 0149), also one that requestSafepoint or the
+// watchdog brought it to: a hidden view's script (HiddenViews.h) or a long one of a cross-site
+// frame (FramePause.h) pauses while urgent work waits. Not inside a nested event loop, whose work
+// goes on where it was.
 extern "C" void bl_jsc_set_safepoint_work(void (*)(JSC::VM&));
 
 static void atSafepoint(JSC::VM& vm)

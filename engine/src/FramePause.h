@@ -12,10 +12,10 @@ namespace BrowserLite {
 
 class WebView;
 
-// At a safepoint of the running script while urgent work waits (EngineLoop.cpp): the script of a
-// site that only has frames (no top-level document in any view) pauses until the user no longer
-// needs the engine thread, input waits for it or its document goes away. Returns whether it
-// paused.
+// At a safepoint of the running script while urgent work waits (EngineLoop.cpp): a long script
+// (scriptRunsLong) of a site that only has frames (no top-level document in any view) pauses
+// until the user no longer needs the engine thread, input waits for it or its document goes away.
+// Returns whether it paused.
 bool pauseFrameScriptForUser();
 
 // On the engine thread before input for the view runs. points: where a pointer input lands in
