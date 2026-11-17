@@ -49,7 +49,8 @@ for the navigation never got its error page and Stop did nothing, or the web fon
 restyled the whole document from scratch when it loaded, or the transform a carousel
 takes off each positioned slide to measure it, which laid out the whole page twice per slide,
 or the page step of Space and PageDown, which was Safari's 80 % of the view instead of
-Chrome's 87.5 %) comes as patches
+Chrome's 87.5 %, or the native light button the theme drew over the background of a select the
+page had styled, so its light text on a dark site was unreadable) comes as patches
 from `patches/`.
 
 ## Folders

@@ -49,6 +49,9 @@
 //                  descendant only of the containers its height depends on (patch 0154): same
 //                  geometry as a fresh layout, a margin that changes on one slide next to many
 //                  cards with an aspect ratio picture costs a fraction of a full relayout
+//   select-styles.html  frame checked by check-select-styles.mjs: a select whose background or
+//                  border the page sets shows them with the arrow in its text color inside the
+//                  border like in Chrome, one without them keeps the native button (patch 0157)
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -64,7 +67,7 @@ const out = path.join(root, 'build', 'engine-pages');
 mkdirSync(out, { recursive: true });
 
 const CASES = [
-  { name: 'basic', size: [800, 600], check: true },
+  { name: 'basic', size: [800, 600], check: 'check-basic.mjs' },
   { name: 'crypto', wait: 'CRYPTO done' },
   { name: 'stack', wait: 'STACK done' },
   { name: 'limits', wait: 'LIMITS done' },
@@ -86,6 +89,7 @@ const CASES = [
   { name: 'font-loads', size: [800, 600], wait: 'FONTLOADS done' },
   { name: 'transform-presence', size: [800, 600], wait: 'TRANSFORM done' },
   { name: 'replaced-percent-heights', size: [1280, 800], wait: 'REPLACED done' },
+  { name: 'select-styles', size: [400, 220], check: 'check-select-styles.mjs' },
   {
     name: 'cookies',
     label: 'cookies (public suffix host)',
@@ -142,7 +146,7 @@ for (const { name, label = name, size = [200, 200], wait, env = {}, check } of C
     ? (output.match(new RegExp(`${wait}=\\S*`))?.[0] ?? `exit ${run.status}`)
     : `exit ${run.status}`;
   if (ok && check) {
-    const frame = spawnSync(process.execPath, [path.join(here, 'check-basic.mjs'), ppm], {
+    const frame = spawnSync(process.execPath, [path.join(here, check), ppm], {
       encoding: 'utf8',
     });
     process.stdout.write(frame.stdout.replace(/^/gm, '     '));

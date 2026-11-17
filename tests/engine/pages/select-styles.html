@@ -1,0 +1,24 @@
+<!doctype html>
+<title>Select styles</title>
+<!-- A select whose background or border the page sets is drawn like in Chrome (patch 0157): the
+     CSS background and border show, the theme only adds the arrow inside the border in the text
+     color. Before, the native light button covered the background, so light text on a dark site
+     sat on a white box. check-select-styles.mjs reads the frame. -->
+<style>
+  body { margin: 0; background: #474747; }
+  select { position: absolute; width: 140px; height: 30px; font: 16px sans-serif; }
+  #a { left: 20px; top: 20px; background-color: #252525; color: #d5d5d5; border: 1px solid #252525; }
+  #b { left: 20px; top: 70px; background-color: #252525; color: #d5d5d5; }
+  #d { left: 20px; top: 120px; background: #252525; color: #d5d5d5; border: 0; }
+  #e { left: 20px; top: 170px; height: 36px; border: 4px solid #f00; }
+  #t { left: 220px; top: 20px; background: #252525; color: #0f0; border: 8px solid #00f; height: 50px; }
+  #n { left: 220px; top: 90px; }
+  #r { left: 220px; top: 140px; background: #252525; color: #0f0; border: 0; }
+</style>
+<select id="a"><option>Layer</option></select>
+<select id="b"><option>Layer</option></select>
+<select id="d"><option>Layer</option></select>
+<select id="e"><option>Layer</option></select>
+<select id="t"><option>Layer</option></select>
+<select id="n"><option>Layer</option></select>
+<select id="r" dir="rtl"><option>Layer</option></select>

@@ -145,6 +145,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   2025-03-15 (#570; before, the month kept taking digits and the value stayed empty), an empty
   field shows mm/dd/yyyy and --:-- -- instead of today's date and 12:30 PM in grey (#571), and a
   set one shows 11/20/2026 without the gaps around the month that the width of "mm" left (#603).
+  A `<select>` whose background or border the page sets shows them like in Chrome, with the arrow
+  in its text color (#606): before, the native light button covered a dark site's background, so
+  Photopea's Layer and blend mode selects showed light gray text on white.
   Words end where they end in Chrome on Linux (#572): one Ctrl+Backspace on "hello world, "
   leaves "hello world" and on "user@example.com" "user@example." (before, "hello " and
   "user@"), Ctrl+Arrow stops at punctuation, and a double click on "example" selects "example",
@@ -978,6 +981,11 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
+- A select keeps 5 px between its text and its top and bottom edge (Adwaita), where Chrome keeps
+  1 px, so a select the page gives a small fixed height (30 px with a 4 px border) clips its text
+  in the engine but not in Chrome. Chrome's spacing only for styled selects would make a select
+  jump 8 px in height when `:focus` gives it a border; changing it for all selects makes the native
+  Adwaita button flatter. Needs a decision.
 - HLS as `src` (#549): the engine plays no HLS playlist itself (it fails at once, #581), Safari
   (the default identity on every host) and current Chrome do. Players that decide by the user agent still treat the
   engine as Safari: on srf.ch (Pillarbox, video.js VHS) the video starts through

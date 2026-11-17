@@ -1,0 +1,92 @@
+diff --git a/Source/WebCore/platform/graphics/adwaita/Adwaita.cpp b/Source/WebCore/platform/graphics/adwaita/Adwaita.cpp
+index a53ebb6c7b..a3134965d8 100644
+--- a/Source/WebCore/platform/graphics/adwaita/Adwaita.cpp
++++ b/Source/WebCore/platform/graphics/adwaita/Adwaita.cpp
+@@ -83,6 +83,11 @@ void paintFocus(GraphicsContext& graphicsContext, const Vector<FloatRect>& rects
+ }
+ 
+ void paintArrow(GraphicsContext& graphicsContext, const FloatRect& rect, ArrowDirection direction, bool useDarkAppearance)
++{
++    paintArrow(graphicsContext, rect, direction, useDarkAppearance ? arrowColorDark : arrowColorLight);
++}
++
++void paintArrow(GraphicsContext& graphicsContext, const FloatRect& rect, ArrowDirection direction, const Color& color)
+ {
+     auto offset = rect.location();
+     float size;
+@@ -114,7 +119,7 @@ void paintArrow(GraphicsContext& graphicsContext, const FloatRect& rect, ArrowDi
+     }
+     path.closeSubpath();
+ 
+-    graphicsContext.setFillColor(useDarkAppearance ? arrowColorDark : arrowColorLight);
++    graphicsContext.setFillColor(color);
+     graphicsContext.fillPath(path);
+ }
+ 
+diff --git a/Source/WebCore/platform/graphics/adwaita/Adwaita.h b/Source/WebCore/platform/graphics/adwaita/Adwaita.h
+index 684c243d8c..90da495f84 100644
+--- a/Source/WebCore/platform/graphics/adwaita/Adwaita.h
++++ b/Source/WebCore/platform/graphics/adwaita/Adwaita.h
+@@ -125,6 +125,7 @@ void paintFocus(GraphicsContext&, const Vector<FloatRect>&, const Color&, PaintR
+ 
+ enum class ArrowDirection { Up, Down };
+ void paintArrow(GraphicsContext&, const FloatRect&, ArrowDirection, bool useDarkAppearance);
++void paintArrow(GraphicsContext&, const FloatRect&, ArrowDirection, const Color&);
+ 
+ inline Color focusColor(const Color& accentColor)
+ {
+diff --git a/Source/WebCore/platform/graphics/adwaita/MenuListAdwaita.cpp b/Source/WebCore/platform/graphics/adwaita/MenuListAdwaita.cpp
+index bd5f330af7..30251c04f6 100644
+--- a/Source/WebCore/platform/graphics/adwaita/MenuListAdwaita.cpp
++++ b/Source/WebCore/platform/graphics/adwaita/MenuListAdwaita.cpp
+@@ -45,26 +45,39 @@ void MenuListAdwaita::draw(GraphicsContext& graphicsContext, const FloatRoundedR
+ {
+     GraphicsContextStateSaver stateSaver(graphicsContext);
+ 
+-    ButtonControlAdwaita::drawButton(graphicsContext, borderRect, deviceScaleFactor, style);
++    // A menulist-button is a select whose author background or border replaced the native look
++    // (RenderTheme::adjustStyle). CSS paints its background, border and focus outline; the part
++    // only adds the arrow inside the border in the text color, like Chrome.
++    bool isMenuListButton = m_owningPart.get()->type() == StyleAppearance::MenulistButton;
+ 
+-    auto zoomedArrowSize = menuListButtonArrowSize * style.zoomFactor;
+     FloatRect fieldRect = borderRect.rect();
+-    auto borderWidth = fieldRect.width();
+-    auto borderHeight = fieldRect.height();
+-    fieldRect.setSize({ zoomedArrowSize, zoomedArrowSize });
++    if (isMenuListButton)
++        fieldRect.contract(style.borderWidth);
++    else
++        ButtonControlAdwaita::drawButton(graphicsContext, borderRect, deviceScaleFactor, style);
++
++    auto zoomedArrowSize = menuListButtonArrowSize * style.zoomFactor;
++    FloatRect arrowRect = fieldRect;
++    arrowRect.setSize({ zoomedArrowSize, zoomedArrowSize });
+ 
+     if (!style.states.contains(ControlStyle::State::VerticalWritingMode)) {
+-        auto centerY = (borderHeight / 2) - (zoomedArrowSize / 2);
++        auto centerY = (fieldRect.height() / 2) - (zoomedArrowSize / 2);
+ 
+         if (style.states.contains(ControlStyle::State::InlineFlippedWritingMode))
+-            fieldRect.move(menuListButtonPadding, centerY);
++            arrowRect.move(menuListButtonPadding, centerY);
+         else
+-            fieldRect.move(borderWidth - (zoomedArrowSize + menuListButtonPadding), centerY);
++            arrowRect.move(fieldRect.width() - (zoomedArrowSize + menuListButtonPadding), centerY);
+     } else {
+-        auto centerX = (borderWidth / 2) - (zoomedArrowSize / 2);
+-        fieldRect.move(centerX, borderHeight - (zoomedArrowSize + menuListButtonPadding));
++        auto centerX = (fieldRect.width() / 2) - (zoomedArrowSize / 2);
++        arrowRect.move(centerX, fieldRect.height() - (zoomedArrowSize + menuListButtonPadding));
+     }
+-    Adwaita::paintArrow(graphicsContext, fieldRect, Adwaita::ArrowDirection::Down, style.states.contains(ControlStyle::State::DarkAppearance));
++
++    if (isMenuListButton) {
++        Adwaita::paintArrow(graphicsContext, arrowRect, Adwaita::ArrowDirection::Down, style.textColor);
++        return;
++    }
++
++    Adwaita::paintArrow(graphicsContext, arrowRect, Adwaita::ArrowDirection::Down, style.states.contains(ControlStyle::State::DarkAppearance));
+ 
+     if (style.states.contains(ControlStyle::State::Focused))
+         Adwaita::paintFocus(graphicsContext, borderRect.rect(), menuListButtonFocusOffset, systemFocusRingColor());

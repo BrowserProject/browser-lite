@@ -409,6 +409,12 @@ Chrome a part is only as wide as its text (with a value: its widest value, so it
 while the user types), and the field's edit element keeps the room for every part's widest value
 or placeholder, so `11/20/2026` and `mm/dd/yyyy` show without gaps and the field keeps its width
 when it gets a value (patch 0156, #603).
+A `<select>` whose background or border the page sets loses its native look like in Chrome
+(WebKit's `RenderTheme::adjustStyle` turns it into a `menulist-button`): CSS paints its background,
+border and focus outline, and the Adwaita theme adds only the arrow inside the border in the
+select's text color; before, it drew its light native button over the page's background, so the
+light text of a dark site sat on a white box (patch 0157, #606). A select without them keeps
+the native Adwaita button.
 Words end where they end in Chrome on Linux (#572). The engine's ICU data has Chromium's word
 break rules: `tools/icu-word-rules.cpp`, built with the sysroot's ICU and run in node during the
 engine build, takes the rules ICU stores in its `word.brk`, makes a full stop between letters
