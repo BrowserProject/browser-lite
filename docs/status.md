@@ -417,7 +417,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (#414; like Chrome's the new tab page is that first entry, so Back after the first address
   typed into a new tab returns to it instead of leaving, #513; a tab a link opened in front
   closes on the host back like in Chrome on Android and its opener is in front again, where
-  before the host left the demo, #546; a back with the menu, a sheet, the tab overview, a context
+  before the host left the demo, #546, also one opened in the background with Open link in new
+  tab or a Ctrl click once it is in front, where the host back left the demo for Chrome's new
+  tab page on a Pixel and reloaded the demo with all tabs on an iPhone, #605; a back with the menu, a sheet, the tab overview, a context
   menu, a select list or another overlay open closes it and the tab stays, like Chrome on Android
   and Safari, also on a tab without a back entry, where before the tab went back under the open
   overlay, #558; checked on a Pixel 9 with the Android back key and on an iPhone 16 with Safari's

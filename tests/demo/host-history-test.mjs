@@ -2,7 +2,8 @@
 // gesture, the mouse buttons) act on the tab in front like in an in-app browser: back goes back in
 // the tab while it has a back entry, only then the host leaves the demo; forward after a back goes
 // forward in it, also while the tab can still go back. Like Chrome on Android the back on a tab a
-// link opened in front closes it when it has no back entry and returns to the tab with the link.
+// link opened (in front, or in the background and switched to later) closes it when it has no
+// back entry and returns to the tab with the link.
 // The demo adds its host entry in the first user action, not when the tab gets a back entry:
 // Safari's back skips an entry pushed more than 10 s after one (no test browser applies that
 // rule), so here the tab gets its back entries by script.
@@ -204,6 +205,44 @@ check('host back on the popup: the tab with the link again', await tabAt(1), awa
 check('host back on the popup: the popup closed', (await tabCount()) === 1, await tabCount());
 check('host back on the popup: the demo stays', page.url().startsWith(stack.origin), page.url());
 check('the tab with the link: no back entry, the host on its own entry', await hostAt('base'));
+
+// A tab opened in the background from the link (the context menu's Open link in new tab, a
+// Ctrl click) closes back to the tab with the link as well once it is in front
+async function backgroundTabBack(name, open) {
+  results.delete('popup');
+  await open();
+  check(`${name}: the tab loads`, (await results.wait('popup')) === '1');
+  check(`${name}: the tab with the link stays in front`, await tabAt(1), await tabURL());
+  await page.click('#tab-list .tab:not(.active)');
+  check(
+    `${name}: switched to the new tab`,
+    await page
+      .waitForFunction(() => window.blTest?.view()?.url.endsWith('/popup'), null, {
+        timeout: 10000,
+      })
+      .then(
+        () => true,
+        () => false,
+      ),
+  );
+  check(`${name}: the host on the entry above`, await hostAt('guard'));
+  await hostBack();
+  check(`${name}, host back: the tab with the link again`, await tabAt(1), await tabURL());
+  check(`${name}, host back: the tab closed`, (await tabCount()) === 1, await tabCount());
+  check(`${name}, host back: the demo stays`, page.url().startsWith(stack.origin), page.url());
+  await hostAt('base');
+}
+await backgroundTabBack('Open link in new tab', async () => {
+  const origin = await canvasOrigin(page);
+  await page.mouse.click(origin.x + 50, origin.y + 50, { button: 'right' });
+  await page.click('.bl-context-menu button[data-bl-item=open-link]');
+});
+await backgroundTabBack('Ctrl click', async () => {
+  const origin = await canvasOrigin(page);
+  await page.keyboard.down('Control');
+  await page.mouse.click(origin.x + 50, origin.y + 50);
+  await page.keyboard.up('Control');
+});
 
 // Without the tab it came from the popup has nothing to return to
 check('target=_blank link again: the popup loads', await openPopup());

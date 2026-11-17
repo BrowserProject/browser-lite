@@ -81,9 +81,10 @@ export class Tab implements SessionTab {
    */
   openedBy: Tab | null = null;
   /**
-   * Tab whose link opened this one in front (target=_blank, window.open, Shift click). Like
-   * Chrome on Android the host back closes this tab when it has no back entry and returns to the
-   * parent; forgotten when the parent closes.
+   * Tab whose link opened this one, in front (target=_blank, window.open, Shift click) or in the
+   * background (Ctrl click, Open link in new tab). Like Chrome on Android the host back closes
+   * this tab when it has no back entry and returns to the parent; forgotten when the parent
+   * closes.
    */
   parent: Tab | null = null;
   /**
@@ -589,12 +590,16 @@ export function loadInTab(tab: Tab, url: string): void {
   if (!focusPrompt(tab.view)) tab.view.focus();
 }
 
-/** A new tab in the background from a link of opener (Ctrl click), placed after it. */
-export function openBackgroundTab(url: string, opener: Tab | null): Tab | null {
+/**
+ * A new tab in the background from a link of opener (Ctrl click, the context menu), placed after
+ * it; opener is its parent.
+ */
+function openBackgroundTab(url: string, opener: Tab): Tab | null {
   const view = createView(url);
   if (!view) return null;
   const tab = new Tab(view, { url });
   tab.openedBy = opener;
+  tab.parent = opener;
   add(tab, linkTabPlace(opener, false));
   persistSession();
   return tab;
