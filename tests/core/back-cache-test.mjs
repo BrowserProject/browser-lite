@@ -131,6 +131,26 @@ check(
   `pageshow persisted/scrollY ${budget.shown[1]}`,
 );
 
+// Above the budget with the area full while the page left last holds 256 MB: the release drops
+// it, which frees the area again, so memory is not short (it counted as short before the second
+// release and showed the demo's notice with one heavy page)
+const freed = await backAfterRelease(
+  'freed',
+  'BL_MEMORY_RELEASE_MB=64,BL_MEMORY_PRESSURE_MB=64',
+  ['big', 'second'],
+  256,
+);
+check(
+  'the area free once the page left last went: memory-pressure moderate',
+  freed.level === 'moderate',
+  `level ${freed.level}`,
+);
+check(
+  'the area full with the page left last: the release drops it',
+  freed.shown[0]?.startsWith('false/'),
+  `pageshow persisted/scrollY ${freed.shown[0]}`,
+);
+
 // Above the budget from 64 MB on with the area full (the page holds what malloc grew by): memory
 // is short, the release empties the cache
 const short = await backAfterRelease('short', 'BL_MEMORY_RELEASE_MB=64,BL_MEMORY_PRESSURE_MB=64', [

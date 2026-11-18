@@ -24,7 +24,7 @@
 //   discards a background view. The footprint is a high-water mark: one heavy
 //   page keeps it above the budget for good, often with most of it free again
 //   after the release, so above the budget memory is short only while the
-//   area stays full.
+//   area stays full, also after the JS code and the page left last went.
 // - after views closed, collects their garbage once the user leaves the engine
 //   thread free (viewClosed)
 // malloc_footprint() costs nothing (mallinfo() walks the whole heap and cost
@@ -182,15 +182,17 @@ void checkMemory(ReleaseCaches release)
         return;
     bool budgetExceeded = overBudget(footprint);
     // Full above the budget, measured after the release that keeps the JS code
-    // and the page left last; then they go too
+    // and the page left last; then they go too, and memory is short only if
+    // the area is still full without them
     bool areaFull = false;
     if (releaseDue) {
         s_footprintAtRelease = footprint;
         bool limitNear = limitIsNear();
         releaseCaches(footprint, limitNear);
-        areaFull = !limitNear && budgetExceeded && areaIsFull();
-        if (areaFull)
+        if (!limitNear && budgetExceeded && areaIsFull()) {
             releaseCaches(footprint, true);
+            areaFull = areaIsFull();
+        }
     } else
         areaFull = checkDue && budgetExceeded && areaIsFull();
     if (!checkDue)

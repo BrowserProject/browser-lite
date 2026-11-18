@@ -94,7 +94,7 @@ from `patches/`.
     back/forward cache only when memory is short (patch 0088), JSC's code cache at every release
     and when a view leaves its page (patch 0102), a full GC soon after views closed, finds the
     memory limit, memory pressure
-    `moderate` above the budget and `critical` when memory is short),
+    `moderate` above the budget and `critical` when memory is still short after the release of the JS code),
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
   - Views: `WebView.cpp` (also Copy image and Save as of the context menu, the word selection of a long press, paint holding: the page
     left stays in view until the new one paints), `Clients.cpp` (WebCore's clients: loads, title, back/forward cache

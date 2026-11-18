@@ -1134,6 +1134,19 @@ browser (Safari keeps Cmd+L, T and W for itself).
   of the malloc in use is many small blocks of DOM, style and JS of the page and its ad frames,
   JS heap slabs and decoded images; tile buffers waiting for the compositor add up to 20 MB at a
   phone size while a page paints.
+  spiegel.de alone (2026-11-18, iPhone 16 with iOS 18 and locally at 393 x 852 with pixel ratio
+  3, shared profile with consent): 290 to 300 MB of malloc in use after its load and 350 to 390
+  MB after scrolling the front page, the area 360 to 520 MB depending on the ads; one run on the
+  phone reached 532 MB and said "Memory is almost full" with one tab although the second release
+  freed the area to 354 MB in use (now `moderate`, #618). A walk over the malloc chunks after
+  releasing everything (spiegel.de, 265 of 387 MB of area in use): 4 MB per thread stack (8 MB
+  for the engine thread; 8 threads on `about:blank`, 16 on spiegel.de; almost untouched, so they
+  count in the area but hardly in what iOS counts), JSC's 64 KB marked blocks in 2 MB slabs
+  (about 90 MB for 35 MB of live JS heap; after scrolling 120 MB for 77 MB), and about 90 MB of
+  small blocks of DOM, style and layout. Marked blocks of 16 KB as on other platforms (the block
+  size follows `CeilingOnPageSize`, 64 KB for an unknown CPU) would hold the same live cells in
+  about 15 % less (counted by 16 KB quarter with a live cell), not yet done as it rebuilds all of
+  JSC and WebCore.
   What iOS ends is the footprint of the whole Safari page, and most of it is outside the engine
   memory (2026-11-12, iPhone 16 with iOS 18, BrowserStack; a page fills memory with
   incompressible data until iOS ends it, so the room left is what the page did not use): a plain

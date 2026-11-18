@@ -824,9 +824,9 @@ level}` at every growth, and the host discards background views (#128, #171, #21
 and iPad a growth never fails, iOS ends the whole web content process instead, so the core sets
 the 3 GB of `BL_MEMORY_PRESSURE_MB` to 512 MB there (#358). Memory is short, level `critical`,
 with less than 128 MB left below the limit, or above the budget when less than that is free
-inside the malloc area after a release that kept the code and the page left last; then a second
-release drops them too. Otherwise the level above the budget is `moderate`: the footprint never
-shrinks, and after one heavy page most of it is free again (#497).
+inside the malloc area after a release that kept the code and the page left last and still after
+a second release that drops them too (#497, #618). Otherwise the level above the budget is
+`moderate`: the footprint never shrinks, and after one heavy page most of it is free again.
 
 Above 2 GB a wasm32 pointer is a negative `i32` in JS. Emscripten makes the pointers of its own
 library functions, of `EM_ASM` arguments and of `malloc` unsigned and rewrites direct `HEAP*[p]`,
