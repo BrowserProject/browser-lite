@@ -480,6 +480,28 @@ at that point unless the page cancelled the event. Firefox on Linux sends no key
 keys but a `contextmenu` event of the focused element, the core's input field: the core cancels
 it and sends the page the menu key instead (`keyboard.ts`), and after a menu key the page got
 already (Firefox on Windows sends the event after the key) it only cancels it.
+Text fields are spell checked like Chrome on Linux (#624; `Spelling.cpp`, `SpellingMenu.cpp`):
+Hunspell (`deps/recipes/hunspell.sh`) with the dictionary of the first of the pages' languages,
+like Chrome's default of the browser language, an exact match or one of the same language (en-GB
+takes en_US), none for other languages (only en_US of SCOWL ships for now,
+`deps/recipes/dictionaries.sh`). The dictionary loads on a thread of its own the first time a
+field needs it (about 550 KB from `lazy/dictionaries`, the first underline about 0.5 s after the
+first focus locally); a raw `pthread_create` starts that thread, since `WTF::Thread::create`
+waits until a web worker runs it. The port has no unified text checking, so WebCore checks typed
+words and the word left by the caret through `checkSpellingOfString`; whole texts (pasted text,
+and like Chrome's cold mode the text a field already has once it gets the focus) go through
+WebCore's asynchronous `SpellChecker`, which the engine answers at once, in pieces of about 4000
+characters ending at white space, one per task (5 to 13 ms each), so the longest stall of the
+engine thread after the focus of a field with 100 KB of text is about 50 ms instead of 260 ms. Words count as correct while the dictionary loads; its
+arrival checks the focused field. Words without letters or with digits, words with letters of
+another script than the language's (Greek in English text) and words over 64 characters are not
+checked (Chrome's `SpellCheckWord` and `SpellcheckCharAttribute`), password fields not at all, and the
+underline stays while the caret is in a word like in Chrome (`shouldEraseMarkersAfterChangeSelection`).
+A right click on an underlined word selects it before the page's `contextmenu` event like Blink;
+the event `context-menu` carries `spelling` (the selected or caret word, if misspelled, and at most
+3 corrections) and `bl_spelling_action` replaces it (`insertReplacementText`) or adds it to the
+dictionary, kept in `/data/spelling/custom-dictionary.txt` for all views. The preference
+`spellcheck` (flag 16 of `bl_set_preferences`) turns it off and takes the underlines away.
 Two fingers zoom the view (`touch-pinch.ts`) once the page answered both touchstarts without
 `preventDefault` and touch-action allows it; the movement until then is kept and the zoom catches
 up with it, also after the fingers lifted, so a pinch while the page keeps the engine thread busy
@@ -683,8 +705,8 @@ bytes, so text outside Latin-1 had half the room.
 Read-only files outside `/data`: `engine.data` (Noto Sans regular and bold, fontconfig with its
 cache, CA list) in memory, and `/lazy`, files of `lazy/` next to the engine that load on first
 use: `/lazy/icu`, the ICU data beyond the core linked into `engine.wasm` (`engine/icu-core.txt`,
-#228), and `/lazy/fonts`, Noto Serif, Mono, the italics, more scripts, symbols, Chinese,
-Japanese, Korean and emoji (#229). `LazyFiles.cpp` lists them from an index (sizes, so `stat`
+#228), `/lazy/fonts`, Noto Serif, Mono, the italics, more scripts, symbols, Chinese,
+Japanese, Korean and emoji (#229), and `/lazy/dictionaries`, the spell checker's (#624). `LazyFiles.cpp` lists them from an index (sizes, so `stat`
 needs no request) and fetches a file whole with a synchronous request on its first read, so only
 pages that need a locale, collation, dictionary, charset converter or font download it.
 fontconfig's cache in `engine.data` already describes every font of `/lazy/fonts`, so finding a

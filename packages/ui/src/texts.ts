@@ -64,6 +64,8 @@ export interface UiTexts {
   cut: string;
   paste: string;
   pasteAsPlainText: string;
+  /** Context menu of a misspelled word, after its corrections. */
+  addToDictionary: string;
   undo: string;
   redo: string;
   selectAll: string;
@@ -127,6 +129,7 @@ export const defaultTexts: Readonly<UiTexts> = Object.freeze({
   cut: 'Cut',
   paste: 'Paste',
   pasteAsPlainText: 'Paste as plain text',
+  addToDictionary: 'Add to dictionary',
   undo: 'Undo',
   redo: 'Redo',
   selectAll: 'Select all',

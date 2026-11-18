@@ -16,6 +16,7 @@ const info = (extra = {}) => ({
   link: '',
   image: '',
   media: null,
+  spelling: null,
   selection: '',
   editable: false,
   canUndo: false,
@@ -339,6 +340,48 @@ test('field with a caret: undo, redo, cut and copy follow the state, no page com
     ],
     'no clipboard access: engine clipboard',
   );
+});
+
+test('misspelled word in a field: its corrections and Add to dictionary first, like Chrome', () => {
+  const view = fakeView();
+  const spelling = { word: 'mispeled', suggestions: ['misspelled', 'dispelled', 'misspell'] };
+  const items = defaultMenuItems(view, info({ editable: true, selection: 'mispeled', spelling }), {
+    openTab() {},
+  });
+  assert.deepEqual(ids(normalizeMenu(items)), [
+    'spelling-suggestion-0',
+    'spelling-suggestion-1',
+    'spelling-suggestion-2',
+    '-',
+    'add-to-dictionary',
+    '-',
+    'undo',
+    'redo',
+    '-',
+    'cut',
+    'copy',
+    'paste',
+    'paste-plain',
+    'select-all',
+  ]);
+  assert.deepEqual(
+    items.slice(0, 3).map((item) => item.label),
+    spelling.suggestions,
+  );
+  assert.equal(items.find((item) => item.id === 'add-to-dictionary').label, 'Add to dictionary');
+  items[1].action();
+  items.find((item) => item.id === 'add-to-dictionary').action();
+  assert.deepEqual(view.calls, [
+    ['replaceMisspelling', 'mispeled', 'dispelled'],
+    ['addToDictionary', 'mispeled'],
+  ]);
+  // Without corrections only Add to dictionary
+  const none = defaultMenuItems(
+    fakeView(),
+    info({ editable: true, spelling: { word: 'qwxz', suggestions: [] } }),
+    { openTab() {} },
+  );
+  assert.deepEqual(ids(normalizeMenu(none)).slice(0, 3), ['add-to-dictionary', '-', 'undo']);
 });
 
 test('search for the selection like Chrome, on the page and in fields', async () => {

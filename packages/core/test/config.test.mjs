@@ -36,6 +36,7 @@ test('defaults', () => {
     images: true,
     globalPrivacyControl: false,
     saveData: false,
+    spellcheck: true,
   });
   assert.equal(config.debug, false);
   assert.equal(config.httpCache, true);
@@ -305,7 +306,13 @@ test('features of the services', () => {
 });
 
 test('preference flags', () => {
-  const off = { javascript: true, images: true, globalPrivacyControl: false, saveData: false };
+  const off = {
+    javascript: true,
+    images: true,
+    globalPrivacyControl: false,
+    saveData: false,
+    spellcheck: true,
+  };
   assert.equal(preferenceFlags(off), 0);
   assert.equal(
     preferenceFlags({
@@ -313,8 +320,9 @@ test('preference flags', () => {
       images: false,
       globalPrivacyControl: true,
       saveData: true,
+      spellcheck: false,
     }),
-    15,
+    31,
   );
 });
 

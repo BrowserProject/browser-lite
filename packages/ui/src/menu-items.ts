@@ -1,4 +1,10 @@
-import type { ContextMenuInfo, ContextMenuMedia, PasteContent, View } from '@browser-lite/core';
+import type {
+  ContextMenuInfo,
+  ContextMenuMedia,
+  ContextMenuSpelling,
+  PasteContent,
+  View,
+} from '@browser-lite/core';
 import { readHostClipboard } from './clipboard.js';
 import type { MenuItem } from './context-menu.js';
 import type { UiOptions } from './options.js';
@@ -120,11 +126,40 @@ function mediaItems(
 }
 
 /**
+ * Chrome's items of a misspelled word (SpellingMenuObserver): its corrections, then Add to
+ * dictionary, each group followed by a separator.
+ */
+function spellingItems(
+  view: View,
+  spelling: ContextMenuSpelling | null,
+  texts: UiTexts,
+): MenuItem[] {
+  if (!spelling) return [];
+  const { word, suggestions } = spelling;
+  const items: MenuItem[] = suggestions.map((suggestion, index) => ({
+    id: `spelling-suggestion-${index}`,
+    label: suggestion,
+    action: () => view.replaceMisspelling(word, suggestion),
+  }));
+  if (items.length) items.push({ separator: true });
+  items.push(
+    {
+      id: 'add-to-dictionary',
+      label: texts.addToDictionary,
+      action: () => view.addToDictionary(word),
+    },
+    { separator: true },
+  );
+  return items;
+}
+
+/**
  * The standard items of a context menu like Chrome: open, save and copy the address of a link or
  * image, copy an image, the items of a video or audio (Loop, Show controls, open, save and copy
  * its address, Picture in picture), copy, search the web for the selection (with
  * `actions.search`), select all, back, forward, reload, print and view source. In an editable
- * field only the edit commands: undo and redo (disabled without an edit to undo or redo), cut and
+ * field the corrections of a misspelled word and Add to dictionary first, then only the edit
+ * commands: undo and redo (disabled without an edit to undo or redo), cut and
  * copy (disabled without a selection), paste, paste as plain text, select all and the search.
  * After a long press (`info.touch`) like Chrome on phones only what was pressed: the address of
  * the link, image or media as a header and its commands, cut, copy, paste and select all in a
@@ -201,6 +236,7 @@ export function defaultMenuItems(
     action: () => view.command('SelectAll'),
   };
   if (info.editable) {
+    items.push(...spellingItems(view, info.spelling, texts));
     if (!info.touch) {
       items.push(
         {

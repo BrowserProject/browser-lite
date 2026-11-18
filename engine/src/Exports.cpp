@@ -26,6 +26,7 @@
 #include "MemoryVFS.h"
 #include "ScrollingWasm.h"
 #include "Speech.h"
+#include "Spelling.h"
 #include "UserContent.h"
 #include "UserNavigation.h"
 #include "VisitedLinks.h"
@@ -592,6 +593,15 @@ EMSCRIPTEN_KEEPALIVE void bl_media_action(int id, double x, double y, char* acti
     withPointerInput(id, { { x, y } }, [=, name = takeString(action)](WebView& view) { view.mediaActionAt(x, y, name, enable); });
 }
 
+// A correction or Add to dictionary of the context menu for its misspelled word: action "replace"
+// (the word becomes replacement) or "add"
+EMSCRIPTEN_KEEPALIVE void bl_spelling_action(int id, char* action, char* word, char* replacement)
+{
+    withInput(id, [action = takeString(action), word = takeString(word), replacement = takeString(replacement)](WebView& view) {
+        view.spellingAction(action, word, replacement);
+    });
+}
+
 // Save image as, Save link as: events download-start and download-done like other downloads
 EMSCRIPTEN_KEEPALIVE void bl_download(int id, char* url)
 {
@@ -854,6 +864,8 @@ EMSCRIPTEN_KEEPALIVE void bl_set_languages(char* languages)
                 list.append(WTF::move(trimmed));
         }
         WTF::overrideUserPreferredLanguages(list);
+        // The dictionary of the first language checks the spelling of text fields
+        BrowserLite::Spelling::setLanguages(list);
         // Their ICU data loads in the background (tools/icu-data.mjs groups the files of a
         // locale): "de-CH" fetches de_CH and de
         for (auto& language : list) {
@@ -868,11 +880,11 @@ EMSCRIPTEN_KEEPALIVE void bl_set_languages(char* languages)
 }
 
 // For all views (WebView::Preference): 1 = JavaScript off, 2 = images off,
-// 4 = Global Privacy Control
+// 4 = Global Privacy Control, 8 = Save-Data, 16 = spell checking off
 EMSCRIPTEN_KEEPALIVE void bl_set_preferences(int flags)
 {
     runOnEngineThread([flags] {
-        WebView::setPreferences(OptionSet<WebView::Preference>::fromRaw(flags & 15));
+        WebView::setPreferences(OptionSet<WebView::Preference>::fromRaw(flags & 31));
     });
 }
 

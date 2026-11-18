@@ -70,6 +70,8 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Sockets.cpp
     ${BL_ENGINE_SRC}/SyncLoad.cpp
     ${BL_ENGINE_SRC}/Speech.cpp
+    ${BL_ENGINE_SRC}/Spelling.cpp
+    ${BL_ENGINE_SRC}/SpellingMenu.cpp
     ${BL_ENGINE_SRC}/Storage.cpp
     ${BL_ENGINE_SRC}/UserContent.cpp
     ${BL_ENGINE_SRC}/ViewSource.cpp
@@ -173,6 +175,21 @@ if (BROWSER_LITE_LAZY_FONTS)
     target_sources(BrowserLiteEngine PRIVATE ${BL_LAZY_FONTS_STAMP})
 endif ()
 
+# Dictionaries of the spell checker (deps/recipes/dictionaries.sh, Spelling.cpp): copied to
+# lazy/dictionaries whenever their index in the data package changes
+if (BROWSER_LITE_LAZY_DICTIONARIES)
+    set(BL_LAZY_DICTIONARIES_STAMP "${CMAKE_CURRENT_BINARY_DIR}/browser-lite-lazy-dictionaries.stamp")
+    add_custom_command(
+        OUTPUT ${BL_LAZY_DICTIONARIES_STAMP}
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/lazy/dictionaries
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${BROWSER_LITE_LAZY_DICTIONARIES} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/lazy/dictionaries
+        COMMAND ${CMAKE_COMMAND} -E touch ${BL_LAZY_DICTIONARIES_STAMP}
+        DEPENDS ${BROWSER_LITE_RUNTIME_DIR}/usr/share/browser-lite/lazy-dictionaries.txt
+        VERBATIM
+    )
+    target_sources(BrowserLiteEngine PRIVATE ${BL_LAZY_DICTIONARIES_STAMP})
+endif ()
+
 # WebCore is static, its private dependencies (JSC, WTF, PAL, curl, ICU, ...)
 # come along as LINK_ONLY. Skia directly for the include paths.
 target_link_libraries(BrowserLiteEngine PRIVATE WebCore Skia::Skia)
@@ -184,6 +201,14 @@ find_library(BL_EXPAT_LIBRARY expat REQUIRED)
 # libwebp (encoder for toDataURL/toBlob) needs libsharpyuv
 find_library(BL_SHARPYUV_LIBRARY sharpyuv REQUIRED)
 target_link_libraries(BrowserLiteEngine PRIVATE ${BL_WOFF2COMMON_LIBRARY} ${BL_EXPAT_LIBRARY} ${BL_SHARPYUV_LIBRARY})
+
+# Hunspell, the spell checker (deps/recipes/hunspell.sh, Spelling.cpp)
+find_library(BL_HUNSPELL_LIBRARY hunspell REQUIRED)
+find_path(BL_HUNSPELL_INCLUDE_DIR hunspell.hxx PATH_SUFFIXES hunspell REQUIRED)
+target_link_libraries(BrowserLiteEngine PRIVATE ${BL_HUNSPELL_LIBRARY})
+set_source_files_properties(${BL_ENGINE_SRC}/Spelling.cpp
+    PROPERTIES INCLUDE_DIRECTORIES "${BL_HUNSPELL_INCLUDE_DIR}" COMPILE_DEFINITIONS HUNSPELL_STATIC
+)
 
 target_link_options(BrowserLiteEngine PRIVATE
     # main() runs in its own worker (pthread). The main thread of the page

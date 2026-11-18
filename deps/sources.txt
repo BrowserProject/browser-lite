@@ -23,6 +23,13 @@ nghttp2       tar  1.70.0    https://github.com/nghttp2/nghttp2/releases/downloa
 curl          tar  8.23.0    https://curl.se/download/curl-8.23.0.tar.xz                                                                8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5
 dav1d         tar  1.5.4     https://downloads.videolan.org/pub/videolan/dav1d/1.5.4/dav1d-1.5.4.tar.xz                                 686616b7c69eb88d44459391ab25cac13b6647a3b288835c5784e71c1514a5c5
 libavif       git  v1.4.2    https://github.com/AOMediaCodec/libavif.git                                                                c5240fc79fe5c2407e10afd35f5505ef6333ea49
+hunspell      tar  1.7.2     https://github.com/hunspell/hunspell/releases/download/v1.7.2/hunspell-1.7.2.tar.gz                         11ddfa39afe28c28539fe65fc4f1592d410c1e9b6dd7d8a91ca25d85e9ec65b8
+# Hunspell dictionaries the engine loads on demand (recipe dictionaries, which takes every dict-*
+# line): en_US of SCOWL 2020.12.07 as LibreOffice ships it
+dict-en-us-aff      file e7f163f   https://raw.githubusercontent.com/LibreOffice/dictionaries/e7f163feb2beaf526135132d8716e68e19d2716e/en/en_US.aff e746c882dd6f303c2c46e7452804b9201115a6942cfeb15f18f8edf774d2e24e
+dict-en-us-dic      file e7f163f   https://raw.githubusercontent.com/LibreOffice/dictionaries/e7f163feb2beaf526135132d8716e68e19d2716e/en/en_US.dic f0b1a234bd178bdd01875b2a392a9647f888b8fe879f79c52aae62c2759b3647
+dict-en-us-license  file e7f163f   https://raw.githubusercontent.com/LibreOffice/dictionaries/e7f163feb2beaf526135132d8716e68e19d2716e/en/README_en_US.txt 168b4c01cb841f766a72f310b065c04d09cff46376c37a81d799593ce751c371
+dictionaries        none -         -                                                                                                              -
 # Fonts the engine loads on demand (recipe lazyfonts, which also takes notosans, notoserif and
 # notosansmono): Noto for more scripts, Chinese, Japanese,
 # Korean and emoji, the slices of Google Fonts for Chinese, Japanese and Korean, the emoji groups

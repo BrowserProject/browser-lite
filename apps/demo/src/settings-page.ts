@@ -488,6 +488,13 @@ function renderDevice(section: HTMLElement): void {
         'Asks websites for lighter pages and images',
       ),
       row(
+        'Spell check',
+        toggle('setting-spellcheck', current.spellcheck, (value) =>
+          saveSettings({ spellcheck: value }),
+        ),
+        'Underlines misspelled words in text fields (English)',
+      ),
+      row(
         'Rendering resolution',
         choice(
           'setting-resolution',

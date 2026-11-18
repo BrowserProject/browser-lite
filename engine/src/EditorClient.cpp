@@ -3,6 +3,7 @@
 
 #include "Host.h"
 #include "HostClipboard.h"
+#include "Spelling.h"
 
 #include <WebCore/Document.h>
 #include <WebCore/EnterKeyHint.h>
@@ -33,6 +34,7 @@
 #include <WebCore/PlatformKeyboardEvent.h>
 #include <WebCore/RenderObjectInlines.h>
 #include <WebCore/SecurityOrigin.h>
+#include <WebCore/TextChecking.h>
 #include <WebCore/TextIterator.h>
 #include <WebCore/VisibleUnits.h>
 #include <wtf/SetForScope.h>
@@ -228,6 +230,47 @@ void EditorClient::requestClipboardRead(LocalFrame& frame, CompletionHandler<voi
         return;
     }
     requestHostClipboard(m_viewId, document->topOrigin().toString(), WTF::move(completionHandler));
+}
+
+bool EditorClient::isContinuousSpellCheckingEnabled()
+{
+    return Spelling::isEnabled();
+}
+
+void EditorClient::TextCheckerClient::ignoreWordInSpellDocument(const String& word)
+{
+    Spelling::ignore(word);
+}
+
+void EditorClient::TextCheckerClient::learnWord(const String& word)
+{
+    Spelling::learn(word);
+}
+
+void EditorClient::TextCheckerClient::checkSpellingOfString(StringView text, int* misspellingLocation, int* misspellingLength)
+{
+    Spelling::findFirstMisspelling(text, *misspellingLocation, *misspellingLength);
+}
+
+void EditorClient::TextCheckerClient::getGuessesForWord(const String& word, const String&, const VisibleSelection&, Vector<String>& guesses)
+{
+    guesses = Spelling::guesses(word);
+}
+
+// Answered at once; cancelled while the dictionary loads, whose arrival checks the focused
+// field again
+void EditorClient::TextCheckerClient::requestCheckingOfString(TextCheckingRequest& request, const VisibleSelection&)
+{
+    Ref protectedRequest = request;
+    auto misspellings = request.data().checkingTypes().contains(TextCheckingType::Spelling) ? Spelling::findMisspellings(request.data().text()) : std::nullopt;
+    if (!misspellings) {
+        request.didCancel();
+        return;
+    }
+    Vector<TextCheckingResult> results;
+    for (auto [offset, length] : *misspellings)
+        results.append({ TextCheckingType::Spelling, CharacterRange(offset, length), { }, { } });
+    request.didSucceed(results);
 }
 
 void EditorClient::updateTextInput(LocalFrame& frame)

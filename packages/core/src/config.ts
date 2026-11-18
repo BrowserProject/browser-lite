@@ -164,6 +164,7 @@ export function preferences(value: unknown): Required<Preferences> {
     globalPrivacyControl:
       optionalBoolean(p.globalPrivacyControl, 'preferences.globalPrivacyControl') ?? false,
     saveData: optionalBoolean(p.saveData, 'preferences.saveData') ?? false,
+    spellcheck: optionalBoolean(p.spellcheck, 'preferences.spellcheck') ?? true,
   };
 }
 
@@ -172,7 +173,8 @@ export const preferenceFlags = (p: Required<Preferences>): number =>
   (p.javascript ? 0 : 1) |
   (p.images ? 0 : 2) |
   (p.globalPrivacyControl ? 4 : 0) |
-  (p.saveData ? 8 : 0);
+  (p.saveData ? 8 : 0) |
+  (p.spellcheck ? 0 : 16);
 
 /** Checks a list of languages (navigator.languages). */
 export function languages(value: unknown): string[] {

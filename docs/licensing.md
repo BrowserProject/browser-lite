@@ -20,10 +20,14 @@ the fontconfig configuration and cache, WebKit's HRTF data `Composite.wav` and o
 `wasm-guest.js`; ICU data (Unicode license) is linked into `engine.wasm` and lies in `lazy/icu/`.
 `lazy/fonts/` holds more Noto fonts (OFL-1.1): copied as they are, or cut into slices with
 fonttools that keep the copyright and license in their name table, as the OFL allows.
+`lazy/dictionaries/` holds the spell checker's Hunspell dictionary en_US of SCOWL (Kevin
+Atkinson and others, permissive notices like BSD and MIT, listed in the notices) as LibreOffice
+ships it.
 
 Further licenses inside the engine, among others: OpenSSL (Apache-2.0), curl, nghttp2, zlib,
 brotli, zstd, libpng, libjpeg-turbo, libwebp, expat, libxml2, libxslt, SQLite (public domain),
-FreeType, HarfBuzz, fontconfig, woff2, libpsl, libavif, dav1d, Skia (bundled with WebKit), and the Emscripten
+FreeType, HarfBuzz, fontconfig, woff2, libpsl, libavif, dav1d, Hunspell (MPL-1.1, GPL-2.0 or
+LGPL-2.1, used under the LGPL like WebKit), Skia (bundled with WebKit), and the Emscripten
 runtime (libc, libc++, dlmalloc). Versions and sources: `deps/sources.txt`, `versions.env`.
 
 ### When you distribute the engine

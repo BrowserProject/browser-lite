@@ -18,6 +18,7 @@
 #include "Host.h"
 #include "LoaderStrategy.h"
 #include "ServiceWorkerWasm.h"
+#include "Spelling.h"
 #include "UserContent.h"
 #include "UserNavigation.h"
 #include "ViewSource.h"
@@ -86,6 +87,7 @@
 #include <WebCore/DocumentFullscreen.h>
 #include <WebCore/Element.h>
 #endif
+#include <wtf/MainThread.h>
 #include <wtf/RunLoop.h>
 #include <wtf/text/MakeString.h>
 #include <memory>
@@ -503,11 +505,18 @@ void ChromeClient::takeFocus(FocusDirection direction)
     notifyHost(m_view->id(), "take-focus", makeString("{\"forward\":"_s, direction == FocusDirection::Backward ? "false"_s : "true"_s, '}'));
 }
 
-// The on-screen keyboard of the host follows the focus (a button takes it from a text field)
-void ChromeClient::focusedElementChanged(Element*, LocalFrame* frame, FocusOptions, BroadcastFocusedElement)
+// The on-screen keyboard of the host follows the focus (a button takes it from a text field).
+// Like Chrome the text a field already has is checked for spelling once it has the focus: after
+// the focus change, which may come in the middle of a script, with the selection in the field.
+void ChromeClient::focusedElementChanged(Element* element, LocalFrame* frame, FocusOptions, BroadcastFocusedElement)
 {
     if (auto* client = frame ? frame->editor().client() : nullptr)
         static_cast<EditorClient*>(client)->updateTextInput(*frame);
+    if (element && frame && Spelling::isEnabled()) {
+        callOnMainThread([document = Ref { element->document() }] {
+            Spelling::checkFocusedEditable(document);
+        });
+    }
 }
 
 RefPtr<PopupMenu> ChromeClient::createPopupMenu(PopupMenuClient& client) const

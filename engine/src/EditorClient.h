@@ -39,11 +39,12 @@ private:
     bool shouldDeleteRange(const std::optional<WebCore::SimpleRange>&) final { return true; }
     bool smartInsertDeleteEnabled() final { return false; }
     bool isSelectTrailingWhitespaceEnabled() const final { return false; }
-    bool isContinuousSpellCheckingEnabled() final { return false; }
+    // Spell checking as you type (Spelling.h): a preference of the host, not of the page
+    bool isContinuousSpellCheckingEnabled() final;
     void toggleContinuousSpellChecking() final { }
     bool isGrammarCheckingEnabled() final { return false; }
     void toggleGrammarChecking() final { }
-    int spellCheckerDocumentTag() final { return -1; }
+    int spellCheckerDocumentTag() final { return 0; }
 
     bool shouldBeginEditing(const WebCore::SimpleRange&) final { return true; }
     bool shouldEndEditing(const WebCore::SimpleRange&) final { return true; }
@@ -109,17 +110,20 @@ private:
 
     void setInputMethodState(WebCore::Element*) final { }
 
+    // Hunspell through Spelling.h. Like Chrome the underline of a misspelled word stays while the
+    // caret is in it; editing the word removes it until the word is checked again.
     class TextCheckerClient final : public WebCore::TextCheckerClient {
-        bool shouldEraseMarkersAfterChangeSelection(WebCore::TextCheckingType) const final { return true; }
-        void ignoreWordInSpellDocument(const String&) final { }
-        void learnWord(const String&) final { }
-        void checkSpellingOfString(StringView, int*, int*) final { }
+        bool shouldEraseMarkersAfterChangeSelection(WebCore::TextCheckingType) const final { return false; }
+        void ignoreWordInSpellDocument(const String&) final;
+        void learnWord(const String&) final;
+        void checkSpellingOfString(StringView, int* misspellingLocation, int* misspellingLength) final;
         void checkGrammarOfString(StringView, Vector<WebCore::GrammarDetail>&, int*, int*) final { }
 #if USE(UNIFIED_TEXT_CHECKING)
         Vector<WebCore::TextCheckingResult> checkTextOfParagraph(StringView, OptionSet<WebCore::TextCheckingType>, const WebCore::VisibleSelection&) final { return { }; }
 #endif
-        void getGuessesForWord(const String&, const String&, const WebCore::VisibleSelection&, Vector<String>&) final { }
-        void requestCheckingOfString(WebCore::TextCheckingRequest&, const WebCore::VisibleSelection&) final { }
+        void getGuessesForWord(const String& word, const String& context, const WebCore::VisibleSelection&, Vector<String>& guesses) final;
+        // Whole fields (pasted text, Spelling::checkFocusedEditable) through WebCore's SpellChecker
+        void requestCheckingOfString(WebCore::TextCheckingRequest&, const WebCore::VisibleSelection&) final;
         void requestExtendedCheckingOfString(WebCore::TextCheckingRequest&, const WebCore::VisibleSelection&) final { }
     };
 

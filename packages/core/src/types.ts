@@ -127,6 +127,12 @@ export interface Preferences {
    * true, so sites that honour it send lighter pages and images. Default false.
    */
   saveData?: boolean;
+  /**
+   * Spell checking of text fields like Chrome's "Check for spelling errors": misspelled words
+   * get a red wavy underline and the context menu offers corrections. It uses the dictionary of
+   * the first of `languages` (English for now; without one nothing is checked). Default true.
+   */
+  spellcheck?: boolean;
 }
 
 /** Storage of the pages (cookies, localStorage, IndexedDB, caches). */
@@ -535,6 +541,18 @@ export interface View {
    */
   mediaAction(x: number, y: number, action: MediaAction, enable: boolean): void;
   /**
+   * A correction of Chrome's context menu: the misspelled word of the menu
+   * ({@link ContextMenuSpelling}, selected by the right click or with the caret in it) becomes
+   * `replacement`, as an edit of the page with the input type `insertReplacementText`. Nothing
+   * when that word is no longer selected or misspelled.
+   */
+  replaceMisspelling(word: string, replacement: string): void;
+  /**
+   * Add to dictionary of Chrome's context menu: the misspelled word of the menu counts as spelled
+   * correctly from now on, in every view and after a restart (stored with the pages' data).
+   */
+  addToDictionary(word: string): void;
+  /**
    * Downloads an address like a link with `download` (Save image as, Save link as): requested
    * as from the page, with its cookies and referrer; the file arrives as event `download` of the
    * browser.
@@ -783,6 +801,17 @@ export interface ContextMenuMedia {
 export type MediaAction = 'loop' | 'controls' | 'picture-in-picture';
 
 /**
+ * The misspelled word of a context menu in an editable element, for Chrome's spelling items: its
+ * corrections and Add to dictionary ({@link View.replaceMisspelling}, {@link View.addToDictionary}).
+ * A right click on an underlined word selects it.
+ */
+export interface ContextMenuSpelling {
+  word: string;
+  /** At most 3 corrections, the best first; empty when the dictionary has none. */
+  suggestions: string[];
+}
+
+/**
  * Where the user right clicked or long pressed, or for the menu key and Shift+F10 the focused
  * element, the selection or the corner of the view; empty strings when there is no link, image or
  * selection.
@@ -797,6 +826,8 @@ export interface ContextMenuInfo {
   image: string;
   /** The video or audio element under the pointer, null without one. */
   media: ContextMenuMedia | null;
+  /** The misspelled word that is selected or has the caret in an editable element, else null. */
+  spelling: ContextMenuSpelling | null;
   /** Selected text. */
   selection: string;
   /** Over an editable element (text field, contenteditable). */

@@ -35,11 +35,13 @@ ORDER=(
     curl
     dav1d
     libavif
+    hunspell
     notosans
     lazyfonts
     cacert
     fontconfig-conf
     fontcache
+    dictionaries
 )
 
 force=0

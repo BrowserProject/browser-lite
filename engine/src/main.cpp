@@ -18,6 +18,7 @@
 #include "Prewarm.h"
 #include "ServiceWorkerWasm.h"
 #include "Speech.h"
+#include "Spelling.h"
 #include "Storage.h"
 #include "Strategies.h"
 #include "VideoOverlay.h"
@@ -203,6 +204,8 @@ int main(int, char**)
     keepSpareWorkers(config.spareWorkers);
     WebCore::initializeCommonAtomStrings();
     initializeStorage();
+    // Dictionaries of the spell checker (lazy/dictionaries), loaded when a field needs one
+    Spelling::initialize();
     // Create the VM right away: from now on all work runs with DeferGC (EngineLoop.cpp)
     WebCore::commonVM();
     installPlatformStrategies();

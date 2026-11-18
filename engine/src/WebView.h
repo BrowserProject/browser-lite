@@ -69,6 +69,7 @@ public:
         NoImages = 1 << 1,
         GlobalPrivacyControl = 1 << 2,
         SaveData = 1 << 3,
+        NoSpellChecking = 1 << 4,
     };
     static void setPreferences(OptionSet<Preference>);
     static OptionSet<Preference> preferences();
@@ -197,6 +198,8 @@ public:
     Vector<uint8_t> copyImageAt(double x, double y);
     // Loop, Show controls, Picture in picture of the menu for the media element at the point
     void mediaActionAt(double x, double y, const String& action, bool enable);
+    // A correction ("replace") or Add to dictionary ("add") of the menu for its misspelled word
+    void spellingAction(const String& action, const String& word, const String& replacement);
     // Save image as, Save link as: a download of the address as requested by the page
     void download(const String& url);
     // Save page as (Ctrl+S): a download of the page's address, named after its title

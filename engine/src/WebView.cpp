@@ -18,6 +18,7 @@
 #include "MemoryWatch.h"
 #include "ScrollingWasm.h"
 #include "ServiceWorkerWasm.h"
+#include "Spelling.h"
 #include "UserContent.h"
 #include "VisitedLinks.h"
 #include "WebPlatformExtras.h"
@@ -26,6 +27,7 @@
 #include "MediaStreamWasm.h"
 #endif
 #include "MediaMenu.h"
+#include "SpellingMenu.h"
 #include "Host.h"
 #include "Preconnect.h"
 #include "LoaderStrategy.h"
@@ -165,6 +167,7 @@ void WebView::setPreferences(OptionSet<Preference> preferences)
 {
     currentPreferences = preferences;
     forEach([](WebView& view) { applyPreferences(view.page().settings()); });
+    Spelling::setEnabled(!preferences.contains(Preference::NoSpellChecking));
 }
 
 WebView& WebView::open(int id, IntSize size, float deviceScaleFactor)
@@ -373,6 +376,9 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setCSSPaintingAPIEnabled(true);
     settings.setStorageAPIEnabled(true);
     settings.setCacheAPIEnabled(true);
+    // Whole fields (pasted text, a field that gets the focus) are checked for spelling through
+    // WebCore's SpellChecker, which needs this (EditorClient::requestCheckingOfString)
+    settings.setAsynchronousSpellCheckingEnabled(true);
     ServiceWorkers::enableIn(settings);
     WebCodecs::enableIn(settings);
 #if ENABLE(MEDIA_STREAM)
@@ -1768,6 +1774,8 @@ void WebView::contextMenu(double x, double y)
         return;
     }
     PlatformMouseEvent event { position, position, MouseButton::Right, PlatformEvent::Type::MousePressed, 1, { }, MonotonicTime::now(), 0, SyntheticClickType::NoTap, MouseEventInputSource::UserDriven };
+    constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::AllowChildFrameContent };
+    selectMisspellingAt(frame->eventHandler().hitTestResultAtPoint(LayoutPoint(view->windowToContents(flooredIntPoint(position))), hitType));
     // Like in WebKit2: if the page does not handle the contextmenu event,
     // WebCore's ContextMenuController builds a menu. Only then we show ours.
     auto& controller = m_page->contextMenuController();
@@ -1817,6 +1825,7 @@ void WebView::showContextMenu(DoublePoint position)
         ",\"link\":\""_s, jsonEscape(result.absoluteLinkURL().string()),
         "\",\"image\":\""_s, jsonEscape(result.absoluteImageURL().string()),
         "\",\"media\":"_s, mediaMenuJSON(result),
+        ",\"spelling\":"_s, spellingMenuJSON(*m_page, result),
         ",\"selection\":\""_s, jsonEscape(selection.left(200)),
         "\",\"editable\":"_s, result.isContentEditable() ? "true"_s : "false"_s,
         ",\"canUndo\":"_s, canUndo ? "true"_s : "false"_s, ",\"canRedo\":"_s, canRedo ? "true"_s : "false"_s,
@@ -1834,6 +1843,11 @@ HitTestResult WebView::menuHitTest(double x, double y)
         return { };
     constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::DisallowUserAgentShadowContent, HitTestRequest::Type::AllowChildFrameContent };
     return frame->eventHandler().hitTestResultAtPoint(LayoutPoint(view->windowToContents(flooredIntPoint(DoublePoint { x, y }))), hitType);
+}
+
+void WebView::spellingAction(const String& action, const String& word, const String& replacement)
+{
+    spellingMenuAction(*m_page, action, word, replacement);
 }
 
 // Like Chrome's MediaPlayerActionAt: Loop, Show controls or Picture in picture of the menu for the

@@ -98,7 +98,7 @@ can resolve and copy them; how to serve them or load the parts into the site's o
 | `colorScheme` | `system` | `light`, `dark` or `system` (follows the host); `prefers-reduced-motion` and `prefers-contrast` always follow the host |
 | `device` | host screen | `{ width, height, pixelRatio, touch?, mobile? }` emulated device; `browser.setDevice()` changes it at runtime (a rotated phone: the views keep at most the new size, `screen`, `screen.orientation` and its `change` event follow) |
 | `maxPixelRatio` | no limit | Highest pixel ratio the pages render at on the host screen (at least 1, `browser.setMaxPixelRatio()` changes it; an emulated `device` keeps its own); above it the host scales the views up, the engine paints fewer pixels |
-| `preferences` | all on, GPC and data saver off | `{ javascript, images, globalPrivacyControl, saveData }` (`saveData`: `Save-Data: on` on every request, `navigator.connection.saveData`) |
+| `preferences` | all on, GPC and data saver off | `{ javascript, images, globalPrivacyControl, saveData, spellcheck }` (`saveData`: `Save-Data: on` on every request, `navigator.connection.saveData`; `spellcheck`: misspelled words in text fields underlined like Chrome, with the dictionary of the first of `languages`, English for now) |
 | `keepSessionCookies` | `false` | Session cookies survive a restart |
 | `engine` | | `gpu`, `compositing`, `safepointGC`, `httpCache`, `scriptTimeoutSeconds`, `extraCA` (PEM), `log`, `env` (experimental `BL_*`, `JSC_*`, `FC_*` switches; keys the core sets are rejected) |
 | `onProgress` | none | Progress of the start for a loading indicator: `{ phase, loaded, total }`, `download` with the uncompressed bytes of `engine.wasm` and `engine.data` (total from `manifest.json`, 0 when unknown) only when the files do not come from the cache, then `start` |
@@ -189,6 +189,12 @@ menu: the engine hit tests the point again like Chrome's `MediaPlayerActionAt` a
 `controls`, or moves the video into or out of the host's picture-in-picture window with the page's
 events, also when the page replaced `requestPictureInPicture`; call it in the click, the host
 browser needs its activation for the window.
+`info.spelling` is the misspelled word of a menu in an editable element (`ContextMenuSpelling`:
+the word and at most 3 corrections, the best first), null elsewhere; a right click on an
+underlined word selects it like Chrome. `view.replaceMisspelling(word, replacement)` is a
+correction of the menu (an edit with the input type `insertReplacementText`),
+`view.addToDictionary(word)` its Add to dictionary: the word counts as correct from then on in
+every view and after a restart (stored with the pages' data under `/data/spelling`).
 `view.copyImage(x, y)` is Copy image of the menu: the engine copies the image at that point of a
 `context-menu` event at its full size as PNG, and the `clipboardWrite` handler gets it as
 `image`, a promise, already in the click (Safari allows a clipboard write only there). The

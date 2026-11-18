@@ -14,6 +14,7 @@
 #include FT_FREETYPE_H
 #include <harfbuzz/hb-icu.h>
 #include <harfbuzz/hb.h>
+#include <hunspell.hxx>
 #include <jpeglib.h>
 #include <libpsl.h>
 #include <libxml/parser.h>
@@ -177,6 +178,25 @@ int main()
         const char* codec = avifCodecName(AVIF_CODEC_CHOICE_AUTO, AVIF_CODEC_FLAG_CAN_DECODE);
         bool ok = codec && !std::strcmp(codec, "dav1d");
         check("libavif", ok, std::string(avifVersion()) + ", dav1d " + dav1d_version());
+    }
+
+    {
+        // Hunspell with a dictionary of two stems, one taking the plural s
+        FILE* aff = std::fopen("/tmp/smoke.aff", "w");
+        FILE* dic = std::fopen("/tmp/smoke.dic", "w");
+        if (aff && dic) {
+            std::fputs("SET UTF-8\nSFX S Y 1\nSFX S 0 s .\n", aff);
+            std::fputs("2\nword/S\nspell\n", dic);
+        }
+        if (aff)
+            std::fclose(aff);
+        if (dic)
+            std::fclose(dic);
+        Hunspell hunspell("/tmp/smoke.aff", "/tmp/smoke.dic");
+        auto guesses = hunspell.suggest("wrod");
+        bool ok = hunspell.spell(std::string("words")) && hunspell.spell(std::string("spell")) && !hunspell.spell(std::string("wrod"))
+            && !guesses.empty() && guesses[0] == "word";
+        check("hunspell", ok, "suggests " + (guesses.empty() ? std::string("nothing") : guesses[0]));
     }
 
     std::printf("%s\n", failures ? "SMOKE TEST FAILED" : "all libs ok");

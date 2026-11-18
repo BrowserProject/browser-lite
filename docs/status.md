@@ -92,7 +92,12 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Input**: keyboard incl. dead keys and IME preview (#127), Backspace and suggestions of
   Android keyboards (#411), on-screen keyboards with the page field's `autocapitalize`,
   `autocorrect` and `spellcheck` and its text before the caret, so an empty name field starts
-  with a capital and a tap after "hello wor" offers "world" (#598), clipboard with HTML and files
+  with a capital and a tap after "hello wor" offers "world" (#598), spell checking of text fields
+  like Chrome: misspelled words with the red wavy underline, the text a field has once it gets
+  the focus (in pieces, so a long text does not stall the engine) and typed words when finished,
+  a right click on one selects it and the menu offers up to 3 corrections and Add to dictionary
+  (kept for every view and the next start), the preference `spellcheck` to turn it off (before,
+  nothing was checked and the menu had no corrections, #624), clipboard with HTML and files
   (#126), copy buttons of sites through `navigator.clipboard.writeText()` and `write()` (text
   and HTML, #469; before, the promise resolved and nothing reached the clipboard), Paste buttons
   of sites through `navigator.clipboard.readText()` and `read()` after Chrome's question (text,
@@ -1063,6 +1068,11 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
+- Spell checking (#624): only the English dictionary (en_US of SCOWL) ships, so pages whose first
+  language is not English are not checked; more dictionaries are a `dict-*` line pair in
+  `deps/sources.txt` each, after a look at their licenses (most are GPL or LGPL). Chrome's Spell
+  check submenu (languages, Ask Google) and grammar checking are not there. Hunspell's code
+  (about 250 KB) stays in `engine.wasm` until `engine/hot-functions.txt` is renewed.
 - Context menu of a video: no Copy video frame like Chrome (#622).
   Copy video frame belongs in the core: the host `<video>` has the frame at its natural size,
   the engine only the frames it copies while a page draws the video, at the size on screen.

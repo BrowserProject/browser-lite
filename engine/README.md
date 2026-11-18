@@ -3,7 +3,7 @@
 The browser engine: WebCore, JavaScriptCore and our embedder compiled to `engine.js`,
 `engine.wasm` and `engine.data`, plus `engine.deferred-<n>.wasm`, chunks of the code the start and
 common pages do not run, which the host loads after the start, and `lazy/` with files it loads on
-first use (ICU data, fonts). A host (`@browser-lite/core`) loads it into a page, gives it a
+first use (ICU data, fonts, the dictionaries of the spell checker). A host (`@browser-lite/core`) loads it into a page, gives it a
 transport for TCP connections and drives it through the C exports. What has to change inside
 WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`, the
 generic code paths the port takes, for example formatting of UI strings or the focus a click
@@ -103,6 +103,11 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
     restore, Tab to links, the popup blocker: a gesture or 5 s of transient activation, the link
     address and tooltip of the mouse, none after a tap), `EditorClient.cpp` (the focused field's
     input mode and keyboard hints and the text before the caret for the host's IME field),
+    `Spelling.cpp` (spell checking like Chrome: Hunspell with the dictionary of the first
+    language from `lazy/dictionaries`, loaded on a thread of its own when a field first needs it;
+    a field's text is checked in pieces once it has the focus, typed words through WebCore),
+    `SpellingMenu.cpp` (a right click selects a misspelled word; its corrections and Add to
+    dictionary of the context menu),
     `BackForwardList.cpp`,
     `Choosers.cpp` (the host shows the `<select>` list, color and date pickers and the
     suggestions of `<input list>`; a tap on a date field and the iOS keyboard's field arrows open

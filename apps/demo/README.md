@@ -177,6 +177,8 @@ select popup) are in the same sheet.
   rows, switches for on and off; start, errors and the access code are a card over the page. On
   narrow screens the whole sheet scrolls and the close button sticks to its top (#379). A text
   field saves its edit also when Esc closes the settings or another section is chosen (#548).
+  Spell check underlines misspelled words in text fields like Chrome's "Check for spelling
+  errors", on by default (`preferences.spellcheck`).
 - **Tabs**: tabs share the width of the strip down to a minimum, then it scrolls like in Chrome
   and Firefox: the active tab stays fully in view when it becomes active (also a new tab, Ctrl+1
   to 9, Ctrl+Tab) and whenever a tab or the strip changes size, a strip the user scrolled stays

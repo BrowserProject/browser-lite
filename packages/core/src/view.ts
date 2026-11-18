@@ -19,6 +19,7 @@ import {
   unhandledKey,
 } from './keyboard.js';
 import { menuMedia } from './menu-media.js';
+import { menuSpelling } from './menu-spelling.js';
 import { PendingNavigation } from './pending.js';
 import type { Requests } from './requests.js';
 import type {
@@ -519,6 +520,25 @@ export class ViewImpl implements View {
     this.call((m) => m._bl_media_action(this.id, x, y, this.host.text(action), enable ? 1 : 0));
   }
 
+  replaceMisspelling(word: string, replacement: string): void {
+    this.spellingAction('replace', word, replacement);
+  }
+
+  addToDictionary(word: string): void {
+    this.spellingAction('add', word, '');
+  }
+
+  private spellingAction(action: 'replace' | 'add', word: string, replacement: string): void {
+    this.call((m) =>
+      m._bl_spelling_action(
+        this.id,
+        this.host.text(action),
+        this.host.text(word),
+        this.host.text(replacement),
+      ),
+    );
+  }
+
   download(url: string): void {
     this.call((m) => m._bl_download(this.id, this.host.text(url)));
   }
@@ -792,6 +812,7 @@ export class ViewImpl implements View {
           link: String(data.link ?? ''),
           image: String(data.image ?? ''),
           media: menuMedia(data.media),
+          spelling: menuSpelling(data.spelling),
           selection: String(data.selection ?? ''),
           editable: !!data.editable,
           canUndo: !!data.canUndo,

@@ -1,8 +1,9 @@
 # deps/
 
 The engine's libraries (zlib, ICU, freetype, harfbuzz, fontconfig, libxml2, sqlite, OpenSSL,
-nghttp2, libcurl, libavif with dav1d, ...) built for WASM, plus runtime files (Noto fonts,
-fontconfig config and cache, CA certificates). Skia comes with WebKit.
+nghttp2, libcurl, libavif with dav1d, Hunspell, ...) built for WASM, plus runtime files (Noto
+fonts, fontconfig config and cache, CA certificates) and the spell checker's dictionaries. Skia
+comes with WebKit.
 
 - `sources.txt`: source of each lib with version and SHA256 (or git commit). The only place
   where their versions live.
@@ -20,8 +21,11 @@ fontconfig config and cache, CA certificates). Skia comes with WebKit.
 Output: `sysroot/` (headers, static libs, pkg-config), `sysroot/runtime/` (fonts,
 fontconfig, CA certificates), which becomes `engine.data` when the engine is linked, and
 `sysroot/lazy/fonts/` (recipe `lazyfonts`: fonts the engine loads on demand, cut with
-`tools/slice-fonts.py`), which the engine build copies to `lazy/fonts/`. Both are
-gitignored. Run inside the toolchain image, see [docs/build.md](../docs/build.md).
+`tools/slice-fonts.py`) and `sysroot/lazy/dictionaries/` (recipe `dictionaries`: the Hunspell
+dictionaries of the `dict-*` lines, `<language>.aff` and `.dic` in UTF-8, en_US of SCOWL for
+now), which the engine build copies to `lazy/fonts/` and `lazy/dictionaries/`. Both are
+gitignored. Hunspell (recipe `hunspell`) is compiled from its sources directly: the configure
+script of the release does not know Emscripten. Run inside the toolchain image, see [docs/build.md](../docs/build.md).
 
 ## Building
 

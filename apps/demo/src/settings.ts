@@ -137,6 +137,7 @@ export interface Settings {
   images: boolean;
   gpc: boolean;
   saveData: boolean;
+  spellcheck: boolean;
   resolution: Resolution;
   dbLimit: number;
 }
@@ -164,6 +165,7 @@ const DEFAULTS: Settings = {
   images: true,
   gpc: false,
   saveData: false,
+  spellcheck: true,
   resolution: 'balanced',
   dbLimit: DEFAULT_DB_LIMIT_KB,
 };
@@ -268,6 +270,7 @@ export function updateStartSettings(restarted: boolean): StartSettings {
         images: current.images,
         globalPrivacyControl: current.gpc,
         saveData: current.saveData,
+        spellcheck: current.spellcheck,
       },
       maxPixelRatio,
       // Like Chrome with "Continue where you left off": session cookies stay
