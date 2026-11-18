@@ -1,0 +1,142 @@
+diff --git a/Source/WebCore/css/themeAdwaita.css b/Source/WebCore/css/themeAdwaita.css
+index fb0ee82105..51c02db5ff 100644
+--- a/Source/WebCore/css/themeAdwaita.css
++++ b/Source/WebCore/css/themeAdwaita.css
+@@ -70,3 +70,18 @@ input[type="search"]::-webkit-search-results-decoration:hover,
+ input[type="search"]::-webkit-search-cancel-button:hover {
+     opacity: 1;
+ }
++
++#if defined(WTF_PLATFORM_WASM) && WTF_PLATFORM_WASM
++/* browser-lite: buttons, checkboxes and radios take the room they take in Chrome and Firefox */
++input:is([type="button"], [type="submit"], [type="reset"]), input[type="file"]::file-selector-button, button {
++    padding-block: 1px;
++}
++
++input[type="checkbox"] {
++    margin: 3px 3px 3px 4px;
++}
++
++input[type="radio"] {
++    margin: 3px 3px 0 5px;
++}
++#endif
+diff --git a/Source/WebCore/platform/graphics/adwaita/Adwaita.h b/Source/WebCore/platform/graphics/adwaita/Adwaita.h
+index 90da495f84..78c87f13be 100644
+--- a/Source/WebCore/platform/graphics/adwaita/Adwaita.h
++++ b/Source/WebCore/platform/graphics/adwaita/Adwaita.h
+@@ -45,17 +45,26 @@ constexpr double disabledOpacity = 0.5;
+ constexpr auto arrowColorLight = SRGBA<uint8_t> { 46, 52, 54 };
+ constexpr auto arrowColorDark = SRGBA<uint8_t> { 238, 238, 236 };
+ 
++// browser-lite: the borders of text fields, buttons and toggles in Chrome's colors, which reach
++// WCAG's 3:1 non-text contrast on the field and page background (Adwaita's alpha 50 is 1.6:1)
++constexpr auto controlBorderColorLight = SRGBA<uint8_t> { 118, 118, 118 };
++constexpr auto controlBorderHoveredColorLight = SRGBA<uint8_t> { 79, 79, 79 };
++constexpr auto controlBorderColorDark = SRGBA<uint8_t> { 133, 133, 133 };
++constexpr auto controlBorderHoveredColorDark = SRGBA<uint8_t> { 172, 172, 172 };
++
+ constexpr int textFieldBorderSize = 1;
+-constexpr auto textFieldBorderColorLight = SRGBA<uint8_t> { 0, 0, 0, 50 };
++constexpr auto textFieldBorderColorLight = controlBorderColorLight;
+ constexpr auto textFieldBackgroundColorLight = Color::white;
+ 
+-constexpr auto textFieldBorderColorDark = SRGBA<uint8_t> { 255, 255, 255, 50 };
++constexpr auto textFieldBorderColorDark = controlBorderColorDark;
+ constexpr auto textFieldBackgroundColorDark = SRGBA<uint8_t> { 45, 45, 45 };
+ 
+ constexpr unsigned arrowSize = 16;
+ constexpr unsigned menuListButtonArrowSize = 16;
+ constexpr int menuListButtonFocusOffset = -2;
+ constexpr unsigned menuListButtonPadding = 5;
++// browser-lite: above and below the text 1px like Chrome, so a select is as tall as in Chrome
++constexpr unsigned menuListButtonPaddingBlock = 1;
+ constexpr int menuListButtonBorderSize = 1;
+ constexpr unsigned progressActivityBlocks = 5;
+ constexpr Seconds progressAnimationDuration = 2475_ms;
+@@ -86,20 +95,20 @@ constexpr auto buttonTextDisabledColorLight = SRGBA<uint8_t> { 0, 0, 0, 102 };
+ constexpr auto buttonTextColorDark = SRGBA<uint8_t> { 255, 255, 255 };
+ constexpr auto buttonTextDisabledColorDark = SRGBA<uint8_t> { 255, 255, 255, 127 };
+ 
+-constexpr auto buttonBorderColorLight = SRGBA<uint8_t> { 0, 0, 0, 50 };
++constexpr auto buttonBorderColorLight = controlBorderColorLight;
+ constexpr auto buttonBackgroundColorLight = SRGBA<uint8_t> { 244, 244, 244 };
+ constexpr auto buttonBackgroundPressedColorLight = SRGBA<uint8_t> { 214, 214, 214 };
+ constexpr auto buttonBackgroundHoveredColorLight = SRGBA<uint8_t> { 248, 248, 248 };
+-constexpr auto toggleBorderColorLight = SRGBA<uint8_t> { 0, 0, 0, 50 };
+-constexpr auto toggleBorderHoveredColorLight = SRGBA<uint8_t> { 0, 0, 0, 80 };
++constexpr auto toggleBorderColorLight = controlBorderColorLight;
++constexpr auto toggleBorderHoveredColorLight = controlBorderHoveredColorLight;
+ constexpr auto toggleBackgroundColorLight = Color::white;
+ 
+-constexpr auto buttonBorderColorDark = SRGBA<uint8_t> { 255, 255, 255, 50 };
++constexpr auto buttonBorderColorDark = controlBorderColorDark;
+ constexpr auto buttonBackgroundColorDark = SRGBA<uint8_t> { 52, 52, 52 };
+ constexpr auto buttonBackgroundPressedColorDark = SRGBA<uint8_t> { 30, 30, 30 };
+ constexpr auto buttonBackgroundHoveredColorDark = SRGBA<uint8_t> { 60, 60, 60 };
+-constexpr auto toggleBorderColorDark = SRGBA<uint8_t> { 255, 255, 255, 50 };
+-constexpr auto toggleBorderHoveredColorDark = SRGBA<uint8_t> { 255, 255, 255, 80 };
++constexpr auto toggleBorderColorDark = controlBorderColorDark;
++constexpr auto toggleBorderHoveredColorDark = controlBorderHoveredColorDark;
+ constexpr auto toggleBackgroundColorDark = SRGBA<uint8_t> { 45, 45, 45 };
+ 
+ constexpr double toggleSize = 14.;
+diff --git a/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp b/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp
+index 02c0095288..4e635fab72 100644
+--- a/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp
++++ b/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp
+@@ -37,10 +37,22 @@ SystemFontDatabase& SystemFontDatabase::singleton()
+     return database.get();
+ }
+ 
+-auto SystemFontDatabase::platformSystemFontShorthandInfo(FontShorthand) -> SystemFontShorthandInfo
++auto SystemFontDatabase::platformSystemFontShorthandInfo(FontShorthand fontShorthand) -> SystemFontShorthandInfo
+ {
+     // system-ui and friends: the standard font (fontconfig picks the matching Noto font)
+-    return { WebKitFontFamilyNames::standardFamily, 16, normalWeightValue() };
++    float size = 16;
++    switch (fontShorthand) {
++    case FontShorthand::WebkitMiniControl:
++    case FontShorthand::WebkitSmallControl:
++    case FontShorthand::WebkitControl:
++        // The font of form controls (html.css): 2pt less than the default 16px, 13.333px like
++        // Chrome and Firefox
++        size = 16 - 2.f * 96 / 72;
++        break;
++    default:
++        break;
++    }
++    return { WebKitFontFamilyNames::standardFamily, size, normalWeightValue() };
+ }
+ 
+ void SystemFontDatabase::platformInvalidate()
+diff --git a/Source/WebCore/rendering/adwaita/RenderThemeAdwaita.cpp b/Source/WebCore/rendering/adwaita/RenderThemeAdwaita.cpp
+index 5678a2be6f..f03e4fe2fa 100644
+--- a/Source/WebCore/rendering/adwaita/RenderThemeAdwaita.cpp
++++ b/Source/WebCore/rendering/adwaita/RenderThemeAdwaita.cpp
+@@ -373,9 +373,9 @@ Style::PaddingBox RenderThemeAdwaita::platformPopupInternalPaddingBox(const Styl
+     auto zoomedArrowSize = menuListButtonArrowSize * style.usedZoom();
+ 
+     return {
+-        Style::PaddingEdge::Fixed { static_cast<float>(menuListButtonPadding) },
++        Style::PaddingEdge::Fixed { static_cast<float>(menuListButtonPaddingBlock) },
+         Style::PaddingEdge::Fixed { static_cast<float>(menuListButtonPadding + zoomedArrowSize) },
+-        Style::PaddingEdge::Fixed { static_cast<float>(menuListButtonPadding) },
++        Style::PaddingEdge::Fixed { static_cast<float>(menuListButtonPaddingBlock) },
+         Style::PaddingEdge::Fixed { static_cast<float>(menuListButtonPadding) },
+     };
+ }
+@@ -428,10 +428,11 @@ Style::PreferredSizePair RenderThemeAdwaita::controlSize(StyleAppearance appeara
+     case StyleAppearance::Radio: {
+         auto buttonSizeWidth = zoomedSize.width();
+         auto buttonSizeHeight = zoomedSize.height();
++        // browser-lite: 13px like Chrome and Firefox
+         if (buttonSizeWidth.isSizingKeywordOrAuto())
+-            buttonSizeWidth = 12_css_px * zoomFactor;
++            buttonSizeWidth = 13_css_px * zoomFactor;
+         if (buttonSizeHeight.isSizingKeywordOrAuto())
+-            buttonSizeHeight = 12_css_px * zoomFactor;
++            buttonSizeHeight = 13_css_px * zoomFactor;
+         return { WTF::move(buttonSizeWidth), WTF::move(buttonSizeHeight) };
+     }
+     case StyleAppearance::InnerSpinButton: {

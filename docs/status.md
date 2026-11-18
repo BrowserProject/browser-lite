@@ -159,6 +159,13 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   A `<select>` whose background or border the page sets shows them like in Chrome, with the arrow
   in its text color (#606): before, the native light button covered a dark site's background, so
   Photopea's Layer and blend mode selects showed light gray text on white.
+  Form controls without author styles have Chrome's metrics (#620): a 13.333px font instead of
+  16px, a text field, button and select 24, 24 and 22 px tall like Chrome with the same font
+  (before 28, 31 and 34), 13 px checkboxes and radios with Chrome's margins, and borders in
+  Chrome's #767676 (4.5:1 on white; Adwaita's were #cdcdcd, 1.6:1, so empty checkboxes and
+  fields were hard to see). Left: the engine ships only Noto Sans, whose taller line makes them
+  3 px taller than Chrome's with Arial, and a text field's default width follows its font's
+  metrics (173 px here, 185 in Chrome with Arial).
   Words end where they end in Chrome on Linux (#572): one Ctrl+Backspace on "hello world, "
   leaves "hello world" and on "user@example.com" "user@example." (before, "hello " and
   "user@"), Ctrl+Arrow stops at punctuation, and a double click on "example" selects "example",
@@ -1044,11 +1051,6 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
-- A select keeps 5 px between its text and its top and bottom edge (Adwaita), where Chrome keeps
-  1 px, so a select the page gives a small fixed height (30 px with a 4 px border) clips its text
-  in the engine but not in Chrome. Chrome's spacing only for styled selects would make a select
-  jump 8 px in height when `:focus` gives it a border; changing it for all selects makes the native
-  Adwaita button flatter. Needs a decision.
 - HLS as `src` (#549): the engine plays no HLS playlist itself (it fails at once, #581), Safari
   (the default identity on every host) and current Chrome do. Players that decide by the user agent still treat the
   engine as Safari: on srf.ch (Pillarbox, video.js VHS) the video starts through

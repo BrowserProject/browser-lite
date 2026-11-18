@@ -432,6 +432,15 @@ border and focus outline, and the Adwaita theme adds only the arrow inside the b
 select's text color; before, it drew its light native button over the page's background, so the
 light text of a dark site sat on a white box (patch 0157, #606). A select without them keeps
 the native Adwaita button.
+Form controls without author styles take the room they take in Chrome (patch 0161): the font
+of `-webkit-small-control`, which `html.css` gives inputs, selects and buttons, is 13.333px
+(16px less 2pt, `SystemFontDatabaseWasm.cpp`) like in Chrome and Firefox, a select keeps 1 px
+above and below its text instead of Adwaita's 5, buttons 1 px (`themeAdwaita.css` for the port),
+checkboxes and radios are 13 px with Chrome's margins. With the same font (Noto Sans) a text
+field, button and select are as tall as in Chrome (24, 24 and 22 px). The Adwaita theme draws the
+borders of text fields, buttons, selects, checkboxes and radios in Chrome's #767676 (dark
+#858585, `Adwaita.h`): Adwaita's black at alpha 50 came out as #cdcdcd on white, 1.6:1, below
+WCAG's 3:1 for non-text contrast.
 Words end where they end in Chrome on Linux (#572). The engine's ICU data has Chromium's word
 break rules: `tools/icu-word-rules.cpp`, built with the sysroot's ICU and run in node during the
 engine build, takes the rules ICU stores in its `word.brk`, makes a full stop between letters

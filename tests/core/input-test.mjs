@@ -56,8 +56,8 @@ const PAGE = `<!doctype html>
   #phtime, #phnoon { top: 600px; }
   #phdate, #phtime { left: 20px; }
   #phtoday, #phnoon { left: 220px; }
-  .gap { position: absolute; top: 630px; margin: 0; border: 0; padding: 0; background: none; font: 16px sans-serif; }
-  #gapempty, #gapph { top: 660px; }
+  .gap { position: absolute; top: 640px; margin: 0; border: 0; padding: 0; background: none; font: 16px sans-serif; }
+  #gapempty, #gapph { top: 670px; }
   #gapdate, #gapempty { left: 20px; }
   #gaptext, #gapph { left: 220px; }
   #blob { position: absolute; left: 600px; top: 20px; width: 120px; height: 30px; }
@@ -1043,8 +1043,8 @@ const inkExtent = async (left, top) => {
   return last - first + 1;
 };
 for (const [name, top] of [
-  ['a set', 630],
-  ['an empty', 660],
+  ['a set', 640],
+  ['an empty', 670],
 ]) {
   const field = await inkExtent(20, top);
   const text = await inkExtent(220, top);

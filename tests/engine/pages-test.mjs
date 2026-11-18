@@ -58,6 +58,10 @@
 //   select-styles.html  frame checked by check-select-styles.mjs: a select whose background or
 //                  border the page sets shows them with the arrow in its text color inside the
 //                  border like in Chrome, one without them keeps the native button (patch 0157)
+//   form-controls.html  controls without author styles have Chrome's metrics (patch 0161): 13.333px
+//                  font, text field, button and select as tall as in Chrome with the same font,
+//                  13 px checkbox and radio; check-form-controls.mjs: their borders reach 3:1
+//                  contrast on white
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -97,6 +101,12 @@ const CASES = [
   { name: 'replaced-percent-heights', size: [1280, 800], wait: 'REPLACED done' },
   { name: 'image-load-events', wait: 'IMGLOAD done' },
   { name: 'select-styles', size: [400, 220], check: 'check-select-styles.mjs' },
+  {
+    name: 'form-controls',
+    size: [300, 200],
+    wait: 'CONTROLS done',
+    check: 'check-form-controls.mjs',
+  },
   {
     name: 'cookies',
     label: 'cookies (public suffix host)',

@@ -53,7 +53,9 @@ or the page step of Space and PageDown, which was Safari's 80 % of the view inst
 Chrome's 87.5 %, or the native light button the theme drew over the background of a select the
 page had styled, so its light text on a dark site was unreadable, or the load events of images,
 which WebKit dispatched all in one task, so a carousel's listeners that lay the page out held the
-engine thread for many seconds) comes as patches
+engine thread for many seconds, or the form controls without author styles, which took the 16px
+of the standard font, Adwaita's room and its borders of 1.6:1 contrast instead of Chrome's
+13.333px, size and #767676) comes as patches
 from `patches/`.
 
 ## Folders

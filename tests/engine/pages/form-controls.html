@@ -1,0 +1,46 @@
+<!doctype html>
+<title>Form controls</title>
+<!-- Controls without author styles have Chrome's metrics (patch 0161): the font of
+     -webkit-small-control is 13.333px (16px less 2pt), a text field, button and select are as
+     tall as in Chrome with the same font (Noto Sans: 24, 24 and 22 px), a checkbox and a radio
+     13 px. check-form-controls.mjs reads the frame: the borders of the empty controls are dark
+     enough for WCAG's 3:1 non-text contrast on white (Chrome: #767676). -->
+<style>
+  body { margin: 0; background: #fff; }
+  .at { position: absolute; }
+</style>
+<input class="at" id="i" style="left: 20px; top: 20px">
+<input class="at" id="c" type="checkbox" style="left: 20px; top: 70px; margin: 0">
+<input class="at" id="r" type="radio" style="left: 60px; top: 70px; margin: 0">
+<select class="at" id="s" style="left: 20px; top: 110px"><option>Option one</option></select>
+<button class="at" id="b" style="left: 160px; top: 110px">Button text</button>
+<input class="at" id="u" type="submit" value="Send" style="left: 160px; top: 160px">
+<input class="at" id="d" type="checkbox" style="left: 100px; top: 70px">
+<input class="at" id="e" type="radio" style="left: 140px; top: 70px">
+<script>
+const box = (id) => {
+  const e = document.getElementById(id);
+  const r = e.getBoundingClientRect();
+  const s = getComputedStyle(e);
+  return { size: Number.parseFloat(s.fontSize).toFixed(3), width: r.width, height: r.height, margin: s.margin };
+};
+// Chrome 142 on Linux with Noto Sans as the control font
+const expected = {
+  i: { size: '13.333', height: 24 },
+  s: { size: '13.333', height: 22 },
+  b: { size: '13.333', height: 24 },
+  u: { size: '13.333', height: 24 },
+  c: { width: 13, height: 13 },
+  r: { width: 13, height: 13 },
+  d: { margin: '3px 3px 3px 4px' },
+  e: { margin: '3px 3px 0px 5px' },
+};
+let bad = 0;
+for (const [id, want] of Object.entries(expected)) {
+  const got = box(id);
+  const wrong = Object.keys(want).filter((key) => got[key] !== want[key]);
+  console.log(`CONTROLS ${id}=${wrong.length ? JSON.stringify(got) : 'ok'}`);
+  if (wrong.length) bad++;
+}
+console.log(`CONTROLS done=${bad ? `${bad} errors` : 'ok'}`);
+</script>
