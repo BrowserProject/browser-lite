@@ -1,10 +1,10 @@
 // Devices and permissions (devices service of the core, engine/src/DeviceClients.cpp): selecting
-// with the mouse, touch (tap, swiping scrolls), the color scheme of the system, location,
-// notifications and speech recognition through the permission handler, File System Access,
-// orientation and motion, platform features of the polyfills, an open permission request when
-// the view closes (aborted, not stored), permissions.query with the stored decisions, answers of
-// the host bridge on a quiet and on an abandoned page, the gamepad listener of the host only while
-// a page uses gamepads.
+// with the mouse, touch (tap, swiping scrolls), the color scheme, reduced motion and contrast of
+// the system, location, notifications and speech recognition through the permission handler,
+// File System Access, orientation and motion, platform features of the polyfills, an open
+// permission request when the view closes (aborted, not stored), permissions.query with the stored
+// decisions, answers of the host bridge on a quiet and on an abandoned page, the gamepad listener
+// of the host only while a page uses gamepads.
 //
 //   node tests/core/devices-test.mjs [engine-dir]
 import {
@@ -51,6 +51,9 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   #lpempty { top: 140px; width: 140px; height: 36px; }
   #lpbutton { position: absolute; left: 300px; top: 100px; width: 200px; height: 40px; font: 20px monospace; }
   #lpframe { position: absolute; left: 800px; top: 140px; width: 150px; height: 40px; border: 0; }
+  :root { --a11y: none; }
+  @media (prefers-reduced-motion: reduce) { :root { --a11y: motion; } }
+  @media (prefers-reduced-motion: reduce) and (prefers-contrast: more) { :root { --a11y: motion-contrast; } }
 </style></head><body>
 <p id="text">This sentence should be selectable with the mouse.</p>
 <div id="tap">Tap</div>
@@ -114,6 +117,13 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   const dark = matchMedia('(prefers-color-scheme: dark)');
   result('dark', dark.matches);
   dark.addEventListener('change', () => result('darkchange', dark.matches));
+  // Accessibility preferences of the host: media queries, their change events and the style
+  const motion = matchMedia('(prefers-reduced-motion: reduce)');
+  const contrast = matchMedia('(prefers-contrast: more)');
+  const a11y = () => [motion.matches, contrast.matches, getComputedStyle(document.documentElement).getPropertyValue('--a11y').trim()].join(',');
+  result('a11y', a11y());
+  motion.addEventListener('change', () => result('motionchange', a11y()));
+  contrast.addEventListener('change', () => result('contrastchange', a11y()));
   result('ontouchstart', 'ontouchstart' in window);
   // Orientation and motion sensors of the host (ENABLE_DEVICE_ORIENTATION). Chrome sends an event
   // without values on registration when it has no sensors
@@ -655,6 +665,23 @@ if (!darkArrived) {
   // A view without a rendering update logs the state of its frame pipeline after 4 s
   await page.waitForTimeout(5000);
   console.log(`     engine log:\n       ${engineLog.join('\n       ')}`);
+}
+
+// 4b) Reduced motion and more contrast of the host reach the page's media queries and its style
+check(
+  'no motion or contrast preference at the start',
+  (await result('a11y')) === 'false,false,none',
+  results.get('a11y'),
+);
+await page.emulateMedia({ reducedMotion: 'reduce' });
+const motionChange = await result('motionchange', 10000);
+check('reduced motion arrives', motionChange === 'true,false,motion', motionChange);
+if (
+  chromiumOnly("more contrast (Firefox's MediaQueryLists miss Playwright's contrast emulation)")
+) {
+  await page.emulateMedia({ contrast: 'more' });
+  const contrastChange = await result('contrastchange', 10000);
+  check('more contrast arrives', contrastChange === 'true,true,motion-contrast', contrastChange);
 }
 
 // 5) Location: the permission handler grants it, then the position arrives

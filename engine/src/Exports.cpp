@@ -47,6 +47,7 @@
 #include <WebCore/ANGLEShimWasm.h>
 #include <WebCore/MediaProducer.h>
 #include <WebCore/Page.h>
+#include <WebCore/Theme.h>
 #include <WebCore/CommonVM.h>
 #include <WebCore/Document.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
@@ -685,7 +686,8 @@ EMSCRIPTEN_KEEPALIVE void bl_set_visible(int id, int visible)
 }
 
 // flags: 1 = dark color scheme (prefers-color-scheme), 2 = touch screen,
-// 4 = mobile device (primary pointer coarse without hover)
+// 4 = mobile device (primary pointer coarse without hover), 8 = reduced motion
+// (prefers-reduced-motion), 16 = more contrast, 32 = less contrast (prefers-contrast)
 EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidth, int availableHeight, int flags)
 {
     runOnEngineThread([=] {
@@ -695,12 +697,19 @@ EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidt
         info.prefersDarkMode = flags & 1;
         info.hasTouch = flags & 2;
         info.mobile = flags & 4;
+        info.prefersReducedMotion = flags & 8;
+        info.preferredContrast = flags & 16 ? WebCore::InterfaceContrastPreference::MoreContrast
+            : flags & 32 ? WebCore::InterfaceContrastPreference::LessContrast
+            : WebCore::InterfaceContrastPreference::NoPreference;
         auto& old = WebCore::WasmPlatform::screenInfo();
         bool darkChanged = info.prefersDarkMode != old.prefersDarkMode;
         bool pointerChanged = info.hasTouch != old.hasTouch || info.mobile != old.mobile;
+        bool accessibilityChanged = info.prefersReducedMotion != old.prefersReducedMotion || info.preferredContrast != old.preferredContrast;
         WebCore::WasmPlatform::setScreenInfo(info);
         if (darkChanged)
             WebView::forEach([&](WebView& view) { view.setDarkAppearance(info.prefersDarkMode); });
+        if (accessibilityChanged)
+            WebCore::Page::forEachPage([](WebCore::Page& page) { page.accessibilitySettingsDidChange(); });
         if (pointerChanged)
             WebCore::Page::updateStyleForAllPagesAfterGlobalChangeInEnvironment();
         screenOrientationMayHaveChanged();

@@ -75,6 +75,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Show controls to check, Open, Save and Copy video address, and Picture in picture where the
   host browser has it, which also works where the page replaced `requestPictureInPicture`
   (before, the menu of a video had only the page items, #622),
+  `prefers-reduced-motion` and `prefers-contrast` of the host for the pages, with `change`
+  events when the user switches them (before, pages always saw `no-preference`, so sites kept
+  their animations and autoplaying carousels for users who asked for less motion, #623;
+  `forced-colors` stays `none` like in WebKit and in Chrome outside Windows),
   synchronous `XMLHttpRequest`, where only its page waits like below a dialog (before it always
   failed with `NetworkError`, so Akamai's bot check reloaded amazon.de in a loop, #471),
   permission prompts like Chrome's that go away when their page is left and close with Escape

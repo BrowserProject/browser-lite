@@ -5,10 +5,14 @@ import type { ColorScheme } from './types.js';
 /**
  * Screen, color scheme (prefers-color-scheme), touch screen and pixel ratio for the pages:
  * like the host, or like the emulated device (size, pixel ratio, touch, coarse pointer).
+ * prefers-reduced-motion and prefers-contrast always follow the host.
  */
 export class Screen {
   colorScheme: ColorScheme;
   private readonly dark = matchMedia('(prefers-color-scheme: dark)');
+  private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  private readonly moreContrast = matchMedia('(prefers-contrast: more)');
+  private readonly lessContrast = matchMedia('(prefers-contrast: less)');
 
   constructor(
     private readonly module: EngineModule,
@@ -32,7 +36,8 @@ export class Screen {
   }
 
   start(signal: AbortSignal): void {
-    this.dark.addEventListener('change', () => this.send(), { signal });
+    for (const query of [this.dark, this.reducedMotion, this.moreContrast, this.lessContrast])
+      query.addEventListener('change', () => this.send(), { signal });
     this.watchPixelRatio(signal);
     this.send();
   }
@@ -56,7 +61,13 @@ export class Screen {
     const device = this.config.device;
     const dark = this.colorScheme === 'system' ? this.dark.matches : this.colorScheme === 'dark';
     const touch = device ? device.touch : navigator.maxTouchPoints > 0;
-    const flags = (dark ? 1 : 0) | (touch ? 2 : 0) | (device?.mobile ? 4 : 0);
+    const flags =
+      (dark ? 1 : 0) |
+      (touch ? 2 : 0) |
+      (device?.mobile ? 4 : 0) |
+      (this.reducedMotion.matches ? 8 : 0) |
+      (this.moreContrast.matches ? 16 : 0) |
+      (this.lessContrast.matches ? 32 : 0);
     if (device)
       this.module._bl_set_screen(device.width, device.height, device.width, device.height, flags);
     else

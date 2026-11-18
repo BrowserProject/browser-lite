@@ -1,0 +1,75 @@
+diff --git a/Source/WebCore/platform/adwaita/ThemeAdwaita.cpp b/Source/WebCore/platform/adwaita/ThemeAdwaita.cpp
+index bda78cbb9f..ad6b9672cc 100644
+--- a/Source/WebCore/platform/adwaita/ThemeAdwaita.cpp
++++ b/Source/WebCore/platform/adwaita/ThemeAdwaita.cpp
+@@ -38,6 +38,10 @@
+ #include "SystemSettings.h"
+ #endif
+ 
++#if PLATFORM(WASM)
++#include "WasmPlatform.h"
++#endif
++
+ namespace WebCore {
+ using namespace WebCore::Adwaita;
+ 
+@@ -90,12 +94,21 @@ Color ThemeAdwaita::accentColor()
+ 
+ InterfaceContrastPreference ThemeAdwaita::userPreferredContrast() const
+ {
++#if PLATFORM(WASM)
++    // The system is the host browser: the embedder passes its media queries on
++    return WasmPlatform::screenInfo().preferredContrast;
++#else
+     return m_preferredContrast;
++#endif
+ }
+ 
+ bool ThemeAdwaita::userPrefersReducedMotion() const
+ {
++#if PLATFORM(WASM)
++    return WasmPlatform::screenInfo().prefersReducedMotion;
++#else
+     return m_prefersReducedMotion;
++#endif
+ }
+ 
+ } // namespace WebCore
+diff --git a/Source/WebCore/platform/adwaita/ThemeAdwaita.h b/Source/WebCore/platform/adwaita/ThemeAdwaita.h
+index dd7712add3..cb8ec2d1f3 100644
+--- a/Source/WebCore/platform/adwaita/ThemeAdwaita.h
++++ b/Source/WebCore/platform/adwaita/ThemeAdwaita.h
+@@ -51,8 +51,10 @@ private:
+ 
+     Color m_accentColor { SRGBA<uint8_t> { 52, 132, 228 } };
+ 
++#if !PLATFORM(WASM)
+     bool m_prefersReducedMotion { false };
+     InterfaceContrastPreference m_preferredContrast { InterfaceContrastPreference::NoPreference };
++#endif
+ };
+ 
+ } // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
+index 3fed20951b..4c176f4a27 100644
+--- a/Source/WebCore/platform/wasm/WasmPlatform.h
++++ b/Source/WebCore/platform/wasm/WasmPlatform.h
+@@ -36,6 +36,8 @@
+ // it gets from the host browser (screen, clipboard, user agent, ...).
+ 
+ namespace WebCore {
++
++enum class InterfaceContrastPreference : uint8_t;
+ class Pasteboard;
+ }
+ 
+@@ -69,6 +71,9 @@ struct ScreenInfo {
+     bool hasTouch { false };
+     // Mobile device: coarse primary pointer without hover
+     bool mobile { false };
++    // The host's accessibility preferences (prefers-reduced-motion, prefers-contrast), read by ThemeAdwaita
++    bool prefersReducedMotion { false };
++    InterfaceContrastPreference preferredContrast { };
+ };
+ 
+ WEBCORE_EXPORT void setScreenInfo(const ScreenInfo&);

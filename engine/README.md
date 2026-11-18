@@ -55,8 +55,8 @@ page had styled, so its light text on a dark site was unreadable, or the load ev
 which WebKit dispatched all in one task, so a carousel's listeners that lay the page out held the
 engine thread for many seconds, or the form controls without author styles, which took the 16px
 of the standard font, Adwaita's room and its borders of 1.6:1 contrast instead of Chrome's
-13.333px, size and #767676) comes as patches
-from `patches/`.
+13.333px, size and #767676, or the host's reduced motion and contrast preferences, which the
+Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
 
 ## Folders
 

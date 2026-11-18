@@ -147,6 +147,14 @@ restyles the links to it in the open documents; a document from the back/forward
 its style again when it comes back. WebCore limits `:visited` to colors and makes
 `getComputedStyle` and painting APIs report the unvisited style (#480).
 
+The pages' media queries for the user's preferences come from the host: the core watches the
+host's `matchMedia` for `prefers-color-scheme` (unless `colorScheme` fixes it),
+`prefers-reduced-motion` and `prefers-contrast` (`packages/core/src/screen.ts`) and sends them
+with the screen (`bl_set_screen`). The Adwaita theme answers WebCore's `userPrefersReducedMotion`
+and `userPreferredContrast` from that (patch 0163; it read them only from GTK's settings), and a
+change reevaluates the media queries of all pages, so their `change` events fire (#623).
+`forced-colors` stays `none`: WebKit has no forced colors mode, and Chrome has one only on Windows.
+
 ## Threads
 
 Emscripten pthreads need `SharedArrayBuffer`, hence cross-origin isolation
