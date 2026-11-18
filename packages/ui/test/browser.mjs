@@ -944,6 +944,109 @@ test('menu of the embedding page', async () => {
   });
 });
 
+test('context menu keyboard: arrows, Home, End, Enter, Space, letters, no keys for the page', async () => {
+  await page.evaluate(() => {
+    // The field that has the keyboard, like the textarea of a view, and the page's key log
+    const field = document.createElement('textarea');
+    field.id = 'page-keys';
+    document.body.append(field);
+    field.focus();
+    window.pageKeys = [];
+    field.addEventListener('keydown', (event) => window.pageKeys.push(event.key));
+    window.chosen = [];
+    window.openKeyMenu = () =>
+      ui.showMenu(
+        [
+          { id: 'select-all', label: 'Select all', action: () => window.chosen.push('select-all') },
+          { separator: true },
+          { id: 'back', label: 'Back', enabled: false, action: () => window.chosen.push('back') },
+          { id: 'forward', label: 'Forward', action: () => window.chosen.push('forward') },
+          { id: 'reload', label: 'Reload', action: () => window.chosen.push('reload') },
+          { id: 'reopen', label: 'Reopen closed tab', action: () => window.chosen.push('reopen') },
+          { id: 'print', label: 'Print…', action: () => window.chosen.push('print') },
+          { id: 'source', label: 'View page source', action: () => window.chosen.push('source') },
+        ],
+        { x: 100, y: 100 },
+      );
+  });
+  const state = () =>
+    page.evaluate(() => ({
+      open: !!document.querySelector('.bl-context-menu'),
+      highlighted: [...document.querySelectorAll('.bl-context-menu [data-bl-highlighted]')].map(
+        (node) => (node.classList.contains('bl-highlighted') ? node.dataset.blItem : '?'),
+      ),
+      chosen: window.chosen.splice(0),
+      pageKeys: window.pageKeys.splice(0),
+      focus: document.activeElement?.id,
+    }));
+  const press = async (...keys) => {
+    for (const key of keys) await page.keyboard.press(key);
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    return state();
+  };
+  const steps = {};
+  await page.evaluate(() => openKeyMenu());
+  steps.opened = await state();
+  // Down skips the disabled Back, wraps at the ends; Up from nothing starts at the end
+  steps.down = await press('ArrowDown', 'ArrowDown');
+  steps.wrap = await press('ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown');
+  steps.upWrap = await press('ArrowUp');
+  steps.end = await press('End');
+  steps.home = await press('Home');
+  // Other keys are kept from the page too: no scrolling, typing or shortcuts behind the menu
+  steps.others = await press('x', 'Tab', 'Control+a', 'ArrowLeft', 'ArrowRight');
+  steps.pageDown = await press('PageDown');
+  steps.pageUp = await press('PageUp');
+  steps.enter = await press('ArrowDown', 'Enter');
+  await page.evaluate(() => openKeyMenu());
+  steps.space = await press('ArrowUp', ' ');
+  // Several commands start with the letter: it moves to the next one; the only one runs at once
+  await page.evaluate(() => openKeyMenu());
+  steps.letterMoves = await press('r', 'r');
+  steps.letterRuns = await press('v');
+  // Enter without a highlight runs nothing; the pointer moves the highlight, the keys go on from it
+  await page.evaluate(() => openKeyMenu());
+  steps.enterNone = await press('Enter');
+  const reload = await page.locator('.bl-context-menu [data-bl-item=reload]').boundingBox();
+  await page.mouse.move(reload.x + 5, reload.y + 5);
+  steps.hover = await press('ArrowDown');
+  steps.escape = await press('Escape');
+  steps.afterClose = await press('ArrowDown');
+  await page.evaluate(() => document.getElementById('page-keys').remove());
+  const none = { chosen: [], pageKeys: [], focus: 'page-keys' };
+  assert.deepEqual(steps, {
+    opened: { open: true, highlighted: [], ...none },
+    down: { open: true, highlighted: ['forward'], ...none },
+    wrap: { open: true, highlighted: ['select-all'], ...none },
+    upWrap: { open: true, highlighted: ['source'], ...none },
+    end: { open: true, highlighted: ['source'], ...none },
+    home: { open: true, highlighted: ['select-all'], ...none },
+    others: { open: true, highlighted: ['select-all'], ...none },
+    pageDown: { open: true, highlighted: ['source'], ...none },
+    pageUp: { open: true, highlighted: ['select-all'], ...none },
+    enter: { open: false, highlighted: [], chosen: ['forward'], pageKeys: [], focus: 'page-keys' },
+    space: { open: false, highlighted: [], chosen: ['source'], pageKeys: [], focus: 'page-keys' },
+    letterMoves: { open: true, highlighted: ['reopen'], ...none },
+    letterRuns: {
+      open: false,
+      highlighted: [],
+      chosen: ['source'],
+      pageKeys: [],
+      focus: 'page-keys',
+    },
+    enterNone: { open: true, highlighted: [], ...none },
+    hover: { open: true, highlighted: ['reopen'], ...none },
+    escape: { open: false, highlighted: [], ...none },
+    afterClose: {
+      open: false,
+      highlighted: [],
+      chosen: [],
+      pageKeys: ['ArrowDown'],
+      focus: 'page-keys',
+    },
+  });
+});
+
 test('context menu of a long press', async () => {
   const result = await page.evaluate(() => {
     const view = makeView(6);

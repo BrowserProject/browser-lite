@@ -100,7 +100,7 @@ iframe.browser-frame {
   font: inherit;
   text-align: left;
 }
-.bl-menu-item:hover:not(:disabled),
+.bl-menu-item.bl-highlighted,
 .bl-option.bl-highlighted {
   background: #1a73e8;
   color: #fff;

@@ -1338,6 +1338,15 @@ svg.favicon {
 .bl-context-menu .bl-menu-item:disabled {
   opacity: 0.38;
 }
+/* One highlight for the pointer and the keyboard: the hover of the row the keys moved away from goes */
+.bl-context-menu .bl-menu-item.bl-highlighted:not(:active) {
+  --layer: var(--state-hover);
+}
+@media (hover: hover) {
+  .bl-context-menu .bl-menu-item:hover:not(.bl-highlighted, :active) {
+    --layer: transparent;
+  }
+}
 .bl-context-menu .bl-menu-header {
   max-width: min(320px, calc(100vw - 32px));
   padding: var(--space-2) var(--space-4);

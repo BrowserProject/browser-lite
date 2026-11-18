@@ -457,7 +457,9 @@ Chrome's input router the core holds later keyboard input until it answered a ke
 a shortcut, one with Ctrl, Alt or Meta or one that types no text (`key-queue.ts`): what was typed
 right after Ctrl+L goes to the address bar the shortcut focused, not to the busy page (#507).
 Typing does not wait, so the keys typed while the engine was busy reach it at once (#524). Escape is Stop there, after the page and the demo's own
-fields (#437). Paste, drag and drop and uploads write files into the engine
+fields (#437). While a select list or a menu of `@browser-lite/ui` is open it takes every keydown in
+the capture phase of the window, before the page and the demo, and the menus work like Chrome's:
+arrows that wrap, Home, End, Enter or Space and a letter (#610). Paste, drag and drop and uploads write files into the engine
 (#125, #126, #181). A drag of the page sends its data to the host (`page-drag-start`); over an
 element of the embedding page (the view canvas has the pointer captured) the core sends that
 element untrusted drag events with the data and the page a point outside the view, and a drop

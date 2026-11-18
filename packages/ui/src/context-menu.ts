@@ -72,11 +72,16 @@ interface Placement {
  * Shows a context menu at the position of `info` (relative to the view canvas), kept inside the
  * visible part of the canvas (it scrolls when it is taller). A click on a command closes the
  * menu, runs it and gives the keyboard back to the page; only a press that began on the menu (or
- * the keyboard) chooses one. Escape, a click outside, losing the window focus, closing the view
- * or a close request (`closeNewest`) close it. Only one menu is open at a time; without any
- * command none opens. Returns a function that closes the menu.
+ * the keyboard) chooses one. The keyboard works the menu like in Chrome while it is open, and no
+ * key reaches the page or the app then: the arrow keys, Home and End move a highlight over the
+ * enabled commands (wrapping around, the pointer moves it too), Enter or Space runs the
+ * highlighted one, a letter highlights the next command starting with it and runs it when it is
+ * the only one. Escape, a click outside, losing the window focus, closing the view or a close
+ * request (`closeNewest`) close it. Only one menu is open at a time; without any command none
+ * opens. Returns a function that closes the menu.
  * Element: `.bl-context-menu` (with `data-bl-touch` for a long press) with `div.bl-menu-header`,
- * `button.bl-menu-item` and `hr.bl-separator`.
+ * `button.bl-menu-item` (`.bl-highlighted` and `data-bl-highlighted` on the highlighted one) and
+ * `hr.bl-separator`.
  */
 export function showContextMenu(
   view: View,
@@ -104,8 +109,8 @@ export function showContextMenu(
  * Shows a menu of the embedding page itself, like the menu of a tab in a tab strip: the same
  * element and behaviour as `showContextMenu`, at `x`, `y` in viewport coordinates (the
  * `clientX`, `clientY` of a `contextmenu` event), kept inside the visible part of the window.
- * A press on the menu does not move the keyboard focus, so it stays where it was. Returns a
- * function that closes the menu.
+ * A press on the menu does not move the keyboard focus, so it stays where it was; the keys go to
+ * the menu while it is open. Returns a function that closes the menu.
  */
 export function showMenu(
   items: MenuItem[],
@@ -140,6 +145,26 @@ function openMenu(items: MenuItem[], at: Placement, options?: UiOptions): () => 
   // The lift of a finger held down to open the menu (on a button, a row) clicks whatever lies
   // under it, maybe an item: only a press that began on the menu, or the keyboard, chooses one
   let pressed = false;
+  const commands: { button: HTMLButtonElement; item: MenuAction }[] = [];
+  let highlighted = -1;
+  const highlight = (position: number) => {
+    const old = commands[highlighted]?.button;
+    old?.classList.remove('bl-highlighted');
+    if (old) delete old.dataset.blHighlighted;
+    highlighted = position;
+    const button = commands[position]?.button;
+    if (!button) return;
+    button.classList.add('bl-highlighted');
+    button.dataset.blHighlighted = '';
+    button.scrollIntoView?.({ block: 'nearest' });
+  };
+  const choose = (item: MenuAction) => {
+    close();
+    void Promise.resolve()
+      .then(() => item.action())
+      .catch((error: unknown) => console.warn('context menu:', error));
+    at.chosen?.();
+  };
 
   for (const item of entries) {
     if (isSeparator(item)) {
@@ -161,15 +186,42 @@ function openMenu(items: MenuItem[], at: Placement, options?: UiOptions): () => 
     button.disabled = item.enabled === false;
     if (item.id) button.dataset.blItem = item.id;
     button.addEventListener('click', (event) => {
-      if (!pressed && event.detail !== 0) return;
-      close();
-      void Promise.resolve()
-        .then(() => item.action())
-        .catch((error: unknown) => console.warn('context menu:', error));
-      at.chosen?.();
+      if (pressed || event.detail === 0) choose(item);
     });
+    if (!button.disabled) {
+      const position = commands.length;
+      commands.push({ button, item });
+      button.addEventListener('pointerenter', () => highlight(position));
+      button.addEventListener('pointerleave', () => highlighted === position && highlight(-1));
+    }
     menu.append(button);
   }
+
+  // Keys go to the menu wherever the focus is (the page or a field of the app keeps it)
+  const onKey = (event: Event) => {
+    const e = event as KeyboardEvent;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const key = typeof e.key === 'string' ? e.key : '';
+    const move = moveInMenu(key, highlighted, commands.length);
+    if (key === 'Escape') {
+      close();
+    } else if (move !== null) {
+      highlight(move);
+    } else if (key === 'Enter' || key === ' ') {
+      const command = commands[highlighted];
+      if (command) choose(command.item);
+    } else if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing) {
+      const found = findByLetter(
+        key,
+        commands.map((command) => command.item.label),
+        highlighted,
+      );
+      if (found) highlight(found.position);
+      const command = commands[highlighted];
+      if (found?.only && command) choose(command.item);
+    }
+  };
 
   const stopListening = listen([
     [
@@ -180,17 +232,7 @@ function openMenu(items: MenuItem[], at: Placement, options?: UiOptions): () => 
       },
       true,
     ],
-    [
-      win,
-      'keydown',
-      (event) => {
-        if ((event as KeyboardEvent).key !== 'Escape') return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        close();
-      },
-      true,
-    ],
+    [win, 'keydown', onKey, true],
     [win, 'blur', close],
     [
       menu,
@@ -207,6 +249,49 @@ function openMenu(items: MenuItem[], at: Placement, options?: UiOptions): () => 
   root.append(menu);
   place(menu, at, win);
   return close;
+}
+
+/**
+ * Position a navigation key moves the highlight of a menu with `count` commands to, from
+ * `position` (-1 for none), wrapping around like Chrome's menus; null when the key does not move.
+ */
+export function moveInMenu(key: string, position: number, count: number): number | null {
+  if (count === 0) return null;
+  switch (key) {
+    case 'ArrowDown':
+      return position < 0 || position >= count - 1 ? 0 : position + 1;
+    case 'ArrowUp':
+      return position <= 0 ? count - 1 : position - 1;
+    case 'Home':
+    case 'PageUp':
+      return 0;
+    case 'End':
+    case 'PageDown':
+      return count - 1;
+    default:
+      return null;
+  }
+}
+
+/**
+ * The next command after `position` whose label starts with the typed `key` (wrapping around),
+ * and whether it is the only one, which Chrome then runs right away; null without a match.
+ */
+export function findByLetter(
+  key: string,
+  labels: readonly string[],
+  position: number,
+): { position: number; only: boolean } | null {
+  const letter = key.toLowerCase();
+  const matches = labels.flatMap((label, index) =>
+    label.trim().toLowerCase().startsWith(letter) ? [index] : [],
+  );
+  const first = matches[0];
+  if (first === undefined) return null;
+  return {
+    position: matches.find((index) => index > position) ?? first,
+    only: matches.length === 1,
+  };
 }
 
 /** Room kept between the menu and the edge of the area it may cover. */

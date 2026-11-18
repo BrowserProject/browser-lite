@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { isHeader, isSeparator, normalizeMenu } from '../dist/context-menu.js';
+import {
+  findByLetter,
+  isHeader,
+  isSeparator,
+  moveInMenu,
+  normalizeMenu,
+} from '../dist/context-menu.js';
 import { defaultMenuItems } from '../dist/index.js';
 import { fakeView } from './fake-view.mjs';
 
@@ -28,6 +34,30 @@ test('normalizeMenu drops leading, trailing and double separators', () => {
   assert.deepEqual(normalizeMenu([s, a, s, s, b, s]), [a, s, b]);
   assert.deepEqual(normalizeMenu([s, s]), []);
   assert.deepEqual(normalizeMenu([]), []);
+});
+
+test('moveInMenu wraps around like Chrome and starts from either end', () => {
+  assert.equal(moveInMenu('ArrowDown', -1, 3), 0);
+  assert.equal(moveInMenu('ArrowDown', 1, 3), 2);
+  assert.equal(moveInMenu('ArrowDown', 2, 3), 0);
+  assert.equal(moveInMenu('ArrowUp', -1, 3), 2);
+  assert.equal(moveInMenu('ArrowUp', 0, 3), 2);
+  assert.equal(moveInMenu('ArrowUp', 2, 3), 1);
+  assert.equal(moveInMenu('Home', 2, 3), 0);
+  assert.equal(moveInMenu('PageUp', 2, 3), 0);
+  assert.equal(moveInMenu('End', -1, 3), 2);
+  assert.equal(moveInMenu('PageDown', 0, 3), 2);
+  assert.equal(moveInMenu('Enter', 0, 3), null);
+  assert.equal(moveInMenu('ArrowDown', -1, 0), null);
+});
+
+test('findByLetter goes to the next match and tells when it is the only one', () => {
+  const labels = ['Reload', 'Print…', ' reopen closed tab', 'View page source'];
+  assert.deepEqual(findByLetter('r', labels, -1), { position: 0, only: false });
+  assert.deepEqual(findByLetter('R', labels, 0), { position: 2, only: false });
+  assert.deepEqual(findByLetter('r', labels, 2), { position: 0, only: false });
+  assert.deepEqual(findByLetter('v', labels, 0), { position: 3, only: true });
+  assert.equal(findByLetter('x', labels, -1), null);
 });
 
 test('plain page: select all and navigation', () => {

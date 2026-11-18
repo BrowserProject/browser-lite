@@ -62,6 +62,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257) that gives
   the keyboard back to the page when it closes (before, arrows and PageDown went nowhere after
   signing in, #609),
+  context menus and the demo's menus (tabs, the lists of Back and Forward) worked with the keyboard
+  like Chrome's: arrows that wrap, Home, End, Enter or Space and a letter, and no key reaches the
+  page behind an open menu (before, only Escape worked and the arrows scrolled the page, #610),
   synchronous `XMLHttpRequest`, where only its page waits like below a dialog (before it always
   failed with `NetworkError`, so Akamai's bot check reloaded amazon.de in a loop, #471),
   permission prompts like Chrome's that go away when their page is left and close with Escape
