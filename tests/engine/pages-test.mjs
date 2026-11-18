@@ -52,6 +52,9 @@
 //                  descendant only of the containers its height depends on (patch 0154): same
 //                  geometry as a fresh layout, a margin that changes on one slide next to many
 //                  cards with an aspect ratio picture costs a fraction of a full relayout
+//   image-load-events.html  a pass of the shared sender of image load events ends after its time
+//                  budget (patch 0159): a timer that is due runs between expensive load
+//                  listeners, every event still comes in order, the window load after them
 //   select-styles.html  frame checked by check-select-styles.mjs: a select whose background or
 //                  border the page sets shows them with the arrow in its text color inside the
 //                  border like in Chrome, one without them keeps the native button (patch 0157)
@@ -92,6 +95,7 @@ const CASES = [
   { name: 'font-loads', size: [800, 600], wait: 'FONTLOADS done' },
   { name: 'transform-presence', size: [800, 600], wait: 'TRANSFORM done' },
   { name: 'replaced-percent-heights', size: [1280, 800], wait: 'REPLACED done' },
+  { name: 'image-load-events', wait: 'IMGLOAD done' },
   { name: 'select-styles', size: [400, 220], check: 'check-select-styles.mjs' },
   {
     name: 'cookies',

@@ -51,7 +51,9 @@ restyled the whole document from scratch when it loaded, or the transform a caro
 takes off each positioned slide to measure it, which laid out the whole page twice per slide,
 or the page step of Space and PageDown, which was Safari's 80 % of the view instead of
 Chrome's 87.5 %, or the native light button the theme drew over the background of a select the
-page had styled, so its light text on a dark site was unreadable) comes as patches
+page had styled, so its light text on a dark site was unreadable, or the load events of images,
+which WebKit dispatched all in one task, so a carousel's listeners that lay the page out held the
+engine thread for many seconds) comes as patches
 from `patches/`.
 
 ## Folders

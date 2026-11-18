@@ -1,0 +1,70 @@
+<!doctype html>
+<title>Image load events</title>
+<!-- Load events of images whose listeners take long (patch 0159): a pass of the shared event
+     sender ends after its time budget like a pass of the timers, so a timer that is due runs
+     between them instead of after all of them; all events still come, in order, and the window
+     load event waits for those of the document's images (like Blink) instead of dispatching the
+     rest of them in its own task -->
+<body>
+<script>
+const src =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+const busy = (ms) => {
+  const end = performance.now() + ms;
+  while (performance.now() < end);
+};
+const done = (result) => console.log(`IMGLOAD done=${result}`);
+let initial = 0;
+let windowLoaded = false;
+let initialTimer = 'did not run';
+const initialCount = 8;
+for (let i = 0; i < initialCount; i++) {
+  const img = document.createElement('img');
+  img.src = src;
+  img.addEventListener('load', () => {
+    if (++initial === 1)
+      setTimeout(() => {
+        initialTimer = windowLoaded ? 'ran after the window load' : 'ok';
+      }, 0);
+    busy(20);
+  });
+  document.body.append(img);
+}
+
+// Images that take a loaded picture from the list of available images: their load events wait in
+// the sender together; the first listener starts a timer
+function many() {
+  const total = 30;
+  const order = [];
+  let beforeTimer = -1;
+  for (let i = 0; i < total; i++) {
+    const img = document.createElement('img');
+    img.addEventListener('load', () => {
+      order.push(i);
+      if (order.length === 1)
+        setTimeout(() => {
+          beforeTimer = order.length;
+        }, 0);
+      busy(20);
+      if (order.length < total) return;
+      setTimeout(() => {
+        const inOrder = order.every((n, k) => n === k);
+        console.log(`IMGLOAD timer after ${beforeTimer} of ${total} load events`);
+        if (!inOrder) done(`order-${order.join(',')}`);
+        else if (beforeTimer < 1 || beforeTimer > 3) done(`timer-after-${beforeTimer}-load-events`);
+        else done('ok');
+      }, 0);
+    });
+    img.src = src;
+    document.body.append(img);
+  }
+}
+
+addEventListener('load', () => {
+  windowLoaded = true;
+  if (initial !== initialCount) done(`window-load-after-${initial}-of-${initialCount}`);
+  else if (initialTimer !== 'ok') done(`window-load-before-timer-${initialTimer.replace(/ /g, '-')}`);
+  else many();
+});
+setTimeout(() => done('timeout'), 20000);
+</script>

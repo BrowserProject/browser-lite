@@ -636,6 +636,23 @@ browser (Safari keeps Cmd+L, T and W for itself).
    score 1.42 instead of 0.99 (medians). Without the JIT the tap is still 10 to 20 % faster
    (compiled code calling functions not compiled, phase 4 of [jit.md](jit.md)), open; blick.ch
    and the heavy loads below were not measured again.
+   20min.ch on 2026-11-18 (the report: on a Moto G71 the first tap seemed lost, Back showed the
+   article for 18 s and then the list at its top): the click reached the link within 0.1 to 1.8 s
+   on the device too, the URL changes once the route's data and JS ran (locally 1.3 to 1.8 s,
+   there 20 s and more), so the tap is page JS as above. The list's position is the site's own:
+   it notes `scrollY` at each route change and scrolls back 100 ms after the route of a Back
+   rendered. On Back the site renders the list in the `popstate` task (React, locally 4.7 to
+   5.1 s, Chromium about 3.5 s), then every image of the list fires its load event and Swiper's
+   listener lays the page out (about 15000 `getComputedStyle` calls, Chromium as many); WebKit
+   dispatched these events in one task of 12 to 13 s, the list painted and the site's scroll ran
+   only after it. Now they go out in passes of at most 16 ms (#614): locally (phone emulation, 3
+   interleaved runs each) the list is back at its position after 8.6 to 9.0 s instead of 20.0 to
+   21.0 s, the longest step after Back 4.7 to 5.1 s instead of 12.3 to 12.6 s (Chromium restores
+   after about 4 s). Still open, the cost of each of Swiper's updates: in the profiled task of the
+   load events (21.5 s) the computed style reads took 13.3 s, style 7.3 s, layout 8.3 s with 4 s
+   of layer positions, and 1.4 s went to the media queries of images with `sizes` or `<picture>`,
+   which WebKit evaluates again at every layout (`Document::updateElementsAffectedByMediaQueries`),
+   also for removed images that are still alive.
    blick.ch (Next.js, 2026-11-09, local, 412x860; the report: 25 to 30 s on a Moto G71): after a
    tap the new route is in the DOM after 7 to 8 s (plain Chromium 3.5 to 6.6 s with the data
    fetch), Back shows the home page after 5 to 7.5 s (Chromium under 1 s). The page got few frames

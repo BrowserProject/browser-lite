@@ -381,7 +381,12 @@ engine thread the host's calls run in their order before the engine's own waitin
 input (like the compositor's answers, #359) is taken in between two of its tasks and before
 WebCore's timers (#365), makes WTF's
 RunLoop return between two of its functions (patch 0072, #347) and WebCore's loops of deferred
-and async scripts and of the page's event loop return after one item (patch 0074, #351). Hidden
+and async scripts and of the page's event loop return after one item (patch 0074, #351). The
+load and error events of images (WebKit's shared `EventSender`, which dispatched every waiting
+one in one task) go out in passes of at most 16 ms like WebCore's timers, ending early when input
+waits, and a document's load event waits for those of its images like in Blink instead of
+dispatching the rest at once before it (patch 0159, #614): carousels such as Swiper lay the page
+out in each image's load listener. Hidden
 views wait while the user works in a visible one (#364, see Threads). Waiting mouse moves coalesce (#350)
 into one move whose `PointerEvent.getCoalescedEvents()` lists them all, each with its own position,
 movement and time; every other trusted pointermove lists itself (#492).

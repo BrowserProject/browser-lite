@@ -1,0 +1,225 @@
+diff --git a/Source/WebCore/dom/EventSender.h b/Source/WebCore/dom/EventSender.h
+index 86aca194f7..e185894fc5 100644
+--- a/Source/WebCore/dom/EventSender.h
++++ b/Source/WebCore/dom/EventSender.h
+@@ -25,23 +25,66 @@
+ 
+ #pragma once
+ 
++#include "Document.h"
++#include "ThreadTimers.h"
+ #include "Timer.h"
+ #include <WebCore/NodeDocument.h>
++#include <wtf/ApproximateTime.h>
+ #include <wtf/CheckedPtr.h>
+ #include <wtf/Vector.h>
+ #include <wtf/WeakPtr.h>
+ 
++#if OS(EMSCRIPTEN)
++extern "C" bool bl_wtf_input_waiting();
++#endif
++
+ namespace WebCore {
+ 
+ class Page;
+ class WeakPtrImplWithEventTargetData;
+ 
++// browser-lite: holds back the load event of a document while an event of a sender that delays it
++// waits (the load event of an image, like Blink's IncrementLoadEventDelayCount)
++class EventSenderLoadEventDelay {
++    WTF_MAKE_NONCOPYABLE(EventSenderLoadEventDelay);
++public:
++    EventSenderLoadEventDelay() = default;
++    explicit EventSenderLoadEventDelay(Document& document)
++        : m_document(document)
++    {
++        document.incrementLoadEventDelayCount();
++    }
++    EventSenderLoadEventDelay(EventSenderLoadEventDelay&& other)
++        : m_document(std::exchange(other.m_document, nullptr))
++    {
++    }
++    EventSenderLoadEventDelay& operator=(EventSenderLoadEventDelay&& other)
++    {
++        if (this != &other) {
++            release();
++            m_document = std::exchange(other.m_document, nullptr);
++        }
++        return *this;
++    }
++    ~EventSenderLoadEventDelay() { release(); }
++
++    void release()
++    {
++        if (RefPtr document = std::exchange(m_document, nullptr).get())
++            document->decrementLoadEventDelayCount();
++    }
++
++private:
++    WeakPtr<Document, WeakPtrImplWithEventTargetData> m_document;
++};
++
+ template<typename T, typename WeakPtrImpl> class EventSender : public CanMakeCheckedPtr<EventSender<T, WeakPtrImpl>> {
+     WTF_MAKE_TZONE_ALLOCATED_TEMPLATE(EventSender);
+     WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(EventSender);
+     WTF_MAKE_NONCOPYABLE(EventSender);
+ public:
+-    EventSender();
++    enum class DelaysLoadEvent : bool { No, Yes };
++    explicit EventSender(DelaysLoadEvent = DelaysLoadEvent::No);
+ 
+     void dispatchEventSoon(T&, const AtomString& eventType);
+     void cancelEvent(T&);
+@@ -66,12 +109,27 @@ public:
+ 
+ private:
+     void timerFired() { dispatchPendingEvents(nullptr); }
++    static bool inputWaiting()
++    {
++#if OS(EMSCRIPTEN)
++        return bl_wtf_input_waiting();
++#else
++        return false;
++#endif
++    }
+ 
+     Timer m_timer;
++    DelaysLoadEvent m_delaysLoadEvent;
+     struct DispatchTask {
+         WeakPtr<T, WeakPtrImpl> sender;
+         AtomString eventType;
++        EventSenderLoadEventDelay loadEventDelay;
+     };
++    static void cancel(DispatchTask& task)
++    {
++        task.sender = nullptr;
++        task.loadEventDelay.release();
++    }
+     Vector<DispatchTask> m_dispatchSoonList;
+     Vector<DispatchTask> m_dispatchingList;
+ };
+@@ -85,14 +143,16 @@ WTF_MAKE_TZONE_ALLOCATED_TEMPLATE_IMPL_WITH_MULTIPLE_OR_SPECIALIZED_PARAMETERS()
+ #undef TZONE_TYPE
+ 
+ 
+-template<typename T, typename WeakPtrImpl> EventSender<T, WeakPtrImpl>::EventSender()
++template<typename T, typename WeakPtrImpl> EventSender<T, WeakPtrImpl>::EventSender(DelaysLoadEvent delaysLoadEvent)
+     : m_timer(*this, &EventSender::timerFired)
++    , m_delaysLoadEvent(delaysLoadEvent)
+ {
+ }
+ 
+ template<typename T, typename WeakPtrImpl> void EventSender<T, WeakPtrImpl>::dispatchEventSoon(T& sender, const AtomString& eventType)
+ {
+-    m_dispatchSoonList.append(DispatchTask { sender, eventType });
++    auto loadEventDelay = m_delaysLoadEvent == DelaysLoadEvent::Yes ? EventSenderLoadEventDelay { sender.document() } : EventSenderLoadEventDelay { };
++    m_dispatchSoonList.append(DispatchTask { sender, eventType, WTF::move(loadEventDelay) });
+     if (!m_timer.isActive())
+         m_timer.startOneShot(0_s);
+ }
+@@ -101,13 +161,13 @@ template<typename T, typename WeakPtrImpl> void EventSender<T, WeakPtrImpl>::can
+ {
+     // Remove instances of this sender from both lists.
+     // Use loops because we allow multiple instances to get into the lists.
+-    for (auto& [sender, eventType] : m_dispatchSoonList) {
+-        if (sender == &senderToCancel)
+-            sender = nullptr;
++    for (auto& task : m_dispatchSoonList) {
++        if (task.sender == &senderToCancel)
++            cancel(task);
+     }
+-    for (auto& [sender, eventType] : m_dispatchingList) {
+-        if (sender == &senderToCancel)
+-            sender = nullptr;
++    for (auto& task : m_dispatchingList) {
++        if (task.sender == &senderToCancel)
++            cancel(task);
+     }
+ }
+ 
+@@ -115,13 +175,13 @@ template<typename T, typename WeakPtrImpl> void EventSender<T, WeakPtrImpl>::can
+ {
+     // Remove instances of this sender from both lists.
+     // Use loops because we allow multiple instances to get into the lists.
+-    for (auto& [sender, eventType] : m_dispatchSoonList) {
+-        if (sender == &senderToCancel && eventType == eventTypeToCancel)
+-            sender = nullptr;
++    for (auto& task : m_dispatchSoonList) {
++        if (task.sender == &senderToCancel && task.eventType == eventTypeToCancel)
++            cancel(task);
+     }
+-    for (auto& [sender, eventType] : m_dispatchingList) {
+-        if (sender == &senderToCancel && eventType == eventTypeToCancel)
+-            sender = nullptr;
++    for (auto& task : m_dispatchingList) {
++        if (task.sender == &senderToCancel && task.eventType == eventTypeToCancel)
++            cancel(task);
+     }
+ }
+ 
+@@ -138,17 +198,43 @@ template<typename T, typename WeakPtrImpl> void EventSender<T, WeakPtrImpl>::dis
+     m_dispatchSoonList.checkConsistency();
+ 
+     m_dispatchingList = std::exchange(m_dispatchSoonList, { });
+-    for (auto& [weakSender, eventType] : m_dispatchingList) {
+-        if (!weakSender)
++    // browser-lite: the timer's pass ends like a pass of the timers (ThreadTimers) once it used
++    // its time or input waits, after at least one event; the rest goes first in the next pass, so
++    // input, timers and frames come between the events as between tasks. A page's own flush
++    // before its load event dispatches all (with images delaying the load event there are
++    // usually none of its own left).
++    auto deadline = page ? std::optional<ApproximateTime> { } : ApproximateTime::now() + ThreadTimers::maxDurationOfFiringTimers;
++    bool dispatched = false;
++    size_t index = 0;
++    for (; index < m_dispatchingList.size(); ++index) {
++        if (dispatched && deadline && (ApproximateTime::now() > *deadline || inputWaiting()))
++            break;
++        auto task = WTF::move(m_dispatchingList[index]);
++        if (!task.sender)
+             continue;
+-        auto sender = std::exchange(weakSender, nullptr);
++        WeakPtr sender = task.sender;
+         // browser-lite: no event in a document that waits, resumeEvents() goes on
+         if (sender->document().activeDOMObjectsAreSuspended())
+-            m_dispatchSoonList.append(DispatchTask { *sender, eventType });
+-        else if (!page || sender->document().page() == page)
+-            sender->dispatchPendingEvent(this, eventType);
+-        else
+-            dispatchEventSoon(*sender, eventType);
++            m_dispatchSoonList.append(WTF::move(task));
++        else if (!page || sender->document().page() == page) {
++            sender->dispatchPendingEvent(this, task.eventType);
++            dispatched = true;
++        } else {
++            m_dispatchSoonList.append(WTF::move(task));
++            if (!m_timer.isActive())
++                m_timer.startOneShot(0_s);
++        }
++    }
++    if (index < m_dispatchingList.size()) {
++        Vector<DispatchTask> rest;
++        for (; index < m_dispatchingList.size(); ++index) {
++            if (m_dispatchingList[index].sender)
++                rest.append(WTF::move(m_dispatchingList[index]));
++        }
++        rest.appendVector(WTF::move(m_dispatchSoonList));
++        m_dispatchSoonList = WTF::move(rest);
++        if (!m_dispatchSoonList.isEmpty())
++            m_timer.startOneShot(0_s);
+     }
+     m_dispatchingList.clear();
+ }
+diff --git a/Source/WebCore/loader/ImageLoader.cpp b/Source/WebCore/loader/ImageLoader.cpp
+index 57670f0fc6..2c46b28729 100644
+--- a/Source/WebCore/loader/ImageLoader.cpp
++++ b/Source/WebCore/loader/ImageLoader.cpp
+@@ -118,7 +118,8 @@ static TextStream& operator<<(TextStream& ts, ImageLoading loading)
+ 
+ static ImageEventSender& loadEventSender()
+ {
+-    static NeverDestroyed<ImageEventSender> sender;
++    // browser-lite: the document's load event waits for the load events of its images (Blink)
++    static NeverDestroyed<ImageEventSender> sender { ImageEventSender::DelaysLoadEvent::Yes };
+     return sender;
+ }
+ 
