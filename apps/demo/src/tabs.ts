@@ -52,6 +52,11 @@ export class Tab implements SessionTab {
   history: SessionHistory | null;
   /** Restored or discarded tab: loads on the first activation. */
   pending: { url: string; history: SessionHistory | null } | null = null;
+  /**
+   * What a restored or discarded tab loads, from its first activation until its document
+   * commits: the session keeps it meanwhile, the view has no address of its own yet.
+   */
+  restoring: { url: string; history: SessionHistory | null } | null = null;
   canGoBack = false;
   canGoForward = false;
   loading = false;
@@ -99,6 +104,11 @@ export class Tab implements SessionTab {
   blockedPopups: BlockedPopup[] = [];
   lastActive = 0;
   /**
+   * Pinned like in Chrome: only its icon, at the left of the strip with the other pinned tabs,
+   * kept by Close other tabs and Close tabs to the right. Changes through setPinned.
+   */
+  private isPinned = false;
+  /**
    * Icon in the tab: an object URL of the engine's icon that the tab owns, or before the page
    * has loaded the remembered data URL of its site.
    */
@@ -119,7 +129,10 @@ export class Tab implements SessionTab {
   private shownLabel = '';
   private hideLinkStatus: (() => void) | null = null;
 
-  constructor(view: View, init: { url?: string; title?: string; history?: SessionHistory | null }) {
+  constructor(
+    view: View,
+    init: { url?: string; title?: string; history?: SessionHistory | null; pinned?: boolean },
+  ) {
     this.view = view;
     this.url = init.url ?? view.url;
     this.title = init.title ?? '';
@@ -156,6 +169,7 @@ export class Tab implements SessionTab {
       void requestClose(this);
     });
     this.part('.close').addEventListener('click', () => requestClose(this));
+    this.markPinned(init.pinned ?? false);
     this.updateTitle();
     this.listen();
   }
@@ -164,13 +178,29 @@ export class Tab implements SessionTab {
     return this.element.querySelector(selector) as T;
   }
 
-  /** Back/forward for the session: the pending one until the first activation. */
+  /** Back/forward for the session: the one to load until the tab's document commits. */
   get sessionHistory(): SessionHistory | null {
-    return this.pending ? this.pending.history : this.history;
+    const waiting = this.pending ?? this.restoring;
+    return waiting ? waiting.history : this.history;
+  }
+
+  /** Address for the session: the one to load until the tab's document commits. */
+  get sessionURL(): string {
+    return (this.pending ?? this.restoring)?.url ?? this.url;
   }
 
   get isActive(): boolean {
     return active === this;
+  }
+
+  get pinned(): boolean {
+    return this.isPinned;
+  }
+
+  /** @internal Sets the state and look of a pinned tab; its place changes in setPinned. */
+  markPinned(pinned: boolean): void {
+    this.isPinned = pinned;
+    this.element.classList.toggle('pinned', pinned);
   }
 
   private on<K extends keyof ViewEvents>(type: K, listener: (event: ViewEvents[K]) => void) {
@@ -194,6 +224,7 @@ export class Tab implements SessionTab {
       this.url = event.url;
       if (this.committed) {
         this.committed = false;
+        this.restoring = null;
         const newTab = isNewTabPage(event.url);
         if (newTab !== this.newTab) {
           this.newTab = newTab;
@@ -491,15 +522,35 @@ export function focusPage(): void {
   }
 }
 
+/** The number of pinned tabs: they come first in the strip. */
+function pinnedCount(): number {
+  const index = list.findIndex((tab) => !tab.pinned);
+  return index < 0 ? list.length : index;
+}
+
+/**
+ * The first and last index tab may take in the strip: like Chrome a pinned tab stays among the
+ * pinned ones at the left, any other tab right of them.
+ */
+function section(tab: Tab): [number, number] {
+  const pinned = pinnedCount() - (tab.pinned && list.includes(tab) ? 1 : 0);
+  const others = list.filter((other) => other !== tab).length;
+  return tab.pinned ? [0, pinned] : [pinned, others];
+}
+
+/** Puts tab, which is not in the list, at index, kept within its section. */
+function insert(tab: Tab, index: number): void {
+  const [first, last] = section(tab);
+  const at = Math.max(first, Math.min(index, last));
+  list.splice(at, 0, tab);
+  const next = list[at + 1];
+  if (next) next.element.before(tab.element);
+  else byId('tab-list').append(tab.element);
+}
+
 function add(tab: Tab, before?: Tab): Tab {
   const index = before ? list.indexOf(before) : -1;
-  if (index >= 0) {
-    list.splice(index, 0, tab);
-    before?.element.before(tab.element);
-  } else {
-    list.push(tab);
-    byId('tab-list').append(tab.element);
-  }
+  insert(tab, index >= 0 ? index : list.length);
   watchStripTab(tab.element);
   for (const listener of created) listener(tab);
   tabsChanged();
@@ -531,17 +582,17 @@ function createView(url?: string) {
 
 /**
  * A new tab in the foreground with url (empty: a blank tab, NEW_TAB_URL: the new tab page), before
- * the tab `before`, else at the end of the strip. While no engine runs it opens once it runs
- * (null now).
+ * the tab `before`, else at the end of the strip, pinned when `pinned` (Duplicate). While no
+ * engine runs it opens once it runs (null now).
  */
-export function openTab(url: string, before?: Tab): Tab | null {
+export function openTab(url: string, before?: Tab, pinned = false): Tab | null {
   if (!engineRunning()) {
     if (url) openOnStart(url);
     return null;
   }
   const view = createView(url);
   if (!view) return null;
-  const tab = new Tab(view, { url });
+  const tab = new Tab(view, { url, pinned });
   tab.opener = active;
   activate(add(tab, before));
   return tab;
@@ -634,7 +685,12 @@ function openMenuTab(url: string, opener: Tab): void {
 export function restoredTab(entry: Omit<SessionEntry, 'active'>, before?: Tab): Tab | null {
   const view = createView();
   if (!view) return null;
-  const tab = new Tab(view, { url: entry.url, title: entry.title, history: entry.history ?? null });
+  const tab = new Tab(view, {
+    url: entry.url,
+    title: entry.title,
+    history: entry.history ?? null,
+    pinned: entry.pinned ?? false,
+  });
   tab.pending = {
     url: entry.url,
     history: entry.history?.entries?.length ? entry.history : null,
@@ -727,6 +783,7 @@ export function activate(tab: Tab): void {
 function loadPending(tab: Tab): void {
   if (!tab.pending) return;
   const { url, history } = tab.pending;
+  tab.restoring = tab.pending;
   tab.pending = null;
   if (history) tab.view.restoreHistory(history);
   else tab.view.load(url);
@@ -744,12 +801,12 @@ export function reloadTab(tab: Tab): void {
 
 /**
  * Duplicate of the tab menu like Chrome: a tab with the same page and back/forward (and scroll
- * positions) right after tab, in front.
+ * positions) right after tab, in front, pinned when tab is.
  */
 export function duplicateTab(tab: Tab): Tab | null {
   const entry = sessionEntry(tab);
   const next = list[list.indexOf(tab) + 1];
-  if (!entry.history) return openTab(tab.url, next);
+  if (!entry.history) return openTab(tab.url, next, tab.pinned);
   const copy = restoredTab(entry, next);
   if (!copy) return null;
   copy.opener = active;
@@ -766,16 +823,37 @@ export function closeTabs(tabs: readonly Tab[], keep: Tab): void {
   for (const tab of tabs) void requestClose(tab);
 }
 
-/** Moves tab to index of the strip (clamped to its ends), like dragging it in Chrome. */
+/**
+ * Moves tab to index of the strip, like dragging it in Chrome: clamped to the ends of its section,
+ * so pinned tabs stay at the left and the others right of them.
+ */
 export function moveTab(tab: Tab, index: number): void {
   const from = list.indexOf(tab);
-  const to = Math.max(0, Math.min(index, list.length - 1));
-  if (from < 0 || to === from) return;
+  if (from < 0) return;
+  const [first, last] = section(tab);
+  if (Math.max(first, Math.min(index, last)) === from) return;
   list.splice(from, 1);
-  list.splice(to, 0, tab);
-  const next = list[to + 1];
-  if (next) next.element.before(tab.element);
-  else byId('tab-list').append(tab.element);
+  insert(tab, index);
+  persistSession();
+  tabsChanged();
+}
+
+/** The tabs tab can be dragged among: the pinned ones for a pinned tab, else the others. */
+export function tabsBeside(tab: Tab): readonly Tab[] {
+  return list.filter((other) => other.pinned === tab.pinned);
+}
+
+/**
+ * Pin and Unpin of the tab menu like Chrome: a tab that is pinned goes after the pinned tabs at
+ * the left of the strip, one that is unpinned right after them.
+ */
+export function setPinned(tab: Tab, pinned: boolean): void {
+  const from = list.indexOf(tab);
+  if (from < 0 || tab.pinned === pinned) return;
+  list.splice(from, 1);
+  tab.markPinned(pinned);
+  insert(tab, pinnedCount());
+  if (tab.isActive) showActiveInStrip(tab.element);
   persistSession();
   tabsChanged();
 }
@@ -837,8 +915,8 @@ function removeTab(tab: Tab): void {
   tab.dispose();
   tabsChanged();
   if (runtime.stopped) return;
-  if (!tab.closedByBrowser && !isInternal(tab.url))
-    rememberClosed({ entry: sessionEntry(tab), index });
+  const entry = sessionEntry(tab);
+  if (!tab.closedByBrowser && !isInternal(entry.url)) rememberClosed({ entry, index });
   setTimeout(persistSession);
   updateHostBeforeUnload();
   if (active !== tab) {
@@ -898,7 +976,7 @@ export function discardForMemory(): Tab | null {
   const tab = candidates[0];
   if (!tab) return null;
   const fresh = restoredTab(
-    { url: tab.url, title: tab.title, history: tab.history ?? undefined },
+    { url: tab.url, title: tab.title, history: tab.history ?? undefined, pinned: tab.pinned },
     tab,
   );
   if (!fresh) return null;

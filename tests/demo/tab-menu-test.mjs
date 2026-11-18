@@ -1,6 +1,6 @@
 // The menu of a right click on the tab strip, like Chrome: on a tab New tab to the right, Reload,
-// Duplicate, Mute tab, Close, Close other tabs, Close tabs to the right and Reopen closed tab; on
-// the free part of the strip New tab and Reopen closed tab. The right press takes no focus, so the
+// Duplicate, Pin (tests/demo/pinned-tabs-test.mjs), Mute tab, Close, Close other tabs, Close tabs
+// to the right and Reopen closed tab; on the free part of the strip New tab and Reopen closed tab. The right press takes no focus, so the
 // address bar keeps its edit; Escape closes the menu. Duplicate opens the page with back and
 // forward right after its tab, Reload of a background tab loads it again without activating it,
 // Close other tabs and Close tabs to the right keep the pressed tab and activate it when the
@@ -112,6 +112,7 @@ check(
       '-',
       'Reload',
       'Duplicate',
+      'Pin',
       'Mute tab',
       '-',
       'Close',

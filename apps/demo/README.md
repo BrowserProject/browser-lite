@@ -227,6 +227,14 @@ select popup) are in the same sheet.
   Unmute tab, Close, Close other tabs and Close tabs to the right (both through beforeunload,
   the pressed tab becomes active when the active one goes) and Reopen closed tab; on the free
   part of the strip New tab and Reopen closed tab. The right press takes no focus either (#521).
+  Pin and Unpin pin a tab like Chrome (#612): a pinned tab shows only its icon (the speaker
+  while it plays sound), sits with the other pinned tabs at the left of the strip (a tab pinned
+  goes after them, one unpinned right after them), and dragging, Ctrl+Shift+PageUp/PageDown and
+  new tabs never cross that border (`section` in `tabs.ts`). Close other tabs and Close tabs to
+  the right leave pinned tabs open, Duplicate and Reopen closed tab keep the pin, the session
+  saves it, and the pinned tabs come back also when the session is not restored (Restore tabs
+  at start off, a start address of `?url=`), in front of the start page. A restored tab that is
+  left before its page commits stays in the session with the address it loads.
 - **Back, Forward and Reload** of the toolbar take no focus from a press with the mouse or a
   finger, like in Chrome: the page has the keyboard after the action, so Space, PageDown and the
   arrow keys scroll it instead of pressing the button again; a button reached with Tab keeps the

@@ -155,19 +155,23 @@ function browserOptions(
   return debug ? withTestOptions(options) : options;
 }
 
-/** The tabs at the start: the last session (unless ?url=) or the start page. */
+/**
+ * The tabs at the start: the last session (unless ?url=) or the start page after the pinned tabs
+ * of the last session.
+ */
 function openStartTabs(restarted: boolean): void {
   // A page asked for while no engine ran opens in front of a restored session
   const typed = takeOpenOnStart();
   const url = typed || (restarted || !startUrl ? null : addressToLoad(startUrl));
   const safe = !!storage(SAFE_START_KEY, undefined, true);
   storage(SAFE_START_KEY, null, true);
-  const session = url && !typed ? null : sessionToRestore();
-  if (!session) {
+  // A start page of its own keeps only the pinned tabs, like the settings without restore
+  const session = sessionToRestore(!url || !!typed);
+  const restored = session.tabs.map((entry) => restoredTab(entry));
+  if (!session.whole || !restored.length) {
     openTab(url || DEFAULT_URL);
     return;
   }
-  const restored = session.map((entry) => restoredTab(entry));
   if (safe) {
     if (typed) openTab(typed);
     else openNewTab();
@@ -178,7 +182,7 @@ function openStartTabs(restarted: boolean): void {
     openTab(typed);
     return;
   }
-  const index = session.findIndex((entry) => entry.active);
+  const index = session.tabs.findIndex((entry) => entry.active);
   const tab = restored[Math.max(0, index)];
   if (tab) activate(tab);
   else openTab(DEFAULT_URL);

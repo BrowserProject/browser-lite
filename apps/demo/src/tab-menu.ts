@@ -8,14 +8,16 @@ import {
   reloadTab,
   reopenClosedTab,
   requestClose,
+  setPinned,
   type Tab,
 } from './tabs.js';
 import { byId } from './util.js';
 
 /**
  * The menu of a right click on the tab strip, like Chrome: on a tab New tab to the right, Reload,
- * Duplicate, Mute or Unmute tab, Close, Close other tabs, Close tabs to the right and Reopen
- * closed tab; on the free part of the strip New tab and Reopen closed tab.
+ * Duplicate, Pin or Unpin, Mute or Unmute tab, Close, Close other tabs, Close tabs to the right
+ * (both keep the pinned tabs) and Reopen closed tab; on the free part of the strip New tab and
+ * Reopen closed tab.
  */
 export function initTabMenu(): void {
   const strip = byId('tabs');
@@ -47,10 +49,14 @@ const forTab =
     if (allTabs().includes(tab)) run();
   };
 
+// Like Chrome, Close other tabs and Close tabs to the right leave the pinned tabs open
+const others = (tab: Tab) => allTabs().filter((other) => other !== tab && !other.pinned);
+const toTheRight = (tab: Tab) =>
+  allTabs()
+    .slice(allTabs().indexOf(tab) + 1)
+    .filter((other) => !other.pinned);
+
 function tabItems(tab: Tab): MenuItem[] {
-  const tabs = allTabs();
-  const others = tabs.filter((other) => other !== tab);
-  const right = tabs.slice(tabs.indexOf(tab) + 1);
   return [
     {
       id: 'new-tab-right',
@@ -61,6 +67,11 @@ function tabItems(tab: Tab): MenuItem[] {
     { id: 'reload', label: 'Reload', action: forTab(tab, () => reloadTab(tab)) },
     { id: 'duplicate', label: 'Duplicate', action: forTab(tab, () => duplicateTab(tab)) },
     {
+      id: 'pin',
+      label: tab.pinned ? 'Unpin' : 'Pin',
+      action: forTab(tab, () => setPinned(tab, !tab.pinned)),
+    },
+    {
       id: 'mute',
       label: tab.view.muted ? 'Unmute tab' : 'Mute tab',
       action: forTab(tab, () => tab.toggleMuted()),
@@ -70,19 +81,14 @@ function tabItems(tab: Tab): MenuItem[] {
     {
       id: 'close-others',
       label: 'Close other tabs',
-      enabled: others.length > 0,
-      action: forTab(tab, () =>
-        closeTabs(
-          allTabs().filter((other) => other !== tab),
-          tab,
-        ),
-      ),
+      enabled: others(tab).length > 0,
+      action: forTab(tab, () => closeTabs(others(tab), tab)),
     },
     {
       id: 'close-right',
       label: 'Close tabs to the right',
-      enabled: right.length > 0,
-      action: forTab(tab, () => closeTabs(allTabs().slice(allTabs().indexOf(tab) + 1), tab)),
+      enabled: toTheRight(tab).length > 0,
+      action: forTab(tab, () => closeTabs(toTheRight(tab), tab)),
     },
     { separator: true },
     reopen(),

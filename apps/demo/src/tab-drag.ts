@@ -1,4 +1,4 @@
-import { allTabs, moveTab, type Tab } from './tabs.js';
+import { allTabs, moveTab, type Tab, tabsBeside } from './tabs.js';
 import { byId } from './util.js';
 
 // CSS px along the strip before a press becomes a drag: a click only activates the tab
@@ -7,7 +7,8 @@ const THRESHOLD = 5;
 /**
  * Reordering tabs by dragging them with the mouse or a pen, like Chrome and Firefox: the tab
  * follows the pointer along the strip and takes the place of a neighbour once it covers half of
- * it. A finger keeps scrolling the strip.
+ * it. A pinned tab moves only among the pinned tabs, another tab only right of them. A finger
+ * keeps scrolling the strip.
  */
 export function initTabDrag(): void {
   const strip = byId('tab-list');
@@ -38,10 +39,10 @@ function follow(strip: HTMLElement, tab: Tab, down: PointerEvent): void {
   const grab = down.clientX - home(node).left;
 
   const place = (x: number) => {
-    const tabs = allTabs();
+    const tabs = tabsBeside(tab);
     const first = tabs[0];
     const last = tabs.at(-1);
-    if (!first || !last || !tabs.includes(tab)) return;
+    if (!first || !last || !allTabs().includes(tab)) return;
     const { width } = home(node);
     const left = Math.min(
       Math.max(x - grab, home(first.element).left),
