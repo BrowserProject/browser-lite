@@ -105,9 +105,10 @@ const keyboardBackspace = async () => {
   });
 };
 
-// The caret at the end of the input (a click right of its text)
+// The caret at the end of the input (a click right of its text); the text before the caret
+// reaches the IME field after the click
 await page.mouse.click(...(await at(300, 35)));
-await page.waitForTimeout(300);
+await waitFor(async () => (await imeValue()) === 'hello world', 10000);
 await page.keyboard.insertText('x');
 await page.keyboard.insertText('y');
 let text = await valueIs('a', 'hello worldxy');

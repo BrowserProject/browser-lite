@@ -236,8 +236,15 @@ check(
   focus.focus.length === 0 && focus.active && (await imeText()) === 'Hi',
   JSON.stringify(focus),
 );
+// The focus comes with the text before the new caret, the IME field is emptied after it
 await page.mouse.click(box.x + 22, box.y + 35);
-await waitFor(async () => (await imeFocus().then((f) => (focus = f))).focus.length > 0, 10000);
+const focusedAgain = [];
+await waitFor(async () => {
+  focusedAgain.push(...(await imeFocus()).focus);
+  return focusedAgain.length > 0 && (await imeText()) === '';
+}, 10000);
+const afterEmptied = await imeFocus();
+focus = { ...afterEmptied, focus: [...focusedAgain, ...afterEmptied.focus] };
 check(
   'keyboard (iOS): focused again when a tap moves the caret after typing',
   focus.focus.length === 1 && focus.active && (await imeText()) === '',
