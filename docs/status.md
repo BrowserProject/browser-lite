@@ -59,7 +59,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Atom feeds without style information as an XML tree like Chrome (before, their text ran
   together, #540),
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,
-  HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257),
+  HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257) that gives
+  the keyboard back to the page when it closes (before, arrows and PageDown went nowhere after
+  signing in, #609),
   synchronous `XMLHttpRequest`, where only its page waits like below a dialog (before it always
   failed with `NetworkError`, so Akamai's bot check reloaded amazon.de in a loop, #471),
   permission prompts like Chrome's that go away when their page is left and close with Escape

@@ -634,7 +634,7 @@ test('permission prompt: Escape before the view keyboard, not from other fields'
   );
 });
 
-test('login prompt: texts, keyboard, queue, cancel and abort', async () => {
+test('login prompt: texts, keyboard, queue, cancel, abort and focus', async () => {
   await page.evaluate(() => {
     const { authenticate } = ui.loginPrompt({ texts: { signIn: 'Anmelden' } });
     window.login = { authenticate, answers: [] };
@@ -642,6 +642,7 @@ test('login prompt: texts, keyboard, queue, cancel and abort', async () => {
   await page.evaluate(
     ([first, second, third]) => {
       const view = makeView(5);
+      window.login.view = view;
       const controller = new AbortController();
       window.login.abort = () => controller.abort();
       for (const [index, origin] of [first, second, third].entries())
@@ -694,6 +695,9 @@ test('login prompt: texts, keyboard, queue, cancel and abort', async () => {
   await page.keyboard.type('sécret');
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.login.answers.length === 1);
+  const viewFocus = () =>
+    page.evaluate(() => window.login.view.calls.filter(([name]) => name === 'focus').length);
+  assert.equal(await viewFocus(), 0, 'the next dialog takes the focus, not the view');
   // The aborted one leaves the queue, the next shows without the warning
   await page.evaluate(() => window.login.abort());
   await page.waitForFunction(() => window.login.answers.length === 2);
@@ -702,20 +706,49 @@ test('login prompt: texts, keyboard, queue, cancel and abort', async () => {
   assert.equal(third.warning, null);
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => window.login.answers.length === 3);
+  assert.equal(await viewFocus(), 1, 'the focus goes back to the view after the last dialog');
   // Cancel button of another request
-  const last = page.evaluate(() =>
-    window.login.authenticate({
-      view: makeView(6),
+  const last = page.evaluate(() => {
+    window.login.view = makeView(6);
+    return window.login.authenticate({
+      view: window.login.view,
       url: 'https://x.example/',
       origin: 'https://x.example',
       realm: '',
       scheme: 'digest',
       retry: true,
       signal: new AbortController().signal,
-    }),
-  );
+    });
+  });
   await page.click('.bl-login-prompt [data-bl-answer=cancel]');
   assert.equal(await last, null);
+  assert.equal(await viewFocus(), 1);
+  // No focus for a view that closed or when the focus moved elsewhere (the address bar)
+  const unfocused = await page.evaluate(async () => {
+    const ask = (view, signal = new AbortController().signal) =>
+      window.login.authenticate({
+        view,
+        url: 'https://y.example/',
+        origin: 'https://y.example',
+        realm: '',
+        scheme: 'basic',
+        retry: false,
+        signal,
+      });
+    const closed = makeView(7);
+    const answer = ask(closed);
+    closed.closed = true;
+    window.key('Escape');
+    await answer;
+    const elsewhere = makeView(8);
+    const controller = new AbortController();
+    const aborted = ask(elsewhere, controller.signal);
+    document.activeElement.blur();
+    controller.abort();
+    await aborted;
+    return [closed, elsewhere].map((view) => view.calls.length);
+  });
+  assert.deepEqual(unfocused, [0, 0]);
   assert.deepEqual(await page.evaluate(() => window.login.answers), [
     [0, { username: 'ann', password: 'sécret' }],
     [1, null],

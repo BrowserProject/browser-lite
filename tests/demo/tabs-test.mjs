@@ -653,6 +653,10 @@ check(
 );
 await loginPrompt.locator('button[data-bl-answer=cancel]').click();
 check(
+  'sign in prompt closed: the page has the keyboard focus like in Chrome',
+  await page.evaluate(() => !!window.blTest.view()?.focused),
+);
+check(
   'sign in cancelled: the 401 page under its address',
   (await activeIs('Denied')) && (await address()) === `${siteURL}auth`,
   `${await activeTitle()}, ${await address()}`,

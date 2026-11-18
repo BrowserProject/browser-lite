@@ -12,7 +12,8 @@ interface Pending {
  * Asks like Chrome's sign-in dialog: "Sign in", the origin of the server, for plain http the
  * warning that the connection is not private, user name, password, Cancel and Sign in. Like
  * Chrome it does not show the realm, a text the server chooses. One dialog at a time, the others
- * wait in order; an aborted request leaves the queue. Enter signs in, Escape cancels. Element:
+ * wait in order; an aborted request leaves the queue. Enter signs in, Escape cancels; the focus
+ * goes to the user name and back to the view afterwards. Element:
  * `.bl-login-prompt` (a form) with `h2`, `p.bl-origin`, `p.bl-not-private`, `input[name=username]`,
  * `input[name=password]` and `button[data-bl-answer=cancel|sign-in]`.
  */
@@ -77,22 +78,27 @@ export function loginPrompt(options?: UiOptions): Pick<RequestHandlers, 'authent
     username.focus();
   };
 
-  const remove = (pending: Pending) => {
+  // Like Chrome the focus goes back to the page when the dialog had it and no other one follows
+  const settle = (pending: Pending, answer: AuthCredentials | null) => {
     const position = queue.indexOf(pending);
-    if (position >= 0) queue.splice(position, 1);
+    if (position < 0) return;
+    queue.splice(position, 1);
+    pending.request.signal.removeEventListener('abort', pending.onAbort);
+    let focused = false;
     if (shown?.pending === pending) {
-      shown.form.remove();
+      const { form } = shown;
+      focused = form.contains(form.ownerDocument.activeElement);
+      form.remove();
       shown = null;
     }
+    pending.resolve(answer);
+    showNext();
+    const { view } = pending.request;
+    if (focused && !shown && !view.closed) view.focus();
   };
 
   const answerShown = (answer: AuthCredentials | null) => {
-    if (!shown) return;
-    const { pending } = shown;
-    remove(pending);
-    pending.request.signal.removeEventListener('abort', pending.onAbort);
-    pending.resolve(answer);
-    showNext();
+    if (shown) settle(shown.pending, answer);
   };
 
   return {
@@ -105,11 +111,7 @@ export function loginPrompt(options?: UiOptions): Pick<RequestHandlers, 'authent
         const pending: Pending = {
           request,
           resolve,
-          onAbort: () => {
-            remove(pending);
-            resolve(null);
-            showNext();
-          },
+          onAbort: () => settle(pending, null),
         };
         request.signal.addEventListener('abort', pending.onAbort, { once: true });
         queue.push(pending);

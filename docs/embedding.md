@@ -253,7 +253,8 @@ cancel, the page shows the 401 response), like Chrome only for the main frame an
 loads, never for workers, `credentials: 'omit'` or requests with their own `Authorization`
 header. The engine keeps the credentials in memory for the session, per realm; they are gone
 after a restart of the engine. Show the `origin` of the request, not the `realm` (a text of the
-server); `loginPrompt` of `@browser-lite/ui` does this.
+server); `loginPrompt` of `@browser-lite/ui` does this and, like Chrome, gives the keyboard
+back to the view when it closes (`view.focus()`, as `pageDialogs` does).
 
 `services` decides what pages can reach at all; a feature without its service is missing for the
 pages. `defaultServices()` is `[audio(), media(), capture(), devices()]`. `webrtc()` is opt-in:
