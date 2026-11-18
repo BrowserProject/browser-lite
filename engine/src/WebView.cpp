@@ -885,6 +885,7 @@ bool WebView::renderCompositedFrame(IntRect*)
         m_page->updateRendering();
         m_page->finalizeRenderingUpdate({ FinalizeRenderingUpdateFlags::ApplyScrollingTreeLayerPositions });
     }
+    m_touchSelection.update(*m_page);
     // The compositor keeps showing the page left; the layers keep their state until the flush
     // after the hold
     if (m_paintHeld) {
@@ -947,6 +948,7 @@ bool WebView::renderFrame(IntRect* dirtyOut)
         // requestAnimationFrame callbacks, animations, style, layout, ...
         m_page->updateRendering();
         m_page->finalizeRenderingUpdate({ });
+        m_touchSelection.update(*m_page);
         // Changes inside layers damage only the layers
         if (m_layersWithoutCompositor)
             addDamage(IntRect { { }, m_size });
@@ -1769,7 +1771,9 @@ void WebView::contextMenu(double x, double y)
     // menu, which then offers to copy it, opens when the finger lifts: WebKit dispatches no
     // contextmenu while a touch pointer is down
     if (m_touchPointer) {
-        selectForLongPress(*frame, LayoutPoint(view->windowToContents(flooredIntPoint(position))));
+        m_touchSelection.change(*m_page, [&] {
+            selectForLongPress(*frame, LayoutPoint(view->windowToContents(flooredIntPoint(position))));
+        });
         m_longPressMenu = position;
         return;
     }
@@ -1812,6 +1816,15 @@ void WebView::showContextMenu(DoublePoint position)
         return;
     auto result = controller.hitTestResult();
     controller.clearContextMenu();
+    notifyContextMenu(position, result, result.isContentEditable());
+}
+
+// The event 'context-menu' with what the hit test found at the point and the focused frame's
+// selection and undo state
+void WebView::notifyContextMenu(DoublePoint position, const HitTestResult& result, bool editable)
+{
+    double x = position.x();
+    double y = position.y();
     String selection;
     bool canUndo = false;
     bool canRedo = false;
@@ -1827,7 +1840,7 @@ void WebView::showContextMenu(DoublePoint position)
         "\",\"media\":"_s, mediaMenuJSON(result),
         ",\"spelling\":"_s, spellingMenuJSON(*m_page, result),
         ",\"selection\":\""_s, jsonEscape(selection.left(200)),
-        "\",\"editable\":"_s, result.isContentEditable() ? "true"_s : "false"_s,
+        "\",\"editable\":"_s, editable ? "true"_s : "false"_s,
         ",\"canUndo\":"_s, canUndo ? "true"_s : "false"_s, ",\"canRedo\":"_s, canRedo ? "true"_s : "false"_s,
         ",\"canGoBack\":"_s, backForward.canGoBackOrForward(-1) ? "true"_s : "false"_s,
         ",\"canGoForward\":"_s, backForward.canGoBackOrForward(1) ? "true"_s : "false"_s, '}'));
@@ -1928,8 +1941,33 @@ void WebView::savePage()
 
 void WebView::executeCommand(const String& name)
 {
-    if (RefPtr frame = m_page->focusController().focusedOrMainFrame())
-        frame->editor().command(name).execute();
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return;
+    // Select all of the menu of a selection with handles shows them around everything, like Chrome
+    if (name == "SelectAll"_s && m_touchSelection.isActive()) {
+        m_touchSelection.change(*m_page, [&] {
+            frame->editor().command(name).execute();
+        });
+        return;
+    }
+    frame->editor().command(name).execute();
+}
+
+void WebView::selectionHandle(bool end, double x, double y, bool done)
+{
+    if (!m_touchSelection.isActive())
+        return;
+    m_touchSelection.moveHandle(end, FloatPoint(x, y));
+    // Like Chrome's menu after a handle drag (no contextmenu event for the page): what the
+    // selection offers, below the edge of the dragged end
+    if (!done)
+        return;
+    auto point = m_touchSelection.menuPoint(end);
+    // The edges of the final selection reach the host before the menu that keeps clear of them
+    m_touchSelection.update(*m_page);
+    if (point)
+        notifyContextMenu(DoublePoint { point->x(), point->y() }, HitTestResult { }, m_touchSelection.isEditable());
 }
 
 // Finished text from the host's text input (IME, dead keys, on-screen keyboard)

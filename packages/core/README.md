@@ -35,6 +35,13 @@ canvas fitted to damage that keeps coming at one place (a pulsing ad placeholder
 holds the host layers (`view-host-layers.ts`): a canvas per layer that only animates its opacity
 and transform (a pulsing placeholder or dot), whose animation runs as a Web Animation, so the engine
 sends no frames for it, and right above it a canvas without animation for the page's layers over it.
+Above the damage tiles lie the selection handles of a selection a long press made
+(`selection-handles.ts`, `[data-bl-selection-handle="start"]` and `"end"`, drawn in
+`--bl-selection-handle-color`, by default `#1a73e8`): like Chrome and Safari on phones the finger
+drags them to extend or shrink the selection, and on release the view emits `context-menu` for
+the selection (`touch` true), like Chrome's menu after a handle drag. The menus of a long press
+and of a released handle carry `selectionBounds`, the selection with its handles, which a menu
+keeps clear of (`showContextMenu` of `@browser-lite/ui` does).
 The canvas shows the page's frames pixel for pixel from its top left (its box is the pixel ratio
 times the container, scaled back with `transform`), so size the container, not the canvas.
 Overlays of your own inside the container need a `z-index`; for the page the mouse leaves when it
@@ -151,7 +158,7 @@ what a browser UI has to do, and nothing happens without a listener:
 | `open-tab` | Ctrl/Cmd, middle or Shift click on a link, also one with `target=_blank`, or `view.viewSource()` (`view-source:<url>`, `foreground`): open `url` in a new view as `disposition` says (`background`, `foreground` or `window`, like Chrome), or ignore it |
 | `external-url` | `mailto:`, `tel:` and app links: hand `url` to the host, or ignore it |
 | `popup-blocked` | A popup without a user gesture did not open (like in Chrome): show that, offer to open `url` and to allow the site with `browser.setPermission(origin, 'popups', 'grant')` |
-| `context-menu` | A right click, long press (`touch` true, the menu comes when the finger lifts), menu key or Shift+F10 (for the focused element, the selection or the corner of the view, like Chrome on Linux) the page did not handle: show a menu (`showContextMenu` and `defaultMenuItems` of `@browser-lite/ui`). With the link, image and selection there, whether the point is editable and whether the page has an edit to undo or redo (`canUndo`, `canRedo`) |
+| `context-menu` | A right click, long press (`touch` true, the menu comes when the finger lifts), the release of a selection handle (`touch` true, only the selection), menu key or Shift+F10 (for the focused element, the selection or the corner of the view, like Chrome on Linux) the page did not handle: show a menu (`showContextMenu` and `defaultMenuItems` of `@browser-lite/ui`). With the link, image and selection there, whether the point is editable and whether the page has an edit to undo or redo (`canUndo`, `canRedo`) |
 | `unhandled-key` | A keydown into the page (while `view.focused`) that the page did not handle (no `preventDefault`, editing command or default action): run your keyboard shortcut for it, like Chrome, where the page gets Ctrl+F or Ctrl+U first. Call `preventDefault` on the host keydown of such a shortcut and let it through to the view; run the ones the page must never get (Ctrl+T, Ctrl+W) on the host keydown right away. Keys typed after a keydown with Ctrl, Alt or Meta or one that types no text (Tab, Escape, F-keys, arrows) wait until the page answered it and then go to whatever has the focus: move it in this listener (to your address bar), and they reach that element as host key events, with their characters typed into a field. Typing (characters, Space, Enter, Backspace, Delete) does not wait, so a shortcut on such a key cannot take the keys after it |
 | `print` | `window.print()` or `view.print()`: show or save the PDF |
 | `close` | The view is closed (`window.close()` of the page or `view.close()`): remove its UI |

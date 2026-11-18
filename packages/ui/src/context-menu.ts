@@ -71,6 +71,11 @@ interface Placement {
   /** Marks the menu with `data-bl-view` and `data-bl-touch`. */
   view?: View;
   touch?: boolean;
+  /**
+   * Rows the menu keeps clear of (a selection with handles, viewport coordinates): above them,
+   * else below them, else at the point.
+   */
+  clear?: { top: number; bottom: number };
 }
 
 /**
@@ -105,6 +110,10 @@ export function showContextMenu(
       until: (close) => view.on('close', close),
       view,
       touch: info.touch,
+      clear: info.selectionBounds && {
+        top: area.top + info.selectionBounds.y,
+        bottom: area.top + info.selectionBounds.y + info.selectionBounds.height,
+      },
     },
     options,
   );
@@ -327,5 +336,11 @@ function place(menu: HTMLElement, at: Placement, win: Window): void {
   style.maxHeight = `${Math.max(0, bottom - top - 2 * MARGIN)}px`;
   style.overflowY = 'auto';
   style.left = `${Math.max(left, Math.min(at.x, right - menu.offsetWidth - MARGIN))}px`;
-  style.top = `${Math.max(top + MARGIN, Math.min(at.y, bottom - menu.offsetHeight - MARGIN))}px`;
+  const height = menu.offsetHeight;
+  let y = at.y;
+  if (at.clear && at.clear.top - height - MARGIN >= top + MARGIN)
+    y = at.clear.top - height - MARGIN;
+  else if (at.clear && at.clear.bottom + height + MARGIN <= bottom - MARGIN)
+    y = at.clear.bottom + MARGIN;
+  style.top = `${Math.max(top + MARGIN, Math.min(y, bottom - height - MARGIN))}px`;
 }

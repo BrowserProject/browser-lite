@@ -4,6 +4,7 @@
 #include "Host.h"
 #include "HostClipboard.h"
 #include "Spelling.h"
+#include "WebView.h"
 
 #include <WebCore/Document.h>
 #include <WebCore/EnterKeyHint.h>
@@ -286,6 +287,12 @@ void EditorClient::respondToChangedSelection(LocalFrame* frame)
 {
     if (!frame)
         return;
+    // Like WebKit2's WebPage::didChangeSelection: a rendering update follows, which paints a
+    // selection that changed without user input (Select all, script) and moves its handles
+    if (auto* view = WebView::fromID(m_viewId)) {
+        view->touchSelection().selectionChanged(*frame);
+        view->scheduleRenderingUpdate();
+    }
     updateTextInput(*frame);
     auto& selection = frame->selection().selection();
     if (!frame->view() || !selection.isContentEditable())

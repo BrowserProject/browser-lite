@@ -22,6 +22,7 @@ import { menuMedia } from './menu-media.js';
 import { menuSpelling } from './menu-spelling.js';
 import { PendingNavigation } from './pending.js';
 import type { Requests } from './requests.js';
+import { SelectionHandles } from './selection-handles.js';
 import type {
   ClipboardWriteRequest,
   ContextMenuInfo,
@@ -115,6 +116,7 @@ export class ViewImpl implements View {
   private readonly setImeContext: (before: string) => void;
   private readonly setImeTraits: (traits: ImeTraits) => void;
   private readonly fieldArrows: { place: () => void; remove: () => void };
+  private readonly selectionHandles: SelectionHandles;
   private imeModeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly events = new Emitter<ViewEvents>();
   private readonly pending = new PendingNavigation();
@@ -165,6 +167,7 @@ export class ViewImpl implements View {
     this.setImeContext = ime.setContext;
     this.setImeTraits = ime.setTraits;
     this.fieldArrows = attachFieldArrows(this, this.ime, this.lifetime.signal);
+    this.selectionHandles = new SelectionHandles(this, this.ime, this.lifetime.signal);
     attachPointerInput(this, this.lifetime.signal);
     this.resizeObserver = new ResizeObserver(() => this.measure());
 
@@ -215,6 +218,15 @@ export class ViewImpl implements View {
     this.host.module._bl_context_menu(this.id, x, y);
   }
 
+  /**
+   * @internal A selection handle moved the start (0) or end (1) of the selection to the point;
+   * done when the finger lifted, then the engine opens the menu of the selection.
+   */
+  selectionHandle(handle: 0 | 1, x: number, y: number, done: boolean): void {
+    if (done) this.menuByTouch = true;
+    this.call((m) => m._bl_selection_handle(this.id, handle, x, y, done ? 1 : 0));
+  }
+
   /** @internal Click, key or text into the page. */
   userInput(focus = true): void {
     if (focus) {
@@ -252,6 +264,7 @@ export class ViewImpl implements View {
     this.tiles?.place();
     this.ime.remove();
     this.fieldArrows.remove();
+    this.selectionHandles.place();
     this.container = null;
     this.updateVisibility();
   }
@@ -263,6 +276,7 @@ export class ViewImpl implements View {
     this.resizeObserver.observe(this.canvas);
     this.canvas.style.display = this.visible ? 'block' : 'none';
     this.tiles?.place();
+    this.selectionHandles.place();
   }
 
   /** @internal Container while attached (fullscreen). */
@@ -313,6 +327,7 @@ export class ViewImpl implements View {
   /** @internal Sends the current size (resize, pixel ratio change). */
   measure(force = false): void {
     this.fitCanvas();
+    this.selectionHandles.place();
     const size = this.measureNow();
     if (!size || !this.alive) return;
     if (!force && size.width === this.size.width && size.height === this.size.height) return;
@@ -433,6 +448,7 @@ export class ViewImpl implements View {
     this.visible = visible;
     this.canvas.style.display = visible ? 'block' : 'none';
     this.tiles?.place();
+    this.selectionHandles.place();
     this.updateVisibility();
     if (visible) this.measure();
   }
@@ -805,7 +821,8 @@ export class ViewImpl implements View {
         if (this.tabFromFieldArrow) return;
         this.emit('take-focus', { forward: data.forward !== false });
         return;
-      case 'context-menu':
+      case 'context-menu': {
+        const selectionBounds = this.menuByTouch ? this.selectionHandles.bounds() : null;
         this.emit('context-menu', {
           x: Number(data.x) || 0,
           y: Number(data.y) || 0,
@@ -820,8 +837,10 @@ export class ViewImpl implements View {
           canGoBack: !!data.canGoBack,
           canGoForward: !!data.canGoForward,
           touch: this.menuByTouch,
+          ...(selectionBounds ? { selectionBounds } : {}),
         } satisfies ContextMenuInfo);
         return;
+      }
       case 'tiles':
         this.tiles?.add(
           Number(data.size),
@@ -837,6 +856,9 @@ export class ViewImpl implements View {
       }
       case 'cursor':
         this.canvas.style.cursor = String(data.cursor ?? '');
+        return;
+      case 'touch-selection':
+        this.selectionHandles.update(data);
         return;
       case 'caret':
         this.caret = {

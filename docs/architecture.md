@@ -470,6 +470,21 @@ finger lifts (#353), like Chrome's `HandleGestureLongPress` (`selectForLongPress
 the text of a button, a date field or media controls selects nothing (as for a mouse press), the
 pressed frame gets the focus, an editable element first gets the caret there, which focuses it,
 and white space or an empty field keeps only that caret (#607).
+The selection of a long press gets two handles like Chrome and Safari on phones (#625;
+`TouchSelection.cpp`, `selection-handles.ts`). WebKit draws none itself (on iOS they come from
+its UI process), so the engine sends the caret lines at both ends of that selection in view
+coordinates (event `touch-selection`, after every rendering update that moved them, also by a
+scroll, with `visible` false where a scrolling box or frame clips one) and the core lays two
+drops over the canvas at their bottoms. Dragging one sends the point at the middle of its line
+(`bl_selection_handle`); the engine moves that end there like WebKit's text interaction on iOS
+without flipping (`rangeForPointInRootViewCoordinates`): the hit test of a mouse drag, within the
+editable element of an editable selection, never past the other end, so one character stays.
+On release it sends the menu of the selection, like Chrome's menu after a handle drag, without a
+`contextmenu` event for the page. The menus of a long press and of a released handle carry
+`selectionBounds`, the selection with its handles as the core shows them, and `showContextMenu`
+of `@browser-lite/ui` opens such a menu above it, else below it, so the handles stay reachable
+like under Chrome's menu above a selection. Any other change of the selection (a tap, typing, script,
+another frame's focus) ends the handles; Select all keeps them.
 The menu key and Shift+F10 open the context menu like Chrome on Linux (#621): a keydown of one of
 them that the page did not handle (`WebView::contextMenuForKey`, like WebKit2's
 `contextMenuForKeyEvent`) sends the page a `contextmenu` event through WebCore's

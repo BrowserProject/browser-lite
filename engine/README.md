@@ -108,6 +108,8 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
     a field's text is checked in pieces once it has the focus, typed words through WebCore),
     `SpellingMenu.cpp` (a right click selects a misspelled word; its corrections and Add to
     dictionary of the context menu),
+    `TouchSelection.cpp` (the edges of a long press selection for the host's selection handles,
+    which move its ends; the menu of the selection after a drag),
     `BackForwardList.cpp`,
     `Choosers.cpp` (the host shows the `<select>` list, color and date pickers and the
     suggestions of `<input list>`; a tap on a date field and the iOS keyboard's field arrows open

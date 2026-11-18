@@ -5,6 +5,7 @@
 #include "ErrorPage.h"
 #include "PinchZoom.h"
 #include "ScrollingWasm.h"
+#include "TouchSelection.h"
 #include <WebCore/DragActions.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/IntSize.h>
@@ -206,6 +207,11 @@ public:
     void savePage();
     // Editor command like "Copy", "Paste", "SelectAll"
     void executeCommand(const String&);
+    // Selection handles (TouchSelection.h)
+    TouchSelection& touchSelection() { return m_touchSelection; }
+    // A handle of the host moved the start (end false) or end of the selection to the point; done:
+    // the finger lifted, the menu of the selection opens like Chrome's after a handle drag
+    void selectionHandle(bool end, double x, double y, bool done);
     void setFocused(bool);
     // Where the last input of a pointer landed (FramePause.h)
     std::optional<WebCore::DoublePoint> lastPointerPoint() const { return m_lastPointerPoint; }
@@ -305,6 +311,7 @@ private:
     // The menu key or Shift+F10 that the page did not handle: the menu of the focused element
     void contextMenuForKey();
     void showContextMenu(WebCore::DoublePoint);
+    void notifyContextMenu(WebCore::DoublePoint, const WebCore::HitTestResult&, bool editable);
     WebCore::HitTestResult menuHitTest(double x, double y);
     // True when the page handled the key (also when it called preventDefault)
     bool dispatchKeyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
@@ -323,6 +330,7 @@ private:
     Scrolling::MainFrameScrolls m_mainFrameScrolls;
 
     int m_id;
+    TouchSelection m_touchSelection { m_id };
     unsigned m_dialogBlocks { 0 };
     Deque<Function<void(WebView&)>> m_heldCommands;
     void runHeldCommands();

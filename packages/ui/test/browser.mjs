@@ -823,6 +823,23 @@ test('context menu with the default items', async () => {
     ];
     short();
     view.canvas.style.height = '300px';
+    // A selection with handles (a long press): the menu keeps clear of it, above it, else below
+    const two = [
+      { label: 'Copy', action: () => {} },
+      { label: 'Select all', action: () => {} },
+    ];
+    const bounds = (y) => ({
+      ...info,
+      touch: true,
+      selectionBounds: { x: 20, y, width: 100, height: 40 },
+    });
+    const above = ui.showContextMenu(view, bounds(200), two);
+    const aboveBox = document.querySelector('.bl-context-menu').getBoundingClientRect();
+    above();
+    const below = ui.showContextMenu(view, bounds(5), two);
+    const belowBox = document.querySelector('.bl-context-menu').getBoundingClientRect();
+    below();
+    out.clear = [aboveBox.bottom <= 60 + 200, belowBox.top >= 60 + 45, belowBox.bottom <= 360];
     ui.showContextMenu(view, info, [
       { label: 'Broken', action: () => Promise.reject(new Error('no')) },
       { separator: true },
@@ -862,6 +879,7 @@ test('context menu with the default items', async () => {
     blur: true,
     inside: [true, true, true, true],
     short: [true, true, true],
+    clear: [true, true, true],
     custom: ['BUTTON'],
     afterError: true,
   });

@@ -624,6 +624,13 @@ EMSCRIPTEN_KEEPALIVE void bl_context_menu(int id, double x, double y)
     withPointerInput(id, { { x, y } }, [=](WebView& view) { view.contextMenu(x, y); });
 }
 
+// A selection handle of the host (event 'touch-selection'): handle 0 moves the start, 1 the end
+// of the selection to the point; done 1 when the finger lifted (opens the menu of the selection)
+EMSCRIPTEN_KEEPALIVE void bl_selection_handle(int id, int handle, double x, double y, int done)
+{
+    withPointerInput(id, { { x, y } }, [=](WebView& view) { view.selectionHandle(handle == 1, x, y, done); });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_command(int id, char* name)
 {
     withInput(id, [name = takeString(name)](WebView& view) { view.executeCommand(name); });

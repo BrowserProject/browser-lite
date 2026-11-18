@@ -73,6 +73,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Spelling.cpp
     ${BL_ENGINE_SRC}/SpellingMenu.cpp
     ${BL_ENGINE_SRC}/Storage.cpp
+    ${BL_ENGINE_SRC}/TouchSelection.cpp
     ${BL_ENGINE_SRC}/UserContent.cpp
     ${BL_ENGINE_SRC}/ViewSource.cpp
     ${BL_ENGINE_SRC}/VisitedLinks.cpp

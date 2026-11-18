@@ -738,8 +738,8 @@ export interface ViewEvents {
    */
   'unhandled-key': UnhandledKey;
   /**
-   * Right click, long press, menu key or Shift+F10 the page did not handle itself: show a
-   * context menu.
+   * Right click, long press, menu key or Shift+F10 the page did not handle itself, or the release
+   * of a selection handle (the menu of the selection): show a context menu.
    */
   'context-menu': ContextMenuInfo;
   /** A PDF of the page from {@link View.print} or window.print(). */
@@ -830,6 +830,12 @@ export interface ContextMenuInfo {
   spelling: ContextMenuSpelling | null;
   /** Selected text. */
   selection: string;
+  /**
+   * The selection with selection handles and the handles below it, in CSS pixels relative to
+   * the view canvas, for a menu of a long press or a released handle: a phone's menu keeps clear
+   * of it (above it, else below it), so the handles stay reachable. Absent otherwise.
+   */
+  selectionBounds?: Rect;
   /** Over an editable element (text field, contenteditable). */
   editable: boolean;
   /** The page has an edit to undo or redo (Undo and Redo of {@link View.command}). */
@@ -838,8 +844,9 @@ export interface ContextMenuInfo {
   canGoBack: boolean;
   canGoForward: boolean;
   /**
-   * A long press of a finger (also of an emulated touch device) opened the menu, not a right
-   * click or a key: phones show a shorter menu for what was pressed, without the page commands.
+   * A long press of a finger (also of an emulated touch device) or the release of a selection
+   * handle opened the menu, not a right click or a key: phones show a shorter menu for what was
+   * pressed, without the page commands.
    */
   touch: boolean;
 }
