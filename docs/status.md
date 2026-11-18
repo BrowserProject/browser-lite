@@ -148,6 +148,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Closing a view waits at most 500 ms for a busy page's beforeunload, like Chrome (#387): Ctrl+W
   in a row while heavy tabs load closes a tab per press. The host browser's color and date pickers open at the field
   (#371; on an iPhone or iPad their sheet keeps its width and 8 px from the window edge, #473) and close when the page removes the field or navigates (#424).
+  On an iPhone or iPad the keyboard's previous and next arrows open the picker of a date, time
+  or color field or the list of a select they move to, like Safari's keyboard (#617; before, the
+  keyboard closed on the date field and only a tap on it brought the sheet; covered in Chromium by
+  `core/safari-test.mjs`, not yet checked on a device).
   Typed digits fill a date or time field part by part like in Chrome: `03152025` gives
   2025-03-15 (#570; before, the month kept taking digits and the value stayed empty), an empty
   field shows mm/dd/yyyy and --:-- -- instead of today's date and 12:30 PM in grey (#571), and a

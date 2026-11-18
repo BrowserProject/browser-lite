@@ -523,6 +523,11 @@ EMSCRIPTEN_KEEPALIVE void bl_focus_next_field(int id)
     withInput(id, [](WebView& view) { focusNextField(view.page()); });
 }
 
+EMSCRIPTEN_KEEPALIVE void bl_show_focused_picker(int id)
+{
+    withInput(id, [id](WebView& view) { showPickerOfFocusedField(id, view.page(), FocusedPicker::Any); });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_set_zoom(int id, float factor)
 {
     withView(id, [=](WebView& view) { view.setZoom(factor); });

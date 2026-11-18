@@ -1529,28 +1529,6 @@ TouchActions touchActionAt(LocalFrame& frame, DoublePoint point)
 }
 #endif
 
-#if ENABLE(TOUCH_EVENTS)
-// A tap anywhere in a date or time field opens its picker, like in mobile browsers. WebKit opens
-// it only on a click on the field itself, a tap on one of its parts (day, month, ...) just selects
-// that part: without a keyboard there was no way to enter a date. When the click opened it
-// already, a second request replaced the first in the host, used up the tap's user activation
-// and no picker came (Pixel 9)
-static void showPickerOfTappedField(int viewId, LocalFrame& frame)
-{
-    if (hasDateTimeChooser(viewId))
-        return;
-    RefPtr page = frame.page();
-    RefPtr focused = page ? page->focusController().focusedOrMainFrame() : nullptr;
-    RefPtr document = focused ? focused->document() : nullptr;
-    RefPtr element = document ? document->focusedElement() : nullptr;
-    if (RefPtr host = element ? element->shadowHost() : nullptr)
-        element = WTF::move(host);
-    RefPtr input = dynamicDowncast<HTMLInputElement>(element.get());
-    if (input && (input->isDateField() || input->isDateTimeLocalField() || input->isMonthField() || input->isTimeField() || input->isWeekField()))
-        input->showPicker();
-}
-#endif
-
 // Touch (Chromebooks): type 0 start, 1 move, 2 end, 3 cancel. Points as JSON
 // [{id, x, y, state, rx, ry, force}], state like PlatformTouchPoint::State.
 // The host learns whether the page handled the event (then no scrolling) and on
@@ -1623,7 +1601,13 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
         mouseEvent(2, -1, 0, released->x(), released->y(), 0, modifiers, 0, 0, releasedPointer);
         mouseEvent(0, 0, 1, released->x(), released->y(), 1, modifiers, 0, 0, releasedPointer);
         mouseEvent(1, 0, 0, released->x(), released->y(), 1, modifiers, 0, 0, releasedPointer);
-        showPickerOfTappedField(m_id, *frame);
+        // A tap anywhere in a date or time field opens its picker, like in mobile browsers. WebKit
+        // opens it only on a click on the field itself, a tap on one of its parts (day, month, ...)
+        // just selects that part: without a keyboard there was no way to enter a date. Not when the
+        // click opened it already: a second request replaced the first in the host, used up the
+        // tap's user activation there and no picker came (Pixel 9)
+        if (RefPtr page = frame->page())
+            showPickerOfFocusedField(m_id, *page, FocusedPicker::DateTime);
     }
     // The pointer of a finger that lifted is gone (its state would stay forever otherwise)
     for (auto id : ended)

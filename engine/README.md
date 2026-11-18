@@ -103,7 +103,8 @@ from `patches/`.
     input mode and keyboard hints and the text before the caret for the host's IME field),
     `BackForwardList.cpp`,
     `Choosers.cpp` (the host shows the `<select>` list, color and date pickers and the
-    suggestions of `<input list>`), `VisitedLinks.cpp` (`:visited`: the addresses the views
+    suggestions of `<input list>`; a tap on a date field and the iOS keyboard's field arrows open
+    the picker of the focused field), `VisitedLinks.cpp` (`:visited`: the addresses the views
     loaded and those of the host's history), `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while
     the user works in, types in or waits for a visible one, also for the first frame of a tab
     switched to and until a page a visible one loads fired its load event; their style, layout and load events wait too, and a script of theirs that runs

@@ -7,11 +7,19 @@
 #include <WebCore/Color.h>
 #include <WebCore/ColorChooserClient.h>
 #include <WebCore/ColorSerialization.h>
+#include <WebCore/ContainerNodeInlines.h>
 #include <WebCore/DataListSuggestionInformation.h>
 #include <WebCore/DataListSuggestionsClient.h>
 #include <WebCore/DateTimeChooserClient.h>
 #include <WebCore/DateTimeChooserParameters.h>
+#include <WebCore/Document.h>
+#include <WebCore/FocusController.h>
+#include <WebCore/HTMLInputElement.h>
+#include <WebCore/HTMLSelectElement.h>
+#include <WebCore/InputType.h>
+#include <WebCore/LocalFrameInlines.h>
 #include <WebCore/LocalFrameView.h>
+#include <WebCore/Page.h>
 #include <WebCore/PopupMenuClient.h>
 #include <cmath>
 #include <wtf/HashMap.h>
@@ -313,6 +321,29 @@ RefPtr<DateTimeChooser> createDateTimeChooser(WebView& view, DateTimeChooserClie
 bool hasDateTimeChooser(int viewId)
 {
     return openChoosers<DateTimeChooserWasm>().contains(viewId);
+}
+
+void showPickerOfFocusedField(int viewId, Page& page, FocusedPicker kind)
+{
+    RefPtr frame = page.focusController().focusedOrMainFrame();
+    RefPtr document = frame ? frame->document() : nullptr;
+    RefPtr element = document ? document->focusedElement() : nullptr;
+    // The day, month or year of a date field has the focus in the field's shadow tree
+    if (RefPtr host = element ? element->shadowHost() : nullptr)
+        element = WTF::move(host);
+    if (!element || !element->renderer())
+        return;
+    if (RefPtr select = dynamicDowncast<HTMLSelectElement>(*element)) {
+        if (kind == FocusedPicker::Any && select->isMutable() && select->usesMenuList() && !select->isOpen())
+            select->openPickerForUserInteraction();
+        return;
+    }
+    RefPtr input = dynamicDowncast<HTMLInputElement>(*element);
+    if (!input || !input->isMutable())
+        return;
+    bool dateTime = input->isDateField() || input->isDateTimeLocalField() || input->isMonthField() || input->isTimeField() || input->isWeekField();
+    if ((dateTime && !hasDateTimeChooser(viewId)) || (kind == FocusedPicker::Any && input->isColorControl()))
+        input->inputType()->showPicker();
 }
 
 void chooseDateTime(int viewId, const String& value, bool done)

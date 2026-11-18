@@ -17,6 +17,7 @@ class Color;
 class ColorChooserClient;
 class DataListSuggestionsClient;
 class DateTimeChooserClient;
+class Page;
 class PopupMenuClient;
 }
 
@@ -31,6 +32,13 @@ RefPtr<WebCore::DateTimeChooser> createDateTimeChooser(WebView&, WebCore::DateTi
 RefPtr<WebCore::DataListSuggestionPicker> createDataListSuggestionPicker(WebView&, WebCore::DataListSuggestionsClient&);
 // Whether the view shows a date or time picker (the click on the field opened it already)
 bool hasDateTimeChooser(int viewId);
+
+// Opens the picker of the page's focused field for the user, as the browser and not the page (no
+// user activation needed): DateTime only that of a date or time input without an open one, Any
+// also the chooser of a color input and the list of a <select>. Nothing for other or immutable
+// fields
+enum class FocusedPicker : bool { DateTime, Any };
+void showPickerOfFocusedField(int viewId, WebCore::Page&, FocusedPicker);
 
 // Answers of the host (engine thread). index -1 / empty value = cancelled
 void choosePopupItem(int viewId, int index);

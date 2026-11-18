@@ -55,7 +55,9 @@ more when the hints or that text change after a tap, and lets the keyboard's cha
 On iPhone and iPad two more hidden fields lie right before and after it while it has the focus,
 on the top left pixels of the view: the keyboard's previous and next field arrows focus them,
 and the view turns that into Shift+Tab or Tab in the page instead of leaving it for your own
-fields ([architecture, Input](../../docs/architecture.md#input)).
+fields; like Safari's keyboard an arrow that reaches a date, time or color field or a select opens
+its picker, the `dateTimePicker`, `colorPicker` or `selectPopup` request
+([architecture, Input](../../docs/architecture.md#input)).
 A page's fullscreen (`requestFullscreen`, the fullscreen button of a video) puts the container
 into host fullscreen, and Esc or `view.exitFullscreen()` ends it. Where the host has no element
 fullscreen (iPhone Safari, a frame without `allow="fullscreen"`) the container fills the window

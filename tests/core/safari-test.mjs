@@ -4,7 +4,8 @@
 // requestIdleCallback, navigator.virtualKeyboard). Checks MSE through the ManagedMediaSource path,
 // the microphone through the AudioWorklet of the capture (no AudioData), and the on-screen keyboard
 // modes and enter key hints of the IME field ("text-input") and the keyboard's previous and next
-// field arrows (iOS focuses the host field before or after the IME field). Video capture
+// field arrows (iOS focuses the host field before or after the IME field; they open the picker
+// of a date field or select they move to). Video capture
 // without a main thread processor transfers the track to the engine worker, which Chromium
 // cannot; that path is checked on devices (docs/status.md).
 //
@@ -36,7 +37,7 @@ if (!chromiumOnly('the Safari 18 paths (forced in Chromium)')) {
 }
 
 const PAGE = `<!doctype html><title>Safari paths</title>
-<style>body { margin: 0 } input, button { position: absolute; left: 20px; width: 200px; height: 30px }</style>
+<style>body { margin: 0 } input, button, select { position: absolute; left: 20px; width: 200px; height: 30px }</style>
 <input id="text" style="top: 20px" enterkeyhint="send">
 <input id="number" type="number" style="top: 70px">
 <input id="numeric" inputmode="numeric" style="top: 120px">
@@ -46,6 +47,9 @@ const PAGE = `<!doctype html><title>Safari paths</title>
 <input id="jump" style="top: 320px">
 <input id="overlay" style="top: 370px">
 <form><input id="search" type="search" name="search" style="top: 420px"></form>
+<input id="when" type="date" style="top: 470px">
+<input id="after" style="top: 520px">
+<select id="choice" style="top: 570px"><option>One</option><option>Two</option></select>
 <video id="video" muted playsinline style="position:absolute;left:300px;top:20px;width:320px;height:240px"></video>
 <script>
 const result = (key, value) => console.log('RESULT ' + key + '=' + String(value).replace(/\\s/g, '_'));
@@ -330,6 +334,45 @@ check(
   'field arrows (iOS): Shift+Tab of a keyboard on the first field still goes to the host',
   takeFocus.length === 1 && takeFocus[0].endsWith('take-focus:false'),
   JSON.stringify(takeFocus),
+);
+// An arrow that moves to a date field or a select opens its picker like Safari's keyboard: the
+// keyboard closes there and the field was left without a way to choose until a tap on it
+const pickers = () =>
+  page.evaluate(() => ({
+    date: window.blHost.dateRequests.length,
+    select: window.blHost.selectRequests.length,
+  }));
+const before = await pickers();
+const opened = async (kind, count) => {
+  let now = await pickers();
+  await waitFor(async () => (now = await pickers())[kind] >= count, 10000);
+  return { date: now.date - before.date, select: now.select - before.select };
+};
+await tapAndMode(535, 'text/go');
+await arrow('previous');
+let requests = await opened('date', before.date + 1);
+check(
+  'field arrows (iOS): previous to a date field opens its picker',
+  requests.date === 1 && requests.select === 0,
+  JSON.stringify(requests),
+);
+await tapAndMode(535, 'text/go');
+await arrow('next');
+requests = await opened('select', before.select + 1);
+check(
+  'field arrows (iOS): next to a select opens its list',
+  requests.date === 1 && requests.select === 1,
+  JSON.stringify(requests),
+);
+await tapAndMode(535, 'text/go');
+await page.keyboard.press('Shift+Tab');
+await waitFor(async () => (mode = await imeMode()) === 'none/', 10000);
+await page.waitForTimeout(1500);
+requests = await opened('date', 0);
+check(
+  'field arrows (iOS): Shift+Tab of a keyboard to the date field opens no picker',
+  mode === 'none/' && requests.date === 1 && requests.select === 1,
+  `${mode} ${JSON.stringify(requests)}`,
 );
 mode = await tapAndMode(235, 'none/');
 

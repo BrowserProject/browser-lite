@@ -340,7 +340,9 @@ function pressKey(view: ViewImpl, e: KeyLike): void {
 /**
  * @internal Previous (false) or next (true) field arrow of the on-screen keyboard: Shift+Tab or
  * Tab in the page. Past the page's first or last element the page keeps no focus and the keyboard
- * closes; the arrows never take the focus to the host ('take-focus' is not emitted for them).
+ * closes; the arrows never take the focus to the host ('take-focus' is not emitted for them). Like
+ * Safari's keyboard, an arrow that reaches a date, time or color field or a select opens its
+ * picker: the keyboard closes there and nothing else would let the user choose.
  */
 export function pressFieldArrow(view: ViewImpl, forward: boolean): void {
   view.userInput(false);
@@ -348,6 +350,7 @@ export function pressFieldArrow(view: ViewImpl, forward: boolean): void {
     page: () => {
       pressKey(view, forward ? TAB : SHIFT_TAB);
       view.tabFromFieldArrow = true;
+      view.host.module._bl_show_focused_picker(view.id);
     },
   });
 }
