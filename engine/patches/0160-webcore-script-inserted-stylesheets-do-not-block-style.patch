@@ -1,0 +1,163 @@
+diff --git a/Source/WebCore/dom/InlineStyleSheetOwner.cpp b/Source/WebCore/dom/InlineStyleSheetOwner.cpp
+index 90845fbfc4..246a4d5e71 100644
+--- a/Source/WebCore/dom/InlineStyleSheetOwner.cpp
++++ b/Source/WebCore/dom/InlineStyleSheetOwner.cpp
+@@ -24,6 +24,7 @@
+ #include "CommonAtomStrings.h"
+ #include "ContentSecurityPolicy.h"
+ #include "ElementInlines.h"
++#include "HTMLNames.h"
+ #include "Logging.h"
+ #include "MediaList.h"
+ #include "MediaQueryParser.h"
+@@ -31,6 +32,7 @@
+ #include "PluginDocument.h"
+ #include "ScriptableDocumentParser.h"
+ #include "ShadowRoot.h"
++#include "SpaceSplitString.h"
+ #include "StyleScope.h"
+ #include "StyleSheetContents.h"
+ #include "StyleSheetContentsCache.h"
+@@ -133,6 +135,12 @@ inline bool isValidCSSContentType(const AtomString& type)
+     return equalLettersIgnoringASCIICase(type, "text/css"_s);
+ }
+ 
++// https://html.spec.whatwg.org/multipage/urls-and-fetching.html#blocking-attributes
++static bool hasRenderBlockingAttribute(const Element& element)
++{
++    return SpaceSplitString::spaceSplitStringContainsValue(element.attributeWithoutSynchronization(HTMLNames::blockingAttr), "render"_s, SpaceSplitString::ShouldFoldCase::Yes);
++}
++
+ void InlineStyleSheetOwner::createSheet(Element& element, const String& text)
+ {
+     ASSERT(element.isConnected());
+@@ -154,8 +162,9 @@ void InlineStyleSheetOwner::createSheet(Element& element, const String& text)
+ 
+     auto mediaQueries = MQ::MediaQueryParser::parse(m_media, document->cssParserContext());
+ 
++    // browser-lite: only a sheet of the parser (or one with blocking=render) holds back style and scripts while its imports load
+     if (CheckedPtr scope = m_styleScope.get())
+-        scope->addPendingSheet(element);
++        scope->addPendingSheet(element, m_isParsingChildren || hasRenderBlockingAttribute(element) ? Style::Scope::BlocksRendering::Yes : Style::Scope::BlocksRendering::No);
+ 
+     Style::StyleSheetContentsCache::Key cacheKey { text, parserContextForElement(element) };
+     if (RefPtr cachedSheet = Style::StyleSheetContentsCache::singleton().get(cacheKey)) {
+@@ -218,7 +227,7 @@ bool InlineStyleSheetOwner::sheetLoaded(Element& element)
+ void InlineStyleSheetOwner::startLoadingDynamicSheet(Element& element)
+ {
+     if (CheckedPtr scope = m_styleScope.get(); scope && !scope->hasPendingSheet(element))
+-        scope->addPendingSheet(element);
++        scope->addPendingSheet(element, hasRenderBlockingAttribute(element) ? Style::Scope::BlocksRendering::Yes : Style::Scope::BlocksRendering::No);
+ }
+ 
+ }
+diff --git a/Source/WebCore/html/HTMLLinkElement.cpp b/Source/WebCore/html/HTMLLinkElement.cpp
+index 05bccefc3c..d2703e0907 100644
+--- a/Source/WebCore/html/HTMLLinkElement.cpp
++++ b/Source/WebCore/html/HTMLLinkElement.cpp
+@@ -490,9 +490,14 @@ void HTMLLinkElement::processInternalResourceLink(Element* element)
+ }
+ 
+ // https://html.spec.whatwg.org/multipage/urls-and-fetching.html#blocking-attributes
++bool HTMLLinkElement::isExplicitlyRenderBlocking() const
++{
++    return m_blockingList && m_blockingList->contains("render"_s);
++}
++
+ void HTMLLinkElement::potentiallyBlockRendering()
+ {
+-    bool explicitRenderBlocking = m_blockingList && m_blockingList->contains("render"_s);
++    bool explicitRenderBlocking = isExplicitlyRenderBlocking();
+     if (explicitRenderBlocking || isImplicitlyPotentiallyRenderBlocking()) {
+         protect(document())->blockRenderingOn(*this, explicitRenderBlocking ? Document::ImplicitRenderBlocking::No : Document::ImplicitRenderBlocking::Yes);
+         m_isRenderBlocking = true;
+@@ -814,7 +819,9 @@ void HTMLLinkElement::addPendingSheet(PendingSheetType type)
+ 
+     if (m_pendingSheetType == PendingSheetType::Inactive)
+         return;
+-    protect(m_styleScope)->addPendingSheet(*this);
++    // browser-lite: only a sheet of the parser (or one with blocking=render) holds back style and scripts
++    bool blocksRendering = isExplicitlyRenderBlocking() || isImplicitlyPotentiallyRenderBlocking();
++    protect(m_styleScope)->addPendingSheet(*this, blocksRendering ? Style::Scope::BlocksRendering::Yes : Style::Scope::BlocksRendering::No);
+ }
+ 
+ void HTMLLinkElement::removePendingSheet()
+diff --git a/Source/WebCore/html/HTMLLinkElement.h b/Source/WebCore/html/HTMLLinkElement.h
+index 506ff9dc5d..9671640fc9 100644
+--- a/Source/WebCore/html/HTMLLinkElement.h
++++ b/Source/WebCore/html/HTMLLinkElement.h
+@@ -116,6 +116,7 @@ private:
+     void potentiallyBlockRendering();
+     void unblockRendering();
+     bool NODELETE isImplicitlyPotentiallyRenderBlocking() const;
++    bool isExplicitlyRenderBlocking() const;
+ 
+     NeedsPostConnectionSteps insertionSteps(InsertionType, ContainerNode&) final;
+     void postConnectionSteps() final;
+diff --git a/Source/WebCore/style/StyleScope.cpp b/Source/WebCore/style/StyleScope.cpp
+index 44ef608b1f..ca616a79b1 100644
+--- a/Source/WebCore/style/StyleScope.cpp
++++ b/Source/WebCore/style/StyleScope.cpp
+@@ -233,10 +233,15 @@ const Scope* Scope::forOrdinal(const Element& element, ScopeOrdinal ordinal)
+     return forOrdinal(const_cast<Element&>(element), ordinal);
+ }
+ 
+-void Scope::addPendingSheet(const Element& element)
++void Scope::addPendingSheet(const Element& element, BlocksRendering blocksRendering)
+ {
+     ASSERT(!hasPendingSheet(element));
+ 
++    if (blocksRendering == BlocksRendering::No) {
++        m_elementsWithNonBlockingPendingSheets.add(element);
++        return;
++    }
++
+     bool isInHead = ancestorsOfType<HTMLHeadElement>(element).first();
+ 
+     LOG_WITH_STREAM(StyleSheets, stream << "Scope " << this << " addPendingSheet() " << element << " isInHead " << isInHead);
+@@ -252,6 +257,11 @@ void Scope::removePendingSheet(const Element& element)
+ {
+     ASSERT(hasPendingSheet(element));
+ 
++    if (m_elementsWithNonBlockingPendingSheets.remove(element)) {
++        didChangeActiveStyleSheetCandidates();
++        return;
++    }
++
+     if (!m_elementsInHeadWithPendingSheets.remove(element))
+         m_elementsInBodyWithPendingSheets.remove(element);
+ 
+@@ -302,7 +312,7 @@ void Scope::didRemovePendingStylesheet()
+ 
+ bool Scope::hasPendingSheet(const Element& element) const
+ {
+-    return m_elementsInHeadWithPendingSheets.contains(element) || hasPendingSheetInBody(element);
++    return m_elementsInHeadWithPendingSheets.contains(element) || hasPendingSheetInBody(element) || m_elementsWithNonBlockingPendingSheets.contains(element);
+ }
+ 
+ bool Scope::hasPendingSheetInBody(const Element& element) const
+diff --git a/Source/WebCore/style/StyleScope.h b/Source/WebCore/style/StyleScope.h
+index 811720748e..7781df9f79 100644
+--- a/Source/WebCore/style/StyleScope.h
++++ b/Source/WebCore/style/StyleScope.h
+@@ -93,7 +93,10 @@ public:
+ 
+     void establishPreferredStylesheetSetName(const Element&, const CSSStyleSheet&);
+ 
+-    void addPendingSheet(const Element&);
++    // browser-lite: a sheet that is not render-blocking (inserted by a script) holds back neither
++    // the style of elements nor scripts while it loads, as in Chrome and HTML.
++    enum class BlocksRendering : bool { No, Yes };
++    void addPendingSheet(const Element&, BlocksRendering);
+     void removePendingSheet(const Element&);
+     void addPendingSheet(const ProcessingInstruction&);
+     void removePendingSheet(const ProcessingInstruction&);
+@@ -231,6 +234,8 @@ private:
+     WeakHashSet<const ProcessingInstruction, WeakPtrImplWithEventTargetData> m_processingInstructionsWithPendingSheets;
+     WeakHashSet<const Element, WeakPtrImplWithEventTargetData> m_elementsInHeadWithPendingSheets;
+     WeakHashSet<const Element, WeakPtrImplWithEventTargetData> m_elementsInBodyWithPendingSheets;
++    // browser-lite: loading sheets that are not render-blocking, each applied as soon as it is loaded
++    WeakHashSet<const Element, WeakPtrImplWithEventTargetData> m_elementsWithNonBlockingPendingSheets;
+ 
+     WeakListHashSet<Node, WeakPtrImplWithEventTargetData> m_styleSheetCandidateNodes;
+ 

@@ -99,7 +99,12 @@ where it did before, unless one of its values depends on the fonts: lengths in `
 container queries and units, anchor functions, animations and the styles user agent shadow trees
 make themselves are resolved again, and the new fonts alone count as no change for their
 descendants. Like Blink, which restyles only font metric dependent styles on a font load
-(patch 0148, #584). `CompressionStream` and
+(patch 0148, #584). A style sheet that a script inserts (a `link` or a `style` with `@import`,
+without `blocking=render`) is not render-blocking, as in HTML and Chrome: while it loads, elements
+still get their style and scripts of the parser still run, and it applies once it arrived. WebKit
+counted it like a sheet of the parser, so no element without a style got one until every such
+sheet had arrived, and every layout a script asked for meanwhile restyled the whole document
+(patch 0160, #619). `CompressionStream` and
 `DecompressionStream` take every `BufferSource`, also one of another realm such as an iframe's
 `Uint8Array`: WebKit's builtin refused chunks that failed `instanceof ArrayBuffer` of its own
 realm, now the WebIDL conversion of the encoder and decoder checks them by brand (patch 0110, #506).

@@ -998,6 +998,22 @@ browser (Safari keeps Cmd+L, T and W for itself).
    built and measured: a removed sheet next to 4000 elements in 2 instead of 57 ms, but no gain on
    nytimes.com, so it was not kept. The longest steps (3 to 5 s) are JS of the page's bundles, the
    payment iframe and the tag manager on cold code (see above).
+   duolingo.com, coursera.org and cash.ch (2026-11-18, local, Chromium host, load 2 to 10; the
+   report: steps of 6.5 to 8.8 s at load 13 to 17, Chromium's longest task 0.4 to 0.6 s):
+   duolingo's longest step (3.5 to 7 s when it comes) is one script of its cross-site reCAPTCHA
+   frame, which pauses for the page's rendering updates every 50 ms (#589) while the page's own
+   loads and timers wait for it. While Google's sign-in sheet loaded (inserted by a script, 8 to
+   11 s here as its body arrived only after that step), WebKit styled no new element and the
+   page's read of its banner height every 100 ms restyled the whole document (4557 elements, 150
+   to 210 ms each, up to 20 in a row). A sheet a script inserts no longer blocks (patch 0160,
+   #619): full restyles of 100 ms or more 1 instead of 8 to 17 per load, style resolutions of 25 ms
+   or more 1.5 to 1.6 s instead of 2.5 to 4.3 s (3 interleaved runs of 45 s). coursera.org showed
+   only its header and footer until 8 s in one of three loads before, for the same reason; its
+   longest step otherwise is the first rendering update of the server rendered page (style and
+   layout on cold code, 1.3 to 3.5 s) and React's chunks. cash.ch's steps (2.6 to 3.9 s) are JS of
+   its ad stack (interpreter, runtime and parsing about 60 %). Still open: the JS (see above), and
+   a long script of a cross-site frame still holds the page's loads and timers (Chrome runs the
+   frame in a process of its own).
 13. YouTube's stream protection (2026-11-13, local, Chromium host, one video, 19 loads): in about
    half of the loads playback stops after about 40 s with "Something went wrong. Refresh or try
    again later." (`ump.spsrejectfailure`). Every media response of YouTube's SABR stream carries a
