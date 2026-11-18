@@ -277,8 +277,9 @@ select popup) are in the same sheet.
   screen or out of it and closes the menu; it is missing where the host has no full screen
   (iPhone Safari, #594).
 - **Icons of sites**: the tab shows the icon the engine reports for every page (as soon as its
-  head names one, else once it has loaded) and every later change of it; until then the last one
-  stays within the site, it goes when the tab leaves the site. Like Chrome's favicon database
+  head names one, else once it has loaded, and when it comes back from the back/forward cache)
+  and every later change of it; until then, like Chrome, the remembered icon of a page seen
+  before (#615), else the last one stays within the site, it goes when the tab leaves the site. Like Chrome's favicon database
   `favicons.ts` remembers the icon of each page in localStorage for suggestions, history,
   bookmarks, the new tab page and the tab overview (#595): every icon once as a 32 px copy named
   by a hash of its bytes (at most 200), the pages that showed it (at most 1000, a page without

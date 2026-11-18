@@ -2357,6 +2357,9 @@ void WebView::willRestoreFromCache()
 void WebView::didRestoreFromCache()
 {
     notifyDocumentState();
+    // Its icon links are all there, and its load does not always end again (a frame started at
+    // pageshow): the icon comes with the restore
+    updateFavicon(false);
 }
 
 // Address and title of the new document. The title is empty until its <title> arrives (the tab
@@ -2451,9 +2454,10 @@ void WebView::didChangeIcons()
 }
 
 // Like Chrome the best <link rel=icon> (closest to 32 px, SVG always fits) as soon as the parser
-// or a script adds, changes or removes one, also after the load (notification badges, SPAs);
-// without one /favicon.ico once the page has loaded. The engine loads it itself, the host has no
-// network. Reported once per document and icon address, also when the last page had the same icon
+// or a script adds, changes or removes one, also after the load (notification badges, SPAs) and
+// when the page comes back from the back/forward cache; without one /favicon.ico once the page
+// has loaded. The engine loads it itself, the host has no network. Reported once per document
+// and icon address, also when the last page had the same icon
 void WebView::updateFavicon(bool pageLoaded)
 {
     RefPtr frame = mainFrame();

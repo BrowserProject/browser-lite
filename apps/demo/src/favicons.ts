@@ -170,6 +170,13 @@ export function rememberedIcon(url: string): string | null {
   return (ref?.icon && entries.icons[ref.icon]) || null;
 }
 
+/** The remembered icon of the page at `url` itself as a data URL, null for a page never seen. */
+export function rememberedPageIcon(url: string): string | null {
+  const entries = load();
+  const ref = entries.pages[pageOf(url)];
+  return (ref?.icon && entries.icons[ref.icon]) || null;
+}
+
 /** Forgets the icon of the page at `url` (removed from the history); its host keeps its own. */
 export function forgetPageIcon(url: string): void {
   const entries = load();

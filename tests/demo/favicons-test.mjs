@@ -1,8 +1,9 @@
 // Remembered favicons per page like Chrome's favicon database: pages of one host with different
 // icons show their own in the history panel and in the restored background tabs, a page without
 // an icon shows the globe, an address a page set with history.pushState gets the icon of its
-// document, a changed icon replaces the old one at once, and removing the last visit of a page
-// from the history forgets its icon.
+// document, a changed icon replaces the old one at once, a tab shows the remembered icon of a page
+// it goes to again until the engine reports one (not the icon of the last page of the host), and
+// removing the last visit of a page from the history forgets its icon.
 //
 //   node tests/demo/favicons-test.mjs [engine-dir]
 import {
@@ -23,6 +24,9 @@ const svg = (color) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="${color}"/></svg>`;
 const ready = (name) => `<script>console.log('RESULT ready=${name}')</script>`;
 let changing = '#ff0';
+// Answers of /held after the first that stop before the head ends (a slow network)
+const held = [];
+let heldVisits = 0;
 const { url: siteURL } = await serve((req, res) => {
   const html = (body) =>
     res
@@ -46,6 +50,13 @@ const { url: siteURL } = await serve((req, res) => {
     return html(
       `<title>App</title><link rel="icon" href="data:image/svg+xml,${encodeURIComponent(svg('#0f0'))}"><script>setTimeout(() => { history.pushState(null, '', '/app/x'); console.log('RESULT ready=app'); }, 1500)</script>`,
     );
+  if (req.url === '/held') {
+    if (heldVisits++ === 0)
+      return html(`<title>Held</title><link rel="icon" href="/red.svg">${ready('held')}`);
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.write(`<!doctype html><title>Held</title>${ready('held')}`);
+    return held.push(res);
+  }
   if (req.url === '/changing')
     return html(
       `<title>Changing</title><link rel="icon" href="/changing.svg">${ready('changing')}`,
@@ -132,6 +143,20 @@ const MAGENTA = '255,0,255';
 await page.goto(stack.app({ url: `${siteURL}a` }));
 await results.wait('ready', TIMEOUT);
 await go('b');
+// Tab 1 again: the red page, the blue one and the red page whose head does not arrive
+await go('held');
+check('the icon of /held is stored', Boolean(await stored('held')));
+await go('b');
+await go('held');
+const activeIcon = async () => (await colors('#tab-list .tab.active .icon'))[0];
+await page.waitForTimeout(1000);
+check(
+  'a page seen before: its remembered icon before its head',
+  (await activeIcon()) === RED,
+  await activeIcon(),
+);
+await go('b');
+for (const res of held.splice(0)) res.end();
 await page.keyboard.press('Control+t');
 await go('c');
 await page.keyboard.press('Control+t');

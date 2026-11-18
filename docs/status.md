@@ -33,7 +33,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   page without one or back to a page whose next page never loaded, #389; like Chrome as soon as
   the head is parsed, following later icon changes of the page and also `data:` and `blob:` icons, #520; in the demo a tab from
   the last session shows the remembered icon of its page before it loads, #493, and history,
-  suggestions and those tabs show each page's own icon like Chrome, not the first one of its host, #595; like Chrome a
+  suggestions and those tabs show each page's own icon like Chrome, not the first one of its host, #595; a page from the
+  back/forward cache reports its icon with the restore, also when its load does not end again, and a tab shows the
+  remembered icon of a page seen before until the engine reports one, #615; like Chrome a
   tab without an icon shows a globe, so narrow tabs are no longer a row of empty boxes, #510),
   `:visited` for the addresses the views loaded and those of the host's history (before, every
   link kept its unvisited color, in search results and on Wikipedia too, #480),

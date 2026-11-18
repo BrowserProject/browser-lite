@@ -11,7 +11,13 @@ import { addBlockedPopup, type BlockedPopup, updatePopupsButton } from './blocke
 import { rememberClosed, takeClosed } from './closed-tabs.js';
 import { engineRunning, openOnStart, restartAfterCrash } from './engine-state.js';
 import { ui } from './extensions.js';
-import { defaultFavicon, hostOf, rememberedIcon, rememberIcon } from './favicons.js';
+import {
+  defaultFavicon,
+  hostOf,
+  rememberedIcon,
+  rememberedPageIcon,
+  rememberIcon,
+} from './favicons.js';
 import { endFind, showFindCount, showFindOf } from './find-bar.js';
 import { recordVisit } from './history.js';
 import { syncHostHistory } from './host-history.js';
@@ -109,8 +115,8 @@ export class Tab implements SessionTab {
    */
   private isPinned = false;
   /**
-   * Icon in the tab: an object URL of the engine's icon that the tab owns, or before the page
-   * has loaded the remembered data URL of its site.
+   * Icon in the tab: an object URL of the engine's icon that the tab owns, or until the engine
+   * reports one the remembered data URL of its page or site.
    */
   iconUrl: string | null = null;
   /** Host of the page the icon belongs to. */
@@ -218,9 +224,12 @@ export class Tab implements SessionTab {
         // (history.pushState) has the icon of the document
         if (this.pageIcon !== undefined) rememberIcon(event.url, this.pageIcon);
       }
-      // The engine reports the icon of every page once it has loaded: until then the last one
-      // stays within the site
-      if (this.iconUrl && hostOf(event.url) !== this.iconHost) this.useIcon(null, '');
+      // The engine reports the icon of a new document once its head is parsed: until then, like
+      // Chrome, the icon remembered for another page it shows, else the last one within the site
+      const remembered =
+        moved && this.committed && !this.errorPage ? rememberedPageIcon(event.url) : null;
+      if (remembered) this.useIcon(remembered, hostOf(event.url));
+      else if (this.iconUrl && hostOf(event.url) !== this.iconHost) this.useIcon(null, '');
       this.url = event.url;
       if (this.committed) {
         this.committed = false;

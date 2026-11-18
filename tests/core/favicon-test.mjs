@@ -1,6 +1,7 @@
 // The favicon belongs to the page: the engine reports it (icon event) for every page that loaded,
 // also when the last page had the same icon (after a page without an icon, after back to a page
-// after a page that never loaded), and loads an icon address only once per view. An icon
+// after a page that never loaded, a page from the back/forward cache whose load does not end
+// after the restore), and loads an icon address only once per view. An icon
 // that arrives after the page was left is not reported for the next page. Like Chrome the icon of
 // a <link rel=icon> comes once the head is parsed, not only after the load event, follows changes
 // of the links after the load (a new address, a data: icon, no link left: /favicon.ico, an icon
@@ -11,6 +12,7 @@ import {
   SWIFTSHADER,
   TIMEOUT,
   check,
+  collect,
   evalPage,
   finish,
   hostEvents,
@@ -45,6 +47,8 @@ const { url: siteURL } = await serve((req, res) => {
     if (path === '/slow-icon.svg') setTimeout(send, 3000);
     else if (path === '/early.svg')
       res.writeHead(200, { 'Content-Type': 'image/svg+xml' }).end(svg(18, '#e0e000'));
+    else if (path === '/kept.svg')
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml' }).end(svg(22, '#000000'));
     else if (path === '/blue.svg')
       res.writeHead(200, { 'Content-Type': 'image/svg+xml' }).end(svg(24, '#0000e0'));
     else send();
@@ -72,6 +76,14 @@ const { url: siteURL } = await serve((req, res) => {
       .end(
         `<!doctype html><title>CHANGE</title><link id="ic" rel="icon" href="/icon.svg"><p>change`,
       );
+  // Restored from the back/forward cache, it starts a frame that never loads (ads on news sites):
+  // the load of the page does not end again
+  if (path === '/kept')
+    return res
+      .writeHead(200, html)
+      .end(
+        `<!doctype html><title>KEPT</title><link rel="icon" href="/kept.svg"><p>kept<script>addEventListener('pageshow', (event) => { if (event.persisted) document.body.append(Object.assign(document.createElement('iframe'), { src: '/hang' })); console.log('RESULT kept=' + event.persisted); });</script>`,
+      );
   if (path === '/hang') {
     hanging.push(res);
     res.writeHead(200, html).write(`<!doctype html><title>HANG</title><p>${' '.repeat(2048)}`);
@@ -83,6 +95,7 @@ const { url: siteURL } = await serve((req, res) => {
 const browser = await launch({ args: SWIFTSHADER });
 const stack = await startStack();
 const tab = await browser.newPage({ viewport: { width: 800, height: 500 } });
+const results = collect(tab);
 check('host page started a browser', await openHost(tab, stack.app({ url: `${siteURL}a` })));
 
 const title = () => tab.evaluate(() => window.blTest.view()?.title ?? '');
@@ -133,6 +146,36 @@ check('no icon for the next page', (await icons()) === 3, String(await icons()))
 
 const sized = (size) => count(new RegExp(`^icon-image:${size}x${size}$`));
 
+// Back to a page from the back/forward cache whose load does not end after the restore: its
+// icon comes with the restore, not with the load that never ends
+const keptLoads = await loads();
+await load(tab, `${siteURL}kept`);
+check('page with its own icon loaded', await waitTitle('KEPT'));
+await waitFor(async () => (await loads()) > keptLoads, 20000);
+check('its icon', await waitFor(async () => (await sized(22)) === 1, 20000));
+await load(tab, `${siteURL}b`);
+check('a page of the site with another icon', await waitTitle('B'));
+check('the other icon', await iconCount(4), String(await icons()));
+await tab.evaluate(() => window.blTest.view().back());
+check('back on the kept page', await waitTitle('KEPT'));
+check(
+  'it came from the back/forward cache',
+  await waitFor(() => results.get('kept') === 'true', 20000),
+  results.get('kept'),
+);
+check(
+  'its icon again',
+  await waitFor(async () => (await sized(22)) === 2, 20000),
+  String(await sized(22)),
+);
+const restoredLoads = await loads();
+for (const res of hanging.splice(0)) res.end();
+check(
+  'its load ends with the frame',
+  await waitFor(async () => (await loads()) > restoredLoads, 20000),
+);
+check('no icon again then', (await sized(22)) === 2, String(await sized(22)));
+
 // The icon of a page whose load event waits for an image: once the head is parsed
 const earlyLoads = await loads();
 await load(tab, `${siteURL}early`);
@@ -161,7 +204,7 @@ const changeLoads = await loads();
 await load(tab, `${siteURL}change`);
 check('page that changes its icon loaded', await waitTitle('CHANGE'));
 await waitFor(async () => (await loads()) > changeLoads, 20000);
-check('its first icon', await iconCount(4), String(await icons()));
+check('its first icon', await iconCount(5), String(await icons()));
 await evalPage(tab, `document.getElementById('ic').href = '/blue.svg'`);
 check(
   'the new icon address',

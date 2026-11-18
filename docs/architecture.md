@@ -612,12 +612,14 @@ The favicon of a page is loaded by the engine itself (`WebView::updateFavicon`, 
 `LoaderStrategy.cpp`, `data:` and `blob:` icons without a request). Like Chrome the best
 `<link rel=icon>` of an http(s) page is taken as soon as the parser or a script adds, changes or
 removes one (patch 0119 tells the view, which decides once per task), also after the load
-(notification badges, single page apps); without one, `/favicon.ico` once the page has loaded. It
+(notification badges, single page apps) and when a page comes back from the back/forward cache
+(its load need not end again, #615); without one, `/favicon.ico` once the page has loaded. It
 goes to the host (`icon`) once per document and icon address; the view keeps its last 4 icons, so
 a page with the same icon address, or one that switches between a few (an unread badge), gets it
 without a new request, and an icon that arrives after its page was left or its link changed is
 dropped (#389, #520). The demo remembers the icon of each page like Chrome's favicon database,
-for its history and suggestions and the tabs that have not loaded yet (#595).
+for its history and suggestions, the tabs that have not loaded yet (#595) and a tab's new
+document until the engine reports its icon (#615).
 
 ## Storage
 
