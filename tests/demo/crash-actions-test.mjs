@@ -17,6 +17,7 @@ import {
   serve,
   startStack,
   timeLimit,
+  waitFor,
   watchErrors,
 } from '../lib/index.mjs';
 
@@ -110,7 +111,12 @@ loaded.length = 0;
 await page.click('#reload');
 check('reload after the crash starts the engine again', await restarted());
 check('and loads the tab in front again', await waitLoaded('two'));
-check('the tabs are back', (await titles()).join('|') === 'one|two', (await titles()).join('|'));
+// The title of the tab in front comes with an event after its load
+check(
+  'the tabs are back',
+  await waitFor(async () => (await titles()).join('|') === 'one|two', 10000),
+  (await titles()).join('|'),
+);
 
 // + restarts and opens a new tab in front of the restored ones (a second crash within a minute:
 // they load only when clicked)
