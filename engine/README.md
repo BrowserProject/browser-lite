@@ -30,7 +30,8 @@ software renderer, or the buffers of an iframe's realm that compression streams 
 tile jobs of a closed view that its painting threads ran after its layer tree host was freed, or
 the frames of a canvas handed to an OffscreenCanvas, which never reached its layer, or the stencil
 a WebGL drawing buffer with depth went without, or the whole document that every rule a CSS-in-JS
-library inserted restyled and laid out again, or the abort signals of a closed page, whose
+library inserted restyled and laid out again, and the rule set of all sheets it built anew for
+each, or the abort signals of a closed page, whose
 listeners kept the whole page alive, or the cookies of a host that is itself a public suffix,
 which the cookie jar dropped, or the tree view of an XML file or feed without style
 information, which WebKit shows only with developer extras, so its text ran together, or

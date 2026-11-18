@@ -21,8 +21,11 @@
 //                  multicol (patch 0118): same geometry as a fresh layout and as a multicol where
 //                  nothing is kept, a relayout of balanced columns costs about as much as without
 //   cssom-rules.html  a rule insertRule() adds or deleteRule() removes restyles only the elements
-//                  it may match (patch 0124): same computed style as a fresh style of the tree, an
-//                  inserted rule next to 4000 elements costs a fraction of a full restyle
+//                  it may match (patch 0124) and an inserted one goes into the built rule set
+//                  (patch 0158): same computed style as a fresh style of the tree with a new rule
+//                  set, also in a frame whose media queries change, an inserted rule next to 4000
+//                  elements costs a fraction of a full restyle and next to 5000 more rules about
+//                  as much as without them
 //   compression.html  CompressionStream and DecompressionStream take buffers of another realm
 //                  (patch 0110) and still reject chunks that are no BufferSource
 //   time-origin.html  performance.timeOrigin reads the same every time in a page, a frame and a

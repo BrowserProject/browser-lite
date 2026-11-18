@@ -658,9 +658,21 @@ browser (Safari keeps Cmd+L, T and W for itself).
    restyles only the elements it may match and unchanged rules keep their faces (#530): 10 to 16
    ms per rule. During the tap style, layout and resolver builds took 18.5 % of the engine thread
    instead of 24 %; the title came after 6.5 to 7.9 s (median 6.9) instead of 6.8 to 8.7 s
-   (median 7.1), Back 5.5 to 7.6 s instead of 6.9 to 9.3 s (5 runs each, noisy). What is left of
-   them is building the resolver for every update with new rules (6 % of the engine thread
+   (median 7.1), Back 5.5 to 7.6 s instead of 6.9 to 9.3 s (5 runs each, noisy). What was left of
+   them was building the resolver for every update with new rules (6 % of the engine thread
    during the tap) and the JS of the route, comments and ads, about 8 to 10 times Chromium's.
+   2026-11-18 (the report: a Moto G71 showed a tapped article after 16 to 32 s and the home page
+   7 to 15 s after Back, in steps of up to 4.4 s; checked again 9 to 12 s and 15 s with steps of
+   2.8 and 3.0 s, native Chrome on the same phone 2 s and 1 s): the tap inserts about 300 rules
+   into styled-components' sheet and each of about 150 style updates between them (layout reads
+   of the page) built the rule set of all sheets anew and freed the old one, 20 % of the engine
+   thread. Such rules now go into the rule set the resolver has (#611, patch 0158): 17 rule sets
+   built during the tap instead of 156, 0.14 instead of 2.2 s of the profiled thread; the article's
+   title is in the DOM after 2.4 to 4.6 s (median 2.6) instead of 5.8 to 6.2 s (median 6.2), with
+   the same page on screen (local, Chromium host, 412x860 with touch, 3 interleaved runs each).
+   Back is unchanged (2.6 to 4.0 s against 2.8 to 3.3 s): 85 % of its engine thread is the JS of
+   the home page's route in the interpreter and compiled code, so it waits for the speed of JS
+   (above). Not checked on the Moto again (the public demo is offline).
    blick.ch's first load (2026-11-11; the report: a task of 12.6 s on a Moto G71 after the load,
    the bar and flings without answer meanwhile): that task is React's hydration, one task in Chrome
    too (0.4 to 0.85 s on this machine), here 3.5 to 8 s. Its render ran without GC and with a

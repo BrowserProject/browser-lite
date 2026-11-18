@@ -3,9 +3,11 @@
 <!-- A rule that insertRule() adds to or deleteRule() removes from an active sheet restyles only the
      elements it may match (patch 0124), like CSS-in-JS libraries insert hundreds of rules while a
      page renders, and the style resolver built anew keeps the faces of unchanged @font-face rules
-     (a new face loads its font again, which restyles and lays out the whole document). Every
-     change below must give the same computed style as a fresh style of the whole tree, and an
-     inserted rule in a big document with a web font costs a fraction of a full restyle. -->
+     (a new face loads its font again, which restyles and lays out the whole document). An inserted
+     style rule (or @media rule of style rules) goes into the built rule set of the document instead
+     of a new one for all sheets (patch 0158). Every change below must give the same computed style
+     as a fresh style of the whole tree with a new rule set, an inserted rule in a big document with
+     a web font costs a fraction of a full restyle, and about as much next to 5000 more rules. -->
 <style>
   @font-face { font-family: Web; src: url(missing-web-font.woff2) format("woff2"); }
   body { margin: 0; font: 12px/16px Web, sans-serif; }
@@ -16,15 +18,28 @@
 <style id="dynamic">
   .base { padding-left: 1px; }
   .other { padding-left: 2px; }
+  .lay { color: rgb(60, 60, 60); }
 </style>
-<style>
+<style id="after-sheet">
   .after { color: rgb(0, 0, 200); }
+  .edge { color: rgb(3, 3, 3); }
+</style>
+<style id="layered">
+  @layer base { .lay { color: rgb(50, 50, 50); } }
+  @container (max-width: 1px) { .cq { color: rgb(70, 70, 70); } }
+  @scope (.scoped) { .in-scope { color: rgb(80, 80, 80); } }
+  .lay { padding-left: 5px; }
+  .cq { padding-left: 6px; }
 </style>
 <div id="app">
   <div class="list" id="list">
-    <p class="item a" id="first">First</p>
-    <p class="item b">Second</p>
-    <p class="item after">Third</p>
+    <p class="item a n0" id="first">First</p>
+    <p class="item b n1">Second</p>
+    <p class="item after n2">Third</p>
+    <p class="tie edge">Tie</p>
+    <p class="lay">Layered</p>
+    <div style="container-type: inline-size"><span class="cq">Container</span></div>
+    <div class="scoped"><span class="in-scope">Scoped</span></div>
     <section class="parent"><span class="child">Inherits</span><em>Plain</em></section>
     <div class="holder"><b class="target">Has</b></div>
     <div class="holder"><i>No target</i></div>
@@ -33,12 +48,25 @@
     <p data-kind="x">Attribute</p>
     <div style="display: none"><span class="hidden">Hidden</span></div>
     <div id="host"></div>
+    <div id="random"></div>
   </div>
   <div id="many"></div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
+// Elements with some of the classes r0 to r7 for random rules (seeded)
+let seed = 7;
+const random = (n) => {
+  seed = (seed * 1103515245 + 12345) % 2147483648;
+  return Math.floor((seed / 2147483648) * n);
+};
+for (let i = 0; i < 30; i++) {
+  const element = document.createElement(i % 3 ? 'p' : 'span');
+  element.className = 'r' + random(8) + ' r' + random(8);
+  $('random').append(element);
+}
 const sheet = $('dynamic').sheet;
+const afterSheet = $('after-sheet').sheet;
 const shadow = $('host').attachShadow({ mode: 'open' });
 shadow.innerHTML = '<style>.inner { color: rgb(1, 1, 1); }</style><p class="inner">Inner</p><slot></slot>';
 $('host').innerHTML = '<span class="slotted">Slotted</span>';
@@ -59,8 +87,13 @@ const snapshot = () =>
     const before = getComputedStyle(element, '::before').content;
     return properties.map((name) => style.getPropertyValue(name)).join(',') + ',' + before;
   });
-// A fresh style: the whole list is styled again from nothing
+// A fresh style: the whole list is styled again from nothing, with a rule set built anew from all
+// sheets (a removed sheet rebuilds it)
 const fresh = () => {
+  const extra = document.head.appendChild(document.createElement('style'));
+  extra.textContent = '.none { color: red; }';
+  document.body.offsetHeight;
+  extra.remove();
   $('list').style.display = 'none';
   $('list').offsetHeight;
   $('list').style.display = '';
@@ -101,6 +134,47 @@ const changes = [
   ['changed font-face', () => {
     sheet.cssRules[find(sheet, '@font-face')].style.setProperty('font-weight', '700');
     sheet.insertRule('.b { font-family: Nothing, monospace; }', middle());
+  }],
+  ['two rules before one rule', () => {
+    sheet.insertRule('.tie { color: rgb(100, 0, 0); }', 1);
+    sheet.insertRule('.tie { color: rgb(0, 100, 0); }', 1);
+  }],
+  ['end of a sheet and start of the next', () => {
+    sheet.insertRule('.edge { margin-top: 7px; outline-style: dashed; }', sheet.cssRules.length);
+    afterSheet.insertRule('.edge { margin-top: 8px; }', 0);
+  }],
+  ['selector list and attribute', () => sheet.insertRule('.c, [data-kind="x"], p.b { outline-style: groove; }', middle())],
+  ['next to keyframes', () => {
+    sheet.insertRule('.b { margin-top: 6px; }', find(sheet, '@keyframes'));
+    sheet.insertRule('.a { margin-top: 9px; }', find(sheet, '@keyframes') + 1);
+  }],
+  ['before layered, container and scoped rules', () => {
+    sheet.insertRule('.lay { font-weight: 800; }', 0);
+    sheet.insertRule('.cq, .in-scope { font-weight: 200; }', sheet.cssRules.length);
+  }],
+  ['many in one update', () => {
+    for (let i = 0; i < 20; i++)
+      sheet.insertRule('.item.n' + (i % 3) + ' { padding-left: ' + i + 'px; }', (i * 7) % (sheet.cssRules.length + 1));
+  }],
+  ['many updates', () => {
+    for (let i = 0; i < 30; i++) {
+      const target = i % 4 ? sheet : afterSheet;
+      target.insertRule('.item.n' + (i % 3) + ', .lay { margin-top: ' + i + 'px; }', (i * 5) % (target.cssRules.length + 1));
+      if (i % 3 === 0) getComputedStyle($('first')).marginTop;
+    }
+  }],
+  ['random rules in three sheets', () => {
+    const targets = [sheet, afterSheet, $('layered').sheet];
+    for (let i = 0; i < 120; i++) {
+      const target = targets[random(3)];
+      const a = 'r' + random(8);
+      const b = 'r' + random(8);
+      const selector = [`.${a}`, `.${a}.${b}`, `p.${a}`, `.${a}, .${b}`, `#random > .${a}`][random(5)];
+      const body = `color: rgb(${i}, ${random(256)}, 0); padding-left: ${random(20)}px;`;
+      const text = random(6) ? `${selector} { ${body} }` : `@media (min-width: ${random(2) ? 1 : 5000}px) { ${selector} { ${body} } }`;
+      target.insertRule(text, random(target.cssRules.length + 1));
+      if (!random(4)) getComputedStyle($('random').firstChild).color;
+    }
   }],
   ['several before a style update', () => {
     sheet.insertRule('.item { background-color: rgb(20, 20, 20); }', 0);
@@ -149,9 +223,53 @@ for (const [name, change] of changes) {
   if (differ) results.push(name + ':' + differ);
 }
 
+// Media queries of inserted rules and of the rules after them in a frame whose width changes
+async function frameMedia() {
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'width: 200px; height: 60px; border: 0';
+  frame.srcdoc = '<style id="a">.x { color: rgb(1, 1, 1); } .y { color: rgb(2, 2, 2); }</style>' +
+    '<style>@media (min-width: 300px) { .mq { color: rgb(90, 90, 90); } } .mq { padding-left: 3px; }</style>' +
+    '<p class="x mq">X</p><p class="y">Y</p><p class="mq">Q</p>';
+  const loaded = new Promise((resolve) => { frame.onload = resolve; });
+  $('app').append(frame);
+  await loaded;
+  const doc = frame.contentDocument;
+  const frameSheet = doc.getElementById('a').sheet;
+  const frameSnapshot = () => [...doc.body.querySelectorAll('*')].map((element) => {
+    const style = frame.contentWindow.getComputedStyle(element);
+    return properties.map((name) => style.getPropertyValue(name)).join(',');
+  });
+  const frameFresh = () => {
+    const extra = doc.head.appendChild(doc.createElement('style'));
+    extra.textContent = '.none { color: red; }';
+    doc.body.offsetHeight;
+    extra.remove();
+    doc.body.style.display = 'none';
+    doc.body.offsetHeight;
+    doc.body.style.display = '';
+    return frameSnapshot();
+  };
+  const compare = (name) => {
+    const incremental = frameSnapshot();
+    const expected = frameFresh();
+    const differ = incremental.filter((value, index) => value !== expected[index]).length;
+    if (differ) results.push(name + ':' + differ);
+  };
+  frameFresh();
+  frameSheet.insertRule('@media (min-width: 300px) { .y { color: rgb(91, 91, 91); } }', 1);
+  frameSheet.insertRule('.x { margin-top: 2px; }', 0);
+  compare('frame inserted media');
+  frame.style.width = '400px';
+  compare('frame wider');
+  frameSheet.insertRule('@media (max-width: 300px) { .x { color: rgb(92, 92, 92); } }', 2);
+  frame.style.width = '200px';
+  compare('frame narrower');
+  frame.remove();
+}
+
 // Cost of an inserted rule next to 4000 elements against a change of the sheet's contents that
 // restyles everything (a declaration of a rule set through the CSSOM), once the web font failed
-addEventListener('load', () => setTimeout(measure, 300));
+addEventListener('load', () => setTimeout(() => frameMedia().then(measure), 300));
 function measure() {
   const rows = [];
   for (let i = 0; i < 1000; i++)
@@ -177,6 +295,21 @@ function measure() {
   const ratio = inserted / full;
   console.log('CSSOM inserted=' + inserted.toFixed(2) + 'ms full=' + full.toFixed(2) + 'ms');
   if (ratio > 0.5) results.push('an inserted rule costs ' + Math.round(ratio * 100) + '% of a full restyle');
+
+  // Ten inserted rules with a style update after each, before and after 5000 more rules
+  const insertTen = () => median(() => {
+    for (let i = 0; i < 10; i++) {
+      sheet.insertRule('.sc-ten-' + next++ + ' { color: blue; }', middle());
+      document.body.offsetHeight;
+    }
+  });
+  const few = insertTen();
+  const big = document.head.appendChild(document.createElement('style'));
+  big.textContent = Array.from({ length: 5000 }, (_, i) => '.big-' + i + ' > .cell:not(.x' + i + ') { margin: ' + (i % 5) + 'px; }').join('\n');
+  document.body.offsetHeight;
+  const many = insertTen();
+  console.log('CSSOM ten inserted=' + few.toFixed(2) + 'ms next to 5000 more rules=' + many.toFixed(2) + 'ms');
+  if (many > few * 3) results.push('an inserted rule next to 5000 more rules costs ' + (many / few).toFixed(1) + ' times as much');
   console.log('CSSOM done=' + (results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'));
 }
 </script>

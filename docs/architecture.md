@@ -81,8 +81,13 @@ one column, like Blink's legacy layout; they lay out only what meets a column bo
 (patch 0118, #519). A rule that `insertRule()` adds to or `deleteRule()` removes from an active
 sheet restyles only the elements it may match, like a sheet that was added (WebKit restyled the
 whole document; CSS-in-JS libraries insert hundreds of rules while a page renders), unless
-something else of the sheets changed or the rule is no style rule (also inside `@media`); the
-style resolver is still built anew. Such a new resolver keeps the faces of the `@font-face` rules
+something else of the sheets changed or the rule is no style rule (also inside `@media`). Such a
+style rule, or an `@media` rule of style rules, also goes into the rule set the document's style
+resolver has, before the rule data of the next rule of its sheet (or after those of the previous
+one), and the positions after it move up, so the cascade keeps the order of the sheets; WebKit
+built the rule set of all sheets anew for every style update after such a change, 5 to 25 ms
+each on blick.ch, about 150 times on a tap there (patch 0158). Other changes, sheets with `@import`
+or a `media` attribute and shadow trees still get a new resolver. A new resolver keeps the faces of the `@font-face` rules
 whose descriptors did not change, where WebKit made every face anew, which loaded its font again
 and so restyled and laid out the whole document once more (patch 0124, #530). A web font that
 loads or a font face that is added or removed no longer restyles the whole document from scratch

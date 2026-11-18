@@ -1,0 +1,597 @@
+diff --git a/Source/WebCore/css/CSSStyleSheet.cpp b/Source/WebCore/css/CSSStyleSheet.cpp
+index ab9c578236..f5550b69f6 100644
+--- a/Source/WebCore/css/CSSStyleSheet.cpp
++++ b/Source/WebCore/css/CSSStyleSheet.cpp
+@@ -255,7 +255,7 @@ void CSSStyleSheet::didMutateRules(RuleMutationType mutationType, ContentsCloned
+         // browser-lite: a rule added or removed through the CSSOM restyles only the elements it
+         // may match instead of the whole document (CSS-in-JS inserts hundreds of rules)
+         if (changedRule)
+-            scope.didChangeStyleSheetRule(*changedRule);
++            scope.didChangeStyleSheetRule(*changedRule, mutationType == RuleInsertion ? this : nullptr);
+         else
+             scope.didChangeStyleSheetContents();
+ 
+diff --git a/Source/WebCore/style/RuleData.h b/Source/WebCore/style/RuleData.h
+index 7dd9daa043..97c2249d69 100644
+--- a/Source/WebCore/style/RuleData.h
++++ b/Source/WebCore/style/RuleData.h
+@@ -46,6 +46,12 @@ public:
+     RuleData(const StyleRule&, unsigned selectorIndex, unsigned selectorListIndex, unsigned position, IsStartingStyle);
+ 
+     unsigned position() const { return m_position; }
++    // browser-lite: rules inserted through the CSSOM move the positions after them (RuleSet::insertRules)
++    void setPosition(unsigned position)
++    {
++        m_position = position;
++        ASSERT(m_position == position);
++    }
+ 
+     const StyleRule& styleRule() const { return *m_styleRuleWithSelectorIndex.pointer(); }
+ 
+diff --git a/Source/WebCore/style/RuleSet.cpp b/Source/WebCore/style/RuleSet.cpp
+index 7d30f4bba2..4cfc0a3014 100644
+--- a/Source/WebCore/style/RuleSet.cpp
++++ b/Source/WebCore/style/RuleSet.cpp
+@@ -709,6 +709,222 @@ void RuleSet::shrinkToFit()
+     m_resolverMutatingRulesInLayers.shrinkToFit();
+ }
+ 
++// browser-lite: CSS-in-JS libraries (styled-components, emotion) insert hundreds of rules into a
++// sheet while a page renders and read layout between them; a new rule set for all sheets of the
++// document per style update cost 5 to 25 ms each on blick.ch. Inserting them keeps the order of the
++// cascade: the positions after an inserted rule move up by its number of rule datas.
++bool RuleSet::isInsertable(const StyleRuleBase& rule)
++{
++    if (rule.type() == StyleRuleType::Style)
++        return true;
++    auto* mediaRule = dynamicDowncast<StyleRuleMedia>(rule);
++    if (!mediaRule)
++        return false;
++    for (auto& child : mediaRule->childRules()) {
++        if (child->type() != StyleRuleType::Style)
++            return false;
++    }
++    return true;
++}
++
++bool RuleSet::addsNoRuleData(const StyleRuleBase& rule)
++{
++    switch (rule.type()) {
++    case StyleRuleType::FontFace:
++    case StyleRuleType::Keyframes:
++    case StyleRuleType::Property:
++    case StyleRuleType::CounterStyle:
++    case StyleRuleType::FontPaletteValues:
++    case StyleRuleType::FontFeatureValues:
++        return true;
++    case StyleRuleType::Media:
++        return uncheckedDowncast<StyleRuleMedia>(rule).childRules().isEmpty();
++    default:
++        return false;
++    }
++}
++
++template<typename Function> static void forEachInsertableStyleRule(const StyleRuleBase& rule, NOESCAPE const Function& function)
++{
++    if (auto* mediaRule = dynamicDowncast<StyleRuleMedia>(rule)) {
++        for (auto& child : mediaRule->childRules())
++            function(uncheckedDowncast<StyleRule>(child.get()));
++        return;
++    }
++    function(uncheckedDowncast<StyleRule>(rule));
++}
++
++bool RuleSet::insertRules(const Vector<Insertion>& insertions, const MQ::MediaQueryEvaluator& evaluator, RuleFeatureSet& insertedFeatures)
++{
++    RELEASE_ASSERT(!m_isBuilding);
++
++    // The first and last position of the rule datas of every anchor's style rules
++    HashMap<const StyleRule*, std::pair<unsigned, unsigned>> anchorPositions;
++    for (auto& insertion : insertions) {
++        ASSERT(isInsertable(insertion.rule) && isInsertable(insertion.anchor));
++        forEachInsertableStyleRule(insertion.anchor, [&](const StyleRule& rule) {
++            anchorPositions.add(&rule, std::pair { std::numeric_limits<unsigned>::max(), 0u });
++        });
++    }
++    traverseRuleDatas([&](const RuleData& ruleData) {
++        auto iterator = anchorPositions.find(&ruleData.styleRule());
++        if (iterator == anchorPositions.end())
++            return;
++        iterator->value.first = std::min(iterator->value.first, ruleData.position());
++        iterator->value.second = std::max(iterator->value.second, ruleData.position());
++    });
++
++    struct Pending {
++        unsigned position;
++        bool isAfterAnchor;
++        unsigned indexInSheet;
++        Ref<RuleSet> ruleSet;
++    };
++    Vector<Pending> pending;
++    unsigned insertedCount = 0;
++    for (auto& insertion : insertions) {
++        std::optional<unsigned> position;
++        bool isMissing = false;
++        forEachInsertableStyleRule(insertion.anchor, [&](const StyleRule& rule) {
++            auto [first, last] = anchorPositions.get(&rule);
++            if (first > last) {
++                isMissing = true;
++                return;
++            }
++            position = insertion.isBeforeAnchor ? std::min(position.value_or(first), first) : std::max(position.value_or(last + 1), last + 1);
++        });
++        if (isMissing || !position)
++            return false;
++
++        auto ruleSet = RuleSet::create();
++        {
++            RuleSetBuilder builder(ruleSet, evaluator, nullptr, RuleSetBuilder::ShrinkToFit::Disable);
++            builder.addInsertedRule(insertion.rule);
++        }
++        ASSERT(ruleSet->m_cascadeLayers.isEmpty() && ruleSet->m_containerQueries.isEmpty() && ruleSet->m_scopeRules.isEmpty());
++        insertedCount += ruleSet->ruleCount();
++        pending.append({ *position, !insertion.isBeforeAnchor, insertion.indexInSheet, WTF::move(ruleSet) });
++    }
++
++    // RuleData::m_position has 21 bits
++    if (m_ruleCount + insertedCount >= (1u << 21))
++        return false;
++
++    // At one position the rules after the end of a sheet come before those before the first rule
++    // of the next sheet, rules before one anchor in the order of the sheet
++    std::ranges::sort(pending, [](auto& a, auto& b) {
++        if (a.position != b.position)
++            return a.position < b.position;
++        if (a.isAfterAnchor != b.isAfterAnchor)
++            return a.isAfterAnchor;
++        return a.indexInSheet < b.indexInSheet;
++    });
++
++    // An old position moves up by the rule datas inserted at it or before it
++    Vector<std::pair<unsigned, unsigned>> insertedUpTo;
++    unsigned total = 0;
++    for (auto& entry : pending) {
++        total += entry.ruleSet->ruleCount();
++        if (!insertedUpTo.isEmpty() && insertedUpTo.last().first == entry.position)
++            insertedUpTo.last().second = total;
++        else
++            insertedUpTo.append({ entry.position, total });
++    }
++    auto newPosition = [&](size_t position) -> unsigned {
++        auto next = std::upper_bound(insertedUpTo.begin(), insertedUpTo.end(), position, [](size_t value, auto& entry) {
++            return value < entry.first;
++        });
++        return position + (next == insertedUpTo.begin() ? 0 : (next - 1)->second);
++    };
++
++    m_isBuilding = true;
++
++    traverseRuleDatas([&](RuleData& ruleData) {
++        ruleData.setPosition(newPosition(ruleData.position()));
++    });
++    auto movePositions = [&](Vector<unsigned>& identifiers) {
++        if (identifiers.isEmpty())
++            return;
++        Vector<unsigned> moved(newPosition(identifiers.size() - 1) + 1, [](size_t) { return 0u; });
++        for (size_t position = 0; position < identifiers.size(); ++position)
++            moved[newPosition(position)] = identifiers[position];
++        identifiers = WTF::move(moved);
++    };
++    movePositions(m_cascadeLayerIdentifierForRulePosition);
++    movePositions(m_containerQueryIdentifierForRulePosition);
++    movePositions(m_scopeRuleIdentifierForRulePosition);
++    for (auto& dynamicRules : m_dynamicMediaQueryRules) {
++        for (auto& position : dynamicRules.affectedRulePositions)
++            position = newPosition(position);
++    }
++
++    unsigned inserted = 0;
++    for (auto& entry : pending) {
++        addInsertedRuleDatas(entry.ruleSet, entry.position + inserted);
++        inserted += entry.ruleSet->ruleCount();
++        insertedFeatures.add(entry.ruleSet->m_features);
++    }
++    m_ruleCount += inserted;
++
++    m_isBuilding = false;
++    return true;
++}
++
++void RuleSet::addInsertedRuleDatas(const RuleSet& inserted, unsigned firstPosition)
++{
++    // The buckets of traverseRuleDatas, as addRuleToBucket chose them in the inserted set
++    auto appendVector = [&](RuleDataVector& vector, const RuleDataVector& insertedVector) {
++        for (auto ruleData : insertedVector) {
++            ruleData.setPosition(firstPosition + ruleData.position());
++            vector.append(WTF::move(ruleData));
++        }
++    };
++    auto appendMap = [&](AtomRuleMap& map, const AtomRuleMap& insertedMap) {
++        for (auto& [key, insertedVector] : insertedMap) {
++            auto& vector = map.add(key, nullptr).iterator->value;
++            if (!vector)
++                vector = makeUnique<RuleDataVector>();
++            appendVector(*vector, *insertedVector);
++        }
++    };
++    appendMap(m_idRules, inserted.m_idRules);
++    appendMap(m_classRules, inserted.m_classRules);
++    appendMap(m_attributeLocalNameRules, inserted.m_attributeLocalNameRules);
++    appendMap(m_attributeLowercaseLocalNameRules, inserted.m_attributeLowercaseLocalNameRules);
++    appendMap(m_tagLocalNameRules, inserted.m_tagLocalNameRules);
++    appendMap(m_tagLowercaseLocalNameRules, inserted.m_tagLowercaseLocalNameRules);
++    appendMap(m_userAgentPartRules, inserted.m_userAgentPartRules);
++    appendMap(m_namedPseudoElementRules, inserted.m_namedPseudoElementRules);
++    appendVector(m_linkPseudoClassRules, inserted.m_linkPseudoClassRules);
++#if ENABLE(VIDEO)
++    appendVector(m_cuePseudoRules, inserted.m_cuePseudoRules);
++#endif
++    appendVector(m_hostPseudoClassRules, inserted.m_hostPseudoClassRules);
++    appendVector(m_slottedPseudoElementRules, inserted.m_slottedPseudoElementRules);
++    appendVector(m_partPseudoElementRules, inserted.m_partPseudoElementRules);
++    appendVector(m_focusPseudoClassRules, inserted.m_focusPseudoClassRules);
++    appendVector(m_focusVisiblePseudoClassRules, inserted.m_focusVisiblePseudoClassRules);
++    appendVector(m_fullscreenPseudoClassRules, inserted.m_fullscreenPseudoClassRules);
++    appendVector(m_rootElementRules, inserted.m_rootElementRules);
++    appendVector(m_universalRules, inserted.m_universalRules);
++    appendVector(m_universalPseudoElementRules, inserted.m_universalPseudoElementRules);
++
++    m_universalHTMLPseudoElementTypes.add(inserted.m_universalHTMLPseudoElementTypes);
++    m_universalPseudoElementTypes.add(inserted.m_universalPseudoElementTypes);
++    m_hasHostPseudoClassRulesMatchingInShadowTree = m_hasHostPseudoClassRulesMatchingInShadowTree || inserted.m_hasHostPseudoClassRulesMatchingInShadowTree;
++    m_hasHostOrScopePseudoClassRulesInUniversalBucket = m_hasHostOrScopePseudoClassRulesInUniversalBucket || inserted.m_hasHostOrScopePseudoClassRulesInUniversalBucket;
++    m_hasViewportDependentMediaQueries = m_hasViewportDependentMediaQueries || inserted.m_hasViewportDependentMediaQueries;
++
++    m_features.add(inserted.m_features);
++
++    for (auto& insertedRules : inserted.m_dynamicMediaQueryRules) {
++        auto dynamicRules = insertedRules;
++        for (auto& position : dynamicRules.affectedRulePositions)
++            position += firstPosition;
++        m_dynamicMediaQueryRules.append(WTF::move(dynamicRules));
++    }
++}
++
+ Vector<Ref<const StyleRuleContainer>> RuleSet::containerQueryRules() const
+ {
+     return m_containerQueries.map([](auto& entry) {
+diff --git a/Source/WebCore/style/RuleSet.h b/Source/WebCore/style/RuleSet.h
+index a3e728be0d..e649216237 100644
+--- a/Source/WebCore/style/RuleSet.h
++++ b/Source/WebCore/style/RuleSet.h
+@@ -150,9 +150,27 @@ public:
+ 
+     WTF::String selectorsForDebugging() const;
+ 
++    // browser-lite: rules that insertRule() added to an author sheet go into the built rule set
++    // instead of a new one for all sheets. A style rule or an @media rule of style rules can be
++    // inserted; it goes right before the rule data of the anchor (the next rule of the sheet the
++    // set has) or right after them (the previous one, when no rule after it has data).
++    struct Insertion {
++        Ref<StyleRuleBase> rule;
++        Ref<const StyleRuleBase> anchor;
++        bool isBeforeAnchor;
++        unsigned indexInSheet;
++    };
++    static bool NODELETE isInsertable(const StyleRuleBase&);
++    static bool NODELETE addsNoRuleData(const StyleRuleBase&);
++    // False without a change when an anchor has no rule data here; insertedFeatures gets the
++    // features of the inserted rules.
++    bool insertRules(const Vector<Insertion>&, const MQ::MediaQueryEvaluator&, RuleFeatureSet& insertedFeatures);
++
+ private:
+     friend class RuleSetBuilder;
+ 
++    void addInsertedRuleDatas(const RuleSet& inserted, unsigned firstPosition);
++
+     RuleSet();
+ 
+     using CascadeLayerIdentifier = unsigned;
+diff --git a/Source/WebCore/style/RuleSetBuilder.h b/Source/WebCore/style/RuleSetBuilder.h
+index 5ec2abe4c5..1b7f2f5376 100644
+--- a/Source/WebCore/style/RuleSetBuilder.h
++++ b/Source/WebCore/style/RuleSetBuilder.h
+@@ -42,6 +42,13 @@ public:
+     void addStyleRule(const StyleRule&);
+     // browser-lite: rules of a sheet without the sheet, for the invalidation of rules changed through the CSSOM
+     void addTopLevelRules(const Vector<Ref<StyleRuleBase>>& rules) { addChildRules(rules); }
++    // browser-lite: a rule insertRule() added to a sheet of a built rule set (RuleSet::insertRules),
++    // a style rule or an @media rule of style rules, with dynamic media queries like in the sheet
++    void addInsertedRule(StyleRuleBase& rule)
++    {
++        m_mediaQueryCollector.collectDynamic = true;
++        addChildRule(rule);
++    }
+ 
+ private:
+     RuleSetBuilder(const MQ::MediaQueryEvaluator&);
+diff --git a/Source/WebCore/style/StyleScope.cpp b/Source/WebCore/style/StyleScope.cpp
+index 7771c9a19f..44ef608b1f 100644
+--- a/Source/WebCore/style/StyleScope.cpp
++++ b/Source/WebCore/style/StyleScope.cpp
+@@ -172,6 +172,11 @@ void Scope::clearResolver()
+     RELEASE_ASSERT(!m_document->isResolvingTreeStyle());
+ 
+     m_resolver = nullptr;
++    // browser-lite: a new resolver has the rules insertRule() added already
++    if (m_pendingChangedRules) {
++        for (auto& changedRule : *m_pendingChangedRules)
++            changedRule.insertedInto = nullptr;
++    }
+     customPropertyRegistry().clearRegisteredFromStylesheets();
+     counterStyleRegistry().clearAuthorCounterStyles();
+ }
+@@ -544,7 +549,7 @@ static void filterEnabledNonemptyCSSStyleSheets(Vector<Ref<CSSStyleSheet>>& resu
+     }
+ }
+ 
+-void Scope::updateActiveStyleSheets(UpdateType updateType, std::optional<Vector<Ref<StyleRuleBase>>>&& changedRules)
++void Scope::updateActiveStyleSheets(UpdateType updateType, std::optional<Vector<ChangedRule>>&& changedRules)
+ {
+     RELEASE_ASSERT(!m_isUpdatingStyleResolver);
+     ASSERT(!m_pendingUpdate);
+@@ -579,7 +584,10 @@ void Scope::updateActiveStyleSheets(UpdateType updateType, std::optional<Vector<
+     if (updateType == UpdateType::ActiveSet)
+         styleSheetChange = analyzeStyleSheetChange(activeCSSStyleSheets);
+ 
+-    updateResolver(activeCSSStyleSheets, styleSheetChange.resolverUpdateType);
++    // browser-lite: rules insertRule() added go into the resolver's rule set instead of a new
++    // resolver for all sheets of the scope
++    if (!changedRules || !insertChangedRulesIntoResolver(activeCSSStyleSheets, *changedRules))
++        updateResolver(activeCSSStyleSheets, styleSheetChange.resolverUpdateType);
+ 
+     m_weakCopyOfActiveStyleSheetListForFastLookup.clear();
+     m_activeStyleSheets.swap(activeCSSStyleSheets);
+@@ -598,7 +606,7 @@ void Scope::updateActiveStyleSheets(UpdateType updateType, std::optional<Vector<
+     invalidateStyleAfterStyleSheetChange(styleSheetChange, changedRules);
+ }
+ 
+-void Scope::invalidateStyleAfterStyleSheetChange(const StyleSheetChange& styleSheetChange, const std::optional<Vector<Ref<StyleRuleBase>>>& changedRules)
++void Scope::invalidateStyleAfterStyleSheetChange(const StyleSheetChange& styleSheetChange, const std::optional<Vector<ChangedRule>>& changedRules)
+ {
+     if (m_shadowRoot && !m_shadowRoot->isConnected())
+         return;
+@@ -611,7 +619,7 @@ void Scope::invalidateStyleAfterStyleSheetChange(const StyleSheetChange& styleSh
+     // all the same, the positions of the rules after them moved). Rules other than style rules
+     // (also inside @media) still restyle everything (Invalidator::dirtiesAllStyle).
+     if (changedRules && !invalidateAll && styleSheetChange.resolverUpdateType == ResolverUpdateType::Reconstruct) {
+-        Invalidator invalidator(*changedRules, resolver().mediaQueryEvaluator());
++        Invalidator invalidator(changedRules->map([](auto& changedRule) { return changedRule.rule; }), resolver().mediaQueryEvaluator());
+         invalidator.invalidateStyle(*this);
+         return;
+     }
+@@ -625,6 +633,69 @@ void Scope::invalidateStyleAfterStyleSheetChange(const StyleSheetChange& styleSh
+     invalidator.invalidateStyle(*this);
+ }
+ 
++bool Scope::insertChangedRulesIntoResolver(std::span<const Ref<CSSStyleSheet>> activeStyleSheets, const Vector<ChangedRule>& changedRules)
++{
++    if (m_shadowRoot || !m_resolver || changedRules.isEmpty())
++        return false;
++    if (!std::ranges::equal(activeStyleSheets, m_activeStyleSheets, [](auto& a, auto& b) { return a.ptr() == b.ptr(); }))
++        return false;
++
++    HashSet<const StyleRuleBase*> insertedRules;
++    for (auto& changedRule : changedRules) {
++        if (!changedRule.insertedInto)
++            return false;
++        insertedRules.add(changedRule.rule.ptr());
++    }
++
++    Vector<RuleSet::Insertion> insertions;
++    for (auto& changedRule : changedRules) {
++        Ref sheet = *changedRule.insertedInto;
++        if (!sheet->mediaQueries().isEmpty() || !activeStyleSheetsContains(sheet) || !RuleSet::isInsertable(changedRule.rule))
++            return false;
++        Ref contents = sheet->contents();
++        if (!contents->importRules().isEmpty())
++            return false;
++        auto& rules = contents->childRules();
++        auto index = rules.findIf([&](auto& rule) {
++            return rule.ptr() == changedRule.rule.ptr();
++        });
++        if (index == notFound)
++            return false;
++
++        // The next rule of the sheet the rule set has, else the previous one
++        std::optional<size_t> anchor;
++        bool isAnchorUsable = true;
++        auto consider = [&](size_t candidate) {
++            Ref rule = rules[candidate];
++            if (insertedRules.contains(rule.ptr()) || RuleSet::addsNoRuleData(rule))
++                return false;
++            isAnchorUsable = RuleSet::isInsertable(rule);
++            anchor = candidate;
++            return true;
++        };
++        bool isBeforeAnchor = true;
++        for (size_t candidate = index + 1; candidate < rules.size(); ++candidate) {
++            if (consider(candidate))
++                break;
++        }
++        if (!anchor) {
++            isBeforeAnchor = false;
++            for (size_t candidate = index; candidate-- > 0;) {
++                if (consider(candidate))
++                    break;
++            }
++        }
++        if (!anchor || !isAnchorUsable)
++            return false;
++
++        insertions.append({ changedRule.rule, rules[*anchor], isBeforeAnchor, static_cast<unsigned>(index) });
++    }
++
++    SetForScope isUpdatingStyleResolver { m_isUpdatingStyleResolver, true };
++    Ref resolver = *m_resolver;
++    return resolver->ruleSets().insertAuthorRules(insertions, resolver->mediaQueryEvaluator());
++}
++
+ void Scope::updateResolver(std::span<const Ref<CSSStyleSheet>> activeStyleSheets, ResolverUpdateType updateType)
+ {
+     if (updateType == ResolverUpdateType::Reconstruct) {
+@@ -744,6 +815,11 @@ void Scope::scheduleUpdate(UpdateType update)
+             documentScope->m_matchResultCache = { };
+     }
+ 
++    startPendingUpdate(update);
++}
++
++void Scope::startPendingUpdate(UpdateType update)
++{
+     if (!m_pendingUpdate || *m_pendingUpdate < update) {
+         m_pendingUpdate = update;
+         if (m_shadowRoot)
+@@ -768,15 +844,31 @@ void Scope::didChangeStyleSheetContents()
+ // browser-lite: beyond this many rules a change restyles everything anyway
+ static constexpr size_t maximumChangedRulesToInvalidate = 512;
+ 
+-void Scope::didChangeStyleSheetRule(StyleRuleBase& rule)
++void Scope::didChangeStyleSheetRule(StyleRuleBase& rule, CSSStyleSheet* insertedInto)
+ {
+     // Only the first change of an update and the changes of rules after it keep the list
+-    auto changedRules = m_pendingUpdate ? std::exchange(m_pendingChangedRules, std::nullopt) : std::optional<Vector<Ref<StyleRuleBase>>> { Vector<Ref<StyleRuleBase>> { } };
++    auto changedRules = m_pendingUpdate ? std::exchange(m_pendingChangedRules, std::nullopt) : std::optional<Vector<ChangedRule>> { Vector<ChangedRule> { } };
+     if (changedRules && changedRules->size() < maximumChangedRulesToInvalidate)
+-        changedRules->append(rule);
++        changedRules->append({ rule, insertedInto });
+     else
+         changedRules = std::nullopt;
+-    scheduleUpdate(UpdateType::ContentsOrInterpretation);
++
++    // While only rules were inserted the resolver stays for the update to take them
++    // (insertChangedRulesIntoResolver); a cleared one forgets the sheets of the list
++    bool keepsResolver = changedRules && m_resolver && !m_shadowRoot && RuleSet::isInsertable(rule) && std::ranges::all_of(*changedRules, [](auto& changedRule) {
++        return !!changedRule.insertedInto;
++    });
++    if (keepsResolver) {
++        if (auto* documentScope = dynamicDowncast<DocumentScope>(*this))
++            documentScope->m_matchResultCache = { };
++        startPendingUpdate(UpdateType::ContentsOrInterpretation);
++    } else {
++        scheduleUpdate(UpdateType::ContentsOrInterpretation);
++        if (changedRules) {
++            for (auto& changedRule : *changedRules)
++                changedRule.insertedInto = nullptr;
++        }
++    }
+     m_pendingChangedRules = WTF::move(changedRules);
+ }
+ 
+diff --git a/Source/WebCore/style/StyleScope.h b/Source/WebCore/style/StyleScope.h
+index d18da2bd2b..811720748e 100644
+--- a/Source/WebCore/style/StyleScope.h
++++ b/Source/WebCore/style/StyleScope.h
+@@ -116,7 +116,8 @@ public:
+     // browser-lite: a top-level rule of an active sheet was added or removed through the CSSOM
+     // (insertRule, deleteRule). Until the update only the elements such rules may match are
+     // restyled, as long as nothing else of the sheets changed.
+-    void didChangeStyleSheetRule(StyleRuleBase&);
++    // insertedInto is the sheet insertRule() added the rule to, null for a removed rule.
++    void didChangeStyleSheetRule(StyleRuleBase&, CSSStyleSheet* insertedInto);
+ 
+     void didChangeViewportSize();
+ 
+@@ -166,8 +167,16 @@ private:
+     void didRemovePendingStylesheet();
+ 
+     enum class UpdateType : uint8_t { ActiveSet, FullForExtensionStyleSheets, ContentsOrInterpretation };
+-    void updateActiveStyleSheets(UpdateType, std::optional<Vector<Ref<StyleRuleBase>>>&& changedRules);
++    // browser-lite: a rule of didChangeStyleSheetRule
++    // insertedInto: the sheet of a rule insertRule() added while the resolver had the sheets
++    struct ChangedRule {
++        Ref<StyleRuleBase> rule;
++        RefPtr<CSSStyleSheet> insertedInto;
++    };
++    void updateActiveStyleSheets(UpdateType, std::optional<Vector<ChangedRule>>&& changedRules);
++    bool insertChangedRulesIntoResolver(std::span<const Ref<CSSStyleSheet>> activeStyleSheets, const Vector<ChangedRule>&);
+     void scheduleUpdate(UpdateType);
++    void startPendingUpdate(UpdateType);
+ 
+     WEBCORE_EXPORT void flushPendingSelfUpdate();
+     WEBCORE_EXPORT void flushPendingDescendantUpdates();
+@@ -189,7 +198,7 @@ private:
+         Vector<Ref<StyleSheetContents>> addedSheets { };
+     };
+     StyleSheetChange analyzeStyleSheetChange(const Vector<Ref<CSSStyleSheet>>& newStylesheets);
+-    void invalidateStyleAfterStyleSheetChange(const StyleSheetChange&, const std::optional<Vector<Ref<StyleRuleBase>>>& changedRules);
++    void invalidateStyleAfterStyleSheetChange(const StyleSheetChange&, const std::optional<Vector<ChangedRule>>& changedRules);
+ 
+     void updateResolver(std::span<const Ref<CSSStyleSheet>>, ResolverUpdateType);
+     void createOrFindSharedShadowTreeResolver();
+@@ -227,7 +236,7 @@ private:
+ 
+     std::optional<UpdateType> m_pendingUpdate;
+     // browser-lite: the rules of didChangeStyleSheetRule when they are all the pending update changes
+-    std::optional<Vector<Ref<StyleRuleBase>>> m_pendingChangedRules;
++    std::optional<Vector<ChangedRule>> m_pendingChangedRules;
+ 
+     bool m_hasDescendantWithPendingUpdate { false };
+     bool m_usesStyleBasedEditability { false };
+diff --git a/Source/WebCore/style/StyleScopeRuleSets.cpp b/Source/WebCore/style/StyleScopeRuleSets.cpp
+index 2ccac3eac3..efaab71da4 100644
+--- a/Source/WebCore/style/StyleScopeRuleSets.cpp
++++ b/Source/WebCore/style/StyleScopeRuleSets.cpp
+@@ -282,6 +282,13 @@ void ScopeRuleSets::collectFeatures() const
+     if (RefPtr userStyle = this->userStyle())
+         m_features.add(userStyle->features());
+ 
++    clearFeatureCaches();
++
++    m_features.shrinkToFit();
++}
++
++void ScopeRuleSets::clearFeatureCaches() const
++{
+     m_idInvalidationRuleSets.clear();
+     m_classInvalidationRuleSets.clear();
+     m_attributeInvalidationRuleSets.clear();
+@@ -291,8 +298,25 @@ void ScopeRuleSets::collectFeatures() const
+     m_customPropertyNamesInStyleContainerQueries = std::nullopt;
+ 
+     m_cachedSelectorsForStyleAttribute = std::nullopt;
++}
+ 
+-    m_features.shrinkToFit();
++bool ScopeRuleSets::insertAuthorRules(const Vector<RuleSet::Insertion>& insertions, const MQ::MediaQueryEvaluator& mediaQueryEvaluator)
++{
++    RELEASE_ASSERT(isMainThread());
++    RELEASE_ASSERT(!m_isInvalidatingStyleWithRuleSets);
++
++    RuleFeatureSet insertedFeatures;
++    if (!m_authorStyle->insertRules(insertions, mediaQueryEvaluator, insertedFeatures))
++        return false;
++
++    // Like collectFeatures for the inserted rules only
++    if (m_defaultStyleVersionOnFeatureCollection < UserAgentStyle::defaultStyleVersion)
++        collectFeatures();
++    else {
++        m_features.add(insertedFeatures);
++        clearFeatureCaches();
++    }
++    return true;
+ }
+ 
+ // Classifies a :has() argument for sibling-combinator invalidation. Recurses into logical
+diff --git a/Source/WebCore/style/StyleScopeRuleSets.h b/Source/WebCore/style/StyleScopeRuleSets.h
+index f9b5143f4e..0d666f9595 100644
+--- a/Source/WebCore/style/StyleScopeRuleSets.h
++++ b/Source/WebCore/style/StyleScopeRuleSets.h
+@@ -110,6 +110,9 @@ public:
+ 
+     void resetAuthorStyle();
+     void appendAuthorStyleSheets(std::span<const Ref<CSSStyleSheet>>, MQ::MediaQueryEvaluator*, Style::InspectorCSSOMWrappers&);
++    // browser-lite: rules insertRule() added to author sheets, false without a change when the
++    // author rule set cannot take them (RuleSet::insertRules)
++    bool insertAuthorRules(const Vector<RuleSet::Insertion>&, const MQ::MediaQueryEvaluator&);
+ 
+     void resetUserAgentMediaQueryStyle();
+ 
+@@ -134,6 +137,7 @@ public:
+ 
+ private:
+     void collectFeatures() const;
++    void clearFeatureCaches() const;
+     void collectRulesFromUserStyleSheets(const Vector<Ref<CSSStyleSheet>>&, RuleSet& userStyle, const MQ::MediaQueryEvaluator&);
+     void updateUserAgentMediaQueryStyleIfNeeded() const;
+ 
