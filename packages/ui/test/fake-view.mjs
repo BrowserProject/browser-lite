@@ -36,6 +36,7 @@ export function fakeView({
     reload: record('reload'),
     print: record('print'),
     copyImage: record('copyImage'),
+    mediaAction: record('mediaAction'),
     download: record('download'),
     viewSource: record('viewSource'),
     focus: record('focus'),

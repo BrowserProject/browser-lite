@@ -979,6 +979,19 @@ static const JSC::Identifier& extensionsInstalledName()
     return name;
 }
 
+// The bridge of the window's polyfills, which the engine keeps for what they leave on it
+static const JSC::Identifier& pageBridgeName()
+{
+    static NeverDestroyed<JSC::Identifier> name = JSC::Identifier::fromUid(JSC::PrivateName(JSC::PrivateName::PrivateSymbol, "blPageBridge"_s));
+    return name;
+}
+
+JSC::JSObject* pageBridge(JSC::JSGlobalObject& globalObject)
+{
+    auto bridge = globalObject.getDirect(globalObject.vm(), pageBridgeName());
+    return bridge ? bridge.getObject() : nullptr;
+}
+
 void installPageExtensions(JSC::JSGlobalObject& globalObject, int viewId)
 {
     auto& vm = globalObject.vm();
@@ -998,6 +1011,7 @@ void installPageExtensions(JSC::JSGlobalObject& globalObject, int viewId)
     bridge->putDirect(vm, JSC::Identifier::fromString(vm, "features"_s), features);
     if (featureEnabled(Feature::WebRTC) || featureEnabled(Feature::PictureInPicture))
         bridge->putDirect(vm, JSC::Identifier::fromString(vm, "media"_s), MediaStreams::createBridge(globalObject));
+    globalObject.putDirect(vm, pageBridgeName(), bridge, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
     JSC::MarkedArgumentBuffer arguments;
     arguments.append(bridge);
     if (featureEnabled(Feature::WebRTC) || featureEnabled(Feature::PictureInPicture))

@@ -71,6 +71,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   the end of the selection or the visible corner of the view, also from Firefox on Linux, which
   sends no keydown for them (before, the page got only the keydown and no `contextmenu`, and no
   menu opened, so keyboard users reached neither Copy nor Open link in new tab, #621),
+  the media items of Chrome's context menu on a video or audio, also on its controls: Loop and
+  Show controls to check, Open, Save and Copy video address, and Picture in picture where the
+  host browser has it, which also works where the page replaced `requestPictureInPicture`
+  (before, the menu of a video had only the page items, #622),
   synchronous `XMLHttpRequest`, where only its page waits like below a dialog (before it always
   failed with `NetworkError`, so Akamai's bot check reloaded amazon.de in a loop, #471),
   permission prompts like Chrome's that go away when their page is left and close with Escape
@@ -1055,6 +1059,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
+- Context menu of a video: no Copy video frame like Chrome (#622).
+  Copy video frame belongs in the core: the host `<video>` has the frame at its natural size,
+  the engine only the frames it copies while a page draws the video, at the size on screen.
 - HLS as `src` (#549): the engine plays no HLS playlist itself (it fails at once, #581), Safari
   (the default identity on every host) and current Chrome do. Players that decide by the user agent still treat the
   engine as Safari: on srf.ch (Pillarbox, video.js VHS) the video starts through

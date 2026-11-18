@@ -25,6 +25,7 @@
 #if ENABLE(MEDIA_STREAM)
 #include "MediaStreamWasm.h"
 #endif
+#include "MediaMenu.h"
 #include "Host.h"
 #include "Preconnect.h"
 #include "LoaderStrategy.h"
@@ -1815,11 +1816,31 @@ void WebView::showContextMenu(DoublePoint position)
     notifyHost(m_id, "context-menu", makeString("{\"x\":"_s, x, ",\"y\":"_s, y,
         ",\"link\":\""_s, jsonEscape(result.absoluteLinkURL().string()),
         "\",\"image\":\""_s, jsonEscape(result.absoluteImageURL().string()),
-        "\",\"selection\":\""_s, jsonEscape(selection.left(200)),
+        "\",\"media\":"_s, mediaMenuJSON(result),
+        ",\"selection\":\""_s, jsonEscape(selection.left(200)),
         "\",\"editable\":"_s, result.isContentEditable() ? "true"_s : "false"_s,
         ",\"canUndo\":"_s, canUndo ? "true"_s : "false"_s, ",\"canRedo\":"_s, canRedo ? "true"_s : "false"_s,
         ",\"canGoBack\":"_s, backForward.canGoBackOrForward(-1) ? "true"_s : "false"_s,
         ",\"canGoForward\":"_s, backForward.canGoBackOrForward(1) ? "true"_s : "false"_s, '}'));
+}
+
+// The element at the point of the context menu (also in frames) as its commands see it, like
+// ContextMenuController's hit test: what lies in the shadow tree of a control counts as the control
+HitTestResult WebView::menuHitTest(double x, double y)
+{
+    RefPtr frame = mainFrame();
+    RefPtr view = mainFrameView();
+    if (!frame || !view)
+        return { };
+    constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::DisallowUserAgentShadowContent, HitTestRequest::Type::AllowChildFrameContent };
+    return frame->eventHandler().hitTestResultAtPoint(LayoutPoint(view->windowToContents(flooredIntPoint(DoublePoint { x, y }))), hitType);
+}
+
+// Like Chrome's MediaPlayerActionAt: Loop, Show controls or Picture in picture of the menu for the
+// <video> or <audio> at its point, hit tested again
+void WebView::mediaActionAt(double x, double y, const String& action, bool enable)
+{
+    mediaMenuAction(menuHitTest(x, y), action, enable);
 }
 
 // Like Chrome's CopyImageAt: hit tests the point of the menu again (also in frames) and copies
@@ -1827,12 +1848,7 @@ void WebView::showContextMenu(DoublePoint position)
 // an animation, as PNG like every browser puts images on the clipboard.
 Vector<uint8_t> WebView::copyImageAt(double x, double y)
 {
-    RefPtr frame = mainFrame();
-    RefPtr view = mainFrameView();
-    if (!frame || !view)
-        return { };
-    constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::DisallowUserAgentShadowContent, HitTestRequest::Type::AllowChildFrameContent };
-    auto hit = frame->eventHandler().hitTestResultAtPoint(LayoutPoint(view->windowToContents(flooredIntPoint(DoublePoint { x, y }))), hitType);
+    auto hit = menuHitTest(x, y);
     RefPtr image = hit.image();
     if (!image)
         return { };

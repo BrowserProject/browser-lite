@@ -81,6 +81,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/media/MediaSourceWasm.cpp
     ${BL_ENGINE_SRC}/media/MediaPlayerPrivateWasm.cpp
     ${BL_ENGINE_SRC}/media/MediaCapabilitiesWasm.cpp
+    ${BL_ENGINE_SRC}/media/MediaMenu.cpp
     ${BL_ENGINE_SRC}/media/VideoOverlay.cpp
     ${BL_ENGINE_SRC}/media/VideoFrameWasm.cpp
     ${BL_ENGINE_SRC}/media/WebCodecsWasm.cpp

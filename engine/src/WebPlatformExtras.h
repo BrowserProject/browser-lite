@@ -39,6 +39,9 @@ void screenOrientationMayHaveChanged();
 // tracks (MediaStreamWasm.cpp) and extendPrototype(className, descriptors)
 // adds properties to a DOM prototype once the window creates it.
 void installPageExtensions(JSC::JSGlobalObject&, int viewId);
+// That bridge of the window, null before installPageExtensions: polyfills leave functions for
+// the engine on it (pictureInPictureMenu, MediaMenu.h)
+JSC::JSObject* pageBridge(JSC::JSGlobalObject&);
 void hostCallFinished(uint64_t identifier, bool ok, const WTF::String& resultJSON);
 // A call to the host that hostCallFinished answers: callback(ok, resultJSON)
 // runs as a task of the window. Returns the identifier of the call.

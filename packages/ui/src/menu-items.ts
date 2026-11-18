@@ -1,8 +1,8 @@
-import type { ContextMenuInfo, PasteContent, View } from '@browser-lite/core';
+import type { ContextMenuInfo, ContextMenuMedia, PasteContent, View } from '@browser-lite/core';
 import { readHostClipboard } from './clipboard.js';
 import type { MenuItem } from './context-menu.js';
 import type { UiOptions } from './options.js';
-import { format, resolveTexts } from './texts.js';
+import { format, resolveTexts, type UiTexts } from './texts.js';
 import { displayURL } from './url-display.js';
 
 /** The search engine of Search ... for "..." (`texts.searchFor`). */
@@ -54,15 +54,82 @@ function shorten(text: string, length: number): string {
 }
 
 /**
+ * Chrome's items of a video or audio (RenderViewContextMenu::AppendVideoItems): Loop and Show
+ * controls to check, then open, save and copy its address, Picture in picture last for a video
+ * where the host browser has it. Open and save only for a file (not MediaSource or a stream),
+ * copy only with an address.
+ */
+function mediaItems(
+  view: View,
+  info: ContextMenuInfo,
+  media: ContextMenuMedia,
+  texts: UiTexts,
+  run: {
+    openTab(url: string): void;
+    download(url: string): void;
+    copyText(text: string): unknown;
+  },
+): MenuItem[] {
+  const video = media.type === 'video';
+  const items: MenuItem[] = [
+    {
+      id: 'loop',
+      label: texts.loop,
+      checked: media.loop,
+      enabled: media.canLoop,
+      action: () => view.mediaAction(info.x, info.y, 'loop', !media.loop),
+    },
+    {
+      id: 'show-controls',
+      label: texts.showControls,
+      checked: media.controls,
+      enabled: media.canToggleControls,
+      action: () => view.mediaAction(info.x, info.y, 'controls', !media.controls),
+    },
+    { separator: true },
+    {
+      id: 'open-media',
+      label: video ? texts.openVideoInNewTab : texts.openAudioInNewTab,
+      enabled: media.canSave,
+      action: () => run.openTab(media.url),
+    },
+    {
+      id: 'save-media',
+      label: video ? texts.saveVideoAs : texts.saveAudioAs,
+      enabled: media.canSave,
+      action: () => run.download(media.url),
+    },
+    {
+      id: 'copy-media-address',
+      label: video ? texts.copyVideoAddress : texts.copyAudioAddress,
+      enabled: !!media.url,
+      action: () => run.copyText(media.url),
+    },
+  ];
+  if (media.pictureInPicture !== 'unsupported') {
+    const active = media.pictureInPicture === 'active';
+    items.push({
+      id: 'picture-in-picture',
+      label: texts.pictureInPicture,
+      checked: active,
+      enabled: media.pictureInPicture !== 'unavailable',
+      action: () => view.mediaAction(info.x, info.y, 'picture-in-picture', !active),
+    });
+  }
+  return items;
+}
+
+/**
  * The standard items of a context menu like Chrome: open, save and copy the address of a link or
- * image, copy an image, copy, search the web for the selection (with `actions.search`), select
- * all, back, forward, reload, print and view source. In an editable field only the edit
- * commands: undo and redo (disabled without an edit to undo or redo), cut and copy (disabled
- * without a selection), paste, paste as plain text, select all and the search. After a long
- * press (`info.touch`) like Chrome on phones only what was pressed: the address of the link or
- * image as a header and its commands, cut, copy, paste and select all in a field or copy and
- * select all for text, the search for a selection, nothing else (no menu on plain page). Pass
- * them to {@link showContextMenu}, possibly with own items added.
+ * image, copy an image, the items of a video or audio (Loop, Show controls, open, save and copy
+ * its address, Picture in picture), copy, search the web for the selection (with
+ * `actions.search`), select all, back, forward, reload, print and view source. In an editable
+ * field only the edit commands: undo and redo (disabled without an edit to undo or redo), cut and
+ * copy (disabled without a selection), paste, paste as plain text, select all and the search.
+ * After a long press (`info.touch`) like Chrome on phones only what was pressed: the address of
+ * the link, image or media as a header and its commands, cut, copy, paste and select all in a
+ * field or copy and select all for text, the search for a selection, nothing else (no menu on
+ * plain page). Pass them to {@link showContextMenu}, possibly with own items added.
  */
 export function defaultMenuItems(
   view: View,
@@ -79,7 +146,8 @@ export function defaultMenuItems(
   const items: MenuItem[] = [];
   const separator = () => items.push({ separator: true });
 
-  const pressed = info.link || info.image;
+  const media = info.media;
+  const pressed = info.link || info.image || media?.url;
   if (info.touch && pressed) items.push({ header: displayURL(pressed) });
   if (info.link) {
     items.push(
@@ -103,6 +171,12 @@ export function defaultMenuItems(
         label: texts.copyImageAddress,
         action: () => copyText(info.image),
       },
+    );
+    separator();
+  }
+  if (media) {
+    items.push(
+      ...mediaItems(view, info, media, texts, { openTab: actions.openTab, download, copyText }),
     );
     separator();
   }

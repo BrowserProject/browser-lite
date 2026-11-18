@@ -15,6 +15,7 @@ const info = (extra = {}) => ({
   y: 20,
   link: '',
   image: '',
+  media: null,
   selection: '',
   editable: false,
   canUndo: false,
@@ -148,6 +149,129 @@ test('link, image, selection and editable field', async () => {
     ['paste', { text: 'clip', html: '<b>clip</b>' }],
     ['paste', 'clip'],
     ['command', 'SelectAll'],
+  ]);
+});
+
+const video = (extra = {}) => ({
+  type: 'video',
+  url: 'https://v.test/clip.webm',
+  canSave: true,
+  loop: false,
+  canLoop: true,
+  controls: true,
+  canToggleControls: true,
+  pictureInPicture: 'available',
+  ...extra,
+});
+
+test('video: the media items of Chrome, checkable, before the page commands', async () => {
+  const view = fakeView();
+  const opened = [];
+  const copied = [];
+  const items = defaultMenuItems(view, info({ media: video() }), {
+    openTab: (url) => opened.push(url),
+    copyText: (text) => copied.push(text),
+  });
+  assert.deepEqual(ids(normalizeMenu(items)), [
+    'loop',
+    'show-controls',
+    '-',
+    'open-media',
+    'save-media',
+    'copy-media-address',
+    'picture-in-picture',
+    '-',
+    'select-all',
+    '-',
+    'back',
+    'forward',
+    'reload',
+    'print',
+    'view-source',
+  ]);
+  const byId = Object.fromEntries(
+    items.filter((item) => !isSeparator(item)).map((item) => [item.id, item]),
+  );
+  assert.deepEqual(
+    [
+      'loop',
+      'show-controls',
+      'open-media',
+      'save-media',
+      'copy-media-address',
+      'picture-in-picture',
+    ].map((id) => [byId[id].label, byId[id].checked, byId[id].enabled]),
+    [
+      ['Loop', false, true],
+      ['Show controls', true, true],
+      ['Open video in new tab', undefined, true],
+      ['Save video as…', undefined, true],
+      ['Copy video address', undefined, true],
+      ['Picture in picture', false, true],
+    ],
+  );
+  for (const id of [
+    'loop',
+    'show-controls',
+    'open-media',
+    'save-media',
+    'copy-media-address',
+    'picture-in-picture',
+  ])
+    await byId[id].action();
+  assert.deepEqual(opened, ['https://v.test/clip.webm']);
+  assert.deepEqual(copied, ['https://v.test/clip.webm']);
+  assert.deepEqual(view.calls, [
+    ['mediaAction', 10, 20, 'loop', true],
+    ['mediaAction', 10, 20, 'controls', false],
+    ['download', 'https://v.test/clip.webm'],
+    ['mediaAction', 10, 20, 'picture-in-picture', true],
+  ]);
+});
+
+test('video in the window, from MediaSource, without picture-in-picture, audio', () => {
+  const find = (media, id) =>
+    defaultMenuItems(fakeView(), info({ media }), { openTab() {} }).find((item) => item.id === id);
+  const active = find(video({ pictureInPicture: 'active', loop: true }), 'picture-in-picture');
+  assert.equal(active.checked, true);
+  const view = fakeView();
+  defaultMenuItems(view, info({ media: video({ pictureInPicture: 'active' }) }), { openTab() {} })
+    .find((item) => item.id === 'picture-in-picture')
+    .action();
+  assert.deepEqual(view.calls, [['mediaAction', 10, 20, 'picture-in-picture', false]]);
+  assert.equal(
+    find(video({ pictureInPicture: 'unavailable' }), 'picture-in-picture').enabled,
+    false,
+  );
+  assert.equal(find(video({ pictureInPicture: 'unsupported' }), 'picture-in-picture'), undefined);
+  const mse = video({ url: 'blob:https://v.test/1', canSave: false });
+  assert.equal(find(mse, 'open-media').enabled, false);
+  assert.equal(find(mse, 'save-media').enabled, false);
+  assert.equal(find(mse, 'copy-media-address').enabled, true);
+  const stream = video({ url: '', canSave: false, canLoop: false });
+  assert.equal(find(stream, 'copy-media-address').enabled, false);
+  assert.equal(find(stream, 'loop').enabled, false);
+  const audio = video({ type: 'audio', canToggleControls: false, pictureInPicture: 'unsupported' });
+  assert.deepEqual(
+    ['open-media', 'save-media', 'copy-media-address'].map((id) => find(audio, id).label),
+    ['Open audio in new tab', 'Save audio as…', 'Copy audio address'],
+  );
+  assert.equal(find(audio, 'show-controls').enabled, false);
+});
+
+test('long press on a video: its address as header, its items, no page commands', () => {
+  const items = defaultMenuItems(fakeView(), info({ media: video(), touch: true }), {
+    openTab() {},
+  });
+  assert.deepEqual(ids(normalizeMenu(items)), [
+    '# https://v.test/clip.webm',
+    'loop',
+    'show-controls',
+    '-',
+    'open-media',
+    'save-media',
+    'copy-media-address',
+    'picture-in-picture',
   ]);
 });
 

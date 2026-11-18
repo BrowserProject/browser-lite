@@ -151,19 +151,32 @@ const char* const webrtcPolyfillSource = R"JS((bridge) => {
         }
       }
     };
+    // The live video track of a srcObject stream, null without one, undefined for no stream
+    const liveTrack = (video) => {
+      const stream = video.srcObject;
+      if (typeof MediaStream === 'function' && stream instanceof MediaStream)
+        return stream.getVideoTracks().find((t) => t.readyState === 'live') ?? null;
+      return undefined;
+    };
+    // Why the video cannot go into the window, '' when it can (as far as the page can tell)
+    const pipBlocker = (video) => {
+      if (video.disablePictureInPicture)
+        return '"disablePictureInPicture" attribute is present.';
+      if (video.readyState === 0)
+        return 'Metadata for the video element are not loaded yet.';
+      return '';
+    };
     async function requestPictureInPicture() {
-      if (this.disablePictureInPicture)
-        throw new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': \"disablePictureInPicture\" attribute is present.", 'InvalidStateError');
-      if (this.readyState === 0)
-        throw new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': Metadata for the video element are not loaded yet.", 'InvalidStateError');
+      const blocker = pipBlocker(this);
+      if (blocker)
+        throw new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': " + blocker, 'InvalidStateError');
       const unavailable = () => new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': Picture-in-Picture is not available for this video.", 'NotSupportedError');
       let player = 0;
       let size;
       let sink = 0;
-      const stream = this.srcObject;
-      if (typeof MediaStream === 'function' && stream instanceof MediaStream) {
+      const track = liveTrack(this);
+      if (track !== undefined) {
         // Stream: the host shows the track in its own <video>
-        const track = stream.getVideoTracks().find((t) => t.readyState === 'live');
         if (!track || !media)
           throw unavailable();
         const info = { kind: 'video' };
@@ -204,6 +217,23 @@ const char* const webrtcPolyfillSource = R"JS((bridge) => {
       await call('pip-exit', {});
       leave();
     }
+    // Picture in picture of the context menu (engine/src/media/MediaMenu.cpp): like Chrome's it
+    // goes past what the page put in place of requestPictureInPicture, the window's events come
+    // as after a call of the page
+    bridge.pictureInPictureMenu = (video, command) => {
+      if (command === 'state') {
+        if (pipElement === video)
+          return 'active';
+        const track = liveTrack(video);
+        const available = !pipBlocker(video) && !video.error && (track === undefined ? !!media('player', video) : !!track);
+        return available ? 'available' : 'unavailable';
+      }
+      if (command === 'enter' && pipElement !== video)
+        requestPictureInPicture.call(video).catch(() => {});
+      else if (command === 'exit' && pipElement === video)
+        exitPictureInPicture().catch(() => {});
+      return '';
+    };
     extendPrototype('HTMLVideoElement', {
       __proto__: null,
       requestPictureInPicture: value(requestPictureInPicture),

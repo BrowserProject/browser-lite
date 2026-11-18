@@ -50,6 +50,16 @@ export interface UiTexts {
   saveImageAs: string;
   copyImage: string;
   copyImageAddress: string;
+  /** Checkable items of a video or audio. */
+  loop: string;
+  showControls: string;
+  pictureInPicture: string;
+  openVideoInNewTab: string;
+  saveVideoAs: string;
+  copyVideoAddress: string;
+  openAudioInNewTab: string;
+  saveAudioAs: string;
+  copyAudioAddress: string;
   copy: string;
   cut: string;
   paste: string;
@@ -104,6 +114,15 @@ export const defaultTexts: Readonly<UiTexts> = Object.freeze({
   saveImageAs: 'Save image as…',
   copyImage: 'Copy image',
   copyImageAddress: 'Copy image address',
+  loop: 'Loop',
+  showControls: 'Show controls',
+  pictureInPicture: 'Picture in picture',
+  openVideoInNewTab: 'Open video in new tab',
+  saveVideoAs: 'Save video as…',
+  copyVideoAddress: 'Copy video address',
+  openAudioInNewTab: 'Open audio in new tab',
+  saveAudioAs: 'Save audio as…',
+  copyAudioAddress: 'Copy audio address',
   copy: 'Copy',
   cut: 'Cut',
   paste: 'Paste',

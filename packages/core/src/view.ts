@@ -18,12 +18,14 @@ import {
   textInputOf,
   unhandledKey,
 } from './keyboard.js';
+import { menuMedia } from './menu-media.js';
 import { PendingNavigation } from './pending.js';
 import type { Requests } from './requests.js';
 import type {
   ClipboardWriteRequest,
   ContextMenuInfo,
   EditCommand,
+  MediaAction,
   PasteContent,
   SessionHistory,
   Unsubscribe,
@@ -513,6 +515,10 @@ export class ViewImpl implements View {
     });
   }
 
+  mediaAction(x: number, y: number, action: MediaAction, enable: boolean): void {
+    this.call((m) => m._bl_media_action(this.id, x, y, this.host.text(action), enable ? 1 : 0));
+  }
+
   download(url: string): void {
     this.call((m) => m._bl_download(this.id, this.host.text(url)));
   }
@@ -785,6 +791,7 @@ export class ViewImpl implements View {
           y: Number(data.y) || 0,
           link: String(data.link ?? ''),
           image: String(data.image ?? ''),
+          media: menuMedia(data.media),
           selection: String(data.selection ?? ''),
           editable: !!data.editable,
           canUndo: !!data.canUndo,

@@ -154,7 +154,8 @@ from `patches/`.
     `PlatformResources.cpp` (WebCore's own images: broken image icon, text area corner)
   - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame,
     `VideoOverlay.cpp` (holes of videos the host shows behind the canvas, punched only once the
-    host's video has a frame), frame counts of
+    host's video has a frame), `MediaMenu.cpp` (the video and audio of the context menu and its
+    Loop, Show controls and Picture in picture, which goes through the polyfill's window), frame counts of
     `getVideoPlaybackQuality()` from the host element,
     `MediaCapabilitiesWasm.cpp` (`navigator.mediaCapabilities` of pages and workers with the
     host's answers); no HLS or DASH manifest as a file, so pages stream them through MSE (one

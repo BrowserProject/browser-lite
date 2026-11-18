@@ -525,6 +525,16 @@ export interface View {
    */
   copyImage(x: number, y: number): void;
   /**
+   * Loop, Show controls and Picture in picture like Chrome's context menu: switches the action
+   * of the `<video>` or `<audio>` at the point (CSS pixels of the view, like
+   * {@link ContextMenuInfo}) on (`enable`) or off, as the page's own script could
+   * (`loop`, `controls`, `requestPictureInPicture`, also when the page replaced that). The point
+   * is hit tested again; an action the element does not offer now (see
+   * {@link ContextMenuMedia}) does nothing. Call Picture in picture in the click that asked for
+   * it: the host browser needs its user activation.
+   */
+  mediaAction(x: number, y: number, action: MediaAction, enable: boolean): void;
+  /**
    * Downloads an address like a link with `download` (Save image as, Save link as): requested
    * as from the page, with its cookies and referrer; the file arrives as event `download` of the
    * browser.
@@ -740,6 +750,39 @@ export interface UnhandledKey {
 }
 
 /**
+ * The `<video>` or `<audio>` of a context menu (also through its controls), for Chrome's media
+ * items: Loop, Show controls, Open, Save and Copy the address, Picture in picture.
+ */
+export interface ContextMenuMedia {
+  type: 'video' | 'audio';
+  /**
+   * Address the element plays (`currentSrc`); a `blob:` address for MediaSource, '' for a
+   * `srcObject` stream.
+   */
+  url: string;
+  /** A file at an http(s) address, not MediaSource or a stream: it can be opened and saved. */
+  canSave: boolean;
+  /** The element loops; `canLoop` false for a stream or after an error (item disabled). */
+  loop: boolean;
+  canLoop: boolean;
+  /**
+   * The element shows its controls; `canToggleControls` like Chrome only for a video with a
+   * picture that is not fullscreen and has no error.
+   */
+  controls: boolean;
+  canToggleControls: boolean;
+  /**
+   * Picture in picture of a video: `unsupported` for audio and where the host browser has none
+   * (Firefox; no item), `unavailable` before its metadata, after an error or with
+   * `disablepictureinpicture` (item disabled), `available`, or `active` while it is in the window.
+   */
+  pictureInPicture: 'unsupported' | 'unavailable' | 'available' | 'active';
+}
+
+/** Commands of {@link View.mediaAction}, the checkable media items of Chrome's context menu. */
+export type MediaAction = 'loop' | 'controls' | 'picture-in-picture';
+
+/**
  * Where the user right clicked or long pressed, or for the menu key and Shift+F10 the focused
  * element, the selection or the corner of the view; empty strings when there is no link, image or
  * selection.
@@ -752,6 +795,8 @@ export interface ContextMenuInfo {
   link: string;
   /** Address of the image under the pointer. */
   image: string;
+  /** The video or audio element under the pointer, null without one. */
+  media: ContextMenuMedia | null;
   /** Selected text. */
   selection: string;
   /** Over an editable element (text field, contenteditable). */

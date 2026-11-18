@@ -141,6 +141,9 @@ private:
     // Element fullscreen of the <video>: webkitEnterFullscreen() and the fullscreen button of the
     // media controls, which without it is hidden inline and in fullscreen
     bool supportsFullscreen() const final { return true; }
+    // Open and Save video as of the context menu: a file at an http(s) address, not MSE or a
+    // stream, like WebKit's GStreamer player and Chrome's
+    bool canSaveMediaData() const final { return hasHostElement() && !m_isMediaSource && m_url.protocolIsInHTTPFamily(); }
     bool supportsAcceleratedRendering() const final { return !!m_overlay; }
     PlatformLayer* platformLayer() const final { return m_overlay.get(); }
     void paint(WebCore::GraphicsContext&, const WebCore::FloatRect&) final;

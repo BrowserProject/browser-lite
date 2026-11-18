@@ -781,6 +781,20 @@ keyboard focused it (`:focus-visible`), not after a click (#569). On a fullscree
 468 px fullscreen bar with 16 px margins (a phone held upright) patch 0136 shows the inline
 controls instead, which drop buttons by width and have the exit button top left; turned to
 landscape the fullscreen bar comes back (#553).
+The context menu of a `<video>` or `<audio>` has Chrome's media items (#622):
+`engine/src/media/MediaMenu.cpp` adds `media` to the event `context-menu` for the media element of
+the menu's hit test, which takes the controls as their element (address, `canSave` from
+`MediaPlayerPrivateWasm::canSaveMediaData`: a file at an http(s) address, not MSE or a stream;
+loop and controls with Chrome's rules for switching them; the picture-in-picture state), and
+`bl_media_action` hit tests the point again like Chrome's `MediaPlayerActionAt` and sets `loop` or
+`controls` in a user gesture. Picture in picture lives in the polyfill (`WebRTCPolyfill.cpp`), so
+the polyfill leaves a function for the menu on its bridge (`pictureInPictureMenu`; the engine
+keeps each window's bridge under a private name, `pageBridge`), so the start of a window calls
+nothing more: it answers the state (the window's element, metadata,
+`disablepictureinpicture`, a host player or a live track) and enters or leaves the window with its
+own `requestPictureInPicture`, which a page cannot replace, so the page's events and
+`pictureInPictureElement` stay right. The UI (`defaultMenuItems`) renders Loop, Show controls and
+Picture in picture as checkable items and opens, saves and copies the address like an image's.
 
 ## Audio
 

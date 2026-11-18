@@ -8,6 +8,11 @@ export interface MenuAction {
   action(): void | Promise<void>;
   /** Default true. */
   enabled?: boolean;
+  /**
+   * Makes it a checkable item like Chrome's Loop and Show controls (`role=menuitemcheckbox`,
+   * `aria-checked`); undefined for a plain command.
+   */
+  checked?: boolean;
   /** Stable name for styling and tests (`data-bl-item`). */
   id?: string;
 }
@@ -80,8 +85,8 @@ interface Placement {
  * request (`closeNewest`) close it. Only one menu is open at a time; without any command none
  * opens. Returns a function that closes the menu.
  * Element: `.bl-context-menu` (with `data-bl-touch` for a long press) with `div.bl-menu-header`,
- * `button.bl-menu-item` (`.bl-highlighted` and `data-bl-highlighted` on the highlighted one) and
- * `hr.bl-separator`.
+ * `button.bl-menu-item` (`.bl-highlighted` and `data-bl-highlighted` on the highlighted one,
+ * `role=menuitemcheckbox` and `aria-checked` on a checkable one) and `hr.bl-separator`.
  */
 export function showContextMenu(
   view: View,
@@ -181,7 +186,11 @@ function openMenu(items: MenuItem[], at: Placement, options?: UiOptions): () => 
     }
     const button = element(root, 'button', 'menu-item');
     button.type = 'button';
-    button.setAttribute('role', 'menuitem');
+    if (item.checked === undefined) button.setAttribute('role', 'menuitem');
+    else {
+      button.setAttribute('role', 'menuitemcheckbox');
+      button.setAttribute('aria-checked', String(item.checked));
+    }
     button.textContent = item.label;
     button.disabled = item.enabled === false;
     if (item.id) button.dataset.blItem = item.id;

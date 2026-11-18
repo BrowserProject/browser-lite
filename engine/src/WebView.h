@@ -34,6 +34,7 @@ enum class PointerLockRequestResult : uint8_t;
 class FileChooser;
 class GraphicsLayer;
 class GraphicsLayerFactory;
+class HitTestResult;
 class LocalFrame;
 class LocalFrameView;
 class Page;
@@ -194,6 +195,8 @@ public:
     void contextMenu(double x, double y);
     // Copy image of the menu: the image at the point as PNG, empty without one
     Vector<uint8_t> copyImageAt(double x, double y);
+    // Loop, Show controls, Picture in picture of the menu for the media element at the point
+    void mediaActionAt(double x, double y, const String& action, bool enable);
     // Save image as, Save link as: a download of the address as requested by the page
     void download(const String& url);
     // Save page as (Ctrl+S): a download of the page's address, named after its title
@@ -299,6 +302,7 @@ private:
     // The menu key or Shift+F10 that the page did not handle: the menu of the focused element
     void contextMenuForKey();
     void showContextMenu(WebCore::DoublePoint);
+    WebCore::HitTestResult menuHitTest(double x, double y);
     // True when the page handled the key (also when it called preventDefault)
     bool dispatchKeyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
     std::optional<DragSession> m_drag;

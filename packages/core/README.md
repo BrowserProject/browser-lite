@@ -178,6 +178,17 @@ page's address requested again the same way, an HTML page named after its title
 (`Example Domain.html`), other documents (an image, text) with the name of their response;
 nothing for a page without an address of its own (`loadHTML`, `about:`).
 
+`info.media` of `context-menu` describes a `<video>` or `<audio>` under the point (also its
+controls), null elsewhere (`ContextMenuMedia`): its address, whether it can be opened and saved (a
+file at an http(s) address, not MediaSource or a stream), loop and controls with whether the menu
+may switch them (Chrome's rules: no loop for a stream or after an error, controls only for a video
+with a picture that is not fullscreen), and its picture-in-picture state (`unsupported` for audio
+and where the host browser has none, `unavailable`, `available`, `active`).
+`view.mediaAction(x, y, action, enable)` is Loop, Show controls and Picture in picture of the
+menu: the engine hit tests the point again like Chrome's `MediaPlayerActionAt` and sets `loop` or
+`controls`, or moves the video into or out of the host's picture-in-picture window with the page's
+events, also when the page replaced `requestPictureInPicture`; call it in the click, the host
+browser needs its activation for the window.
 `view.copyImage(x, y)` is Copy image of the menu: the engine copies the image at that point of a
 `context-menu` event at its full size as PNG, and the `clipboardWrite` handler gets it as
 `image`, a promise, already in the click (Safari allows a clipboard write only there). The

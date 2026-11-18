@@ -584,6 +584,13 @@ EMSCRIPTEN_KEEPALIVE void bl_copy_image(int id, int requestId, double x, double 
     });
 }
 
+// Loop, Show controls, Picture in picture of the context menu: action "loop", "controls" or
+// "picture-in-picture" for the media element at the point, on (enable) or off
+EMSCRIPTEN_KEEPALIVE void bl_media_action(int id, double x, double y, char* action, int enable)
+{
+    withPointerInput(id, { { x, y } }, [=, name = takeString(action)](WebView& view) { view.mediaActionAt(x, y, name, enable); });
+}
+
 // Save image as, Save link as: events download-start and download-done like other downloads
 EMSCRIPTEN_KEEPALIVE void bl_download(int id, char* url)
 {

@@ -1352,6 +1352,16 @@ svg.favicon {
 .bl-context-menu .bl-menu-item:disabled {
   opacity: 0.38;
 }
+/* Checkable items (Loop, Show controls of a video): a check mark in a gutter all items share */
+.bl-context-menu:has([role="menuitemcheckbox"]) .bl-menu-item {
+  position: relative;
+  padding-left: calc(var(--space-4) + 20px);
+}
+.bl-context-menu .bl-menu-item[aria-checked="true"]::before {
+  content: "\2713";
+  position: absolute;
+  left: var(--space-4);
+}
 /* One highlight for the pointer and the keyboard: the hover of the row the keys moved away from goes */
 .bl-context-menu .bl-menu-item.bl-highlighted:not(:active) {
   --layer: var(--state-hover);

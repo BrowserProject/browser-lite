@@ -766,6 +766,7 @@ test('context menu with the default items', async () => {
       y: 40,
       link: 'https://l.test/',
       image: '',
+      media: null,
       selection: '',
       editable: false,
       canGoBack: false,
@@ -875,7 +876,16 @@ test('menu of the embedding page', async () => {
     window.chosen = [];
     window.closeView = ui.showContextMenu(
       view,
-      { x: 5, y: 5, link: '', image: '', selection: '', editable: false, touch: false },
+      {
+        x: 5,
+        y: 5,
+        link: '',
+        image: '',
+        media: null,
+        selection: '',
+        editable: false,
+        touch: false,
+      },
       [{ label: 'View item', action() {} }],
     );
     window.closeMenu = ui.showMenu(
@@ -1055,6 +1065,7 @@ test('context menu of a long press', async () => {
       y: 40,
       link: 'https://l.test/a/long/path',
       image: '',
+      media: null,
       selection: '',
       editable: false,
       canGoBack: true,
