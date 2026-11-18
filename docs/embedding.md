@@ -49,7 +49,7 @@ browser page and other pages of the site is cut. `checkSupport()` reports what i
 | Response | Headers |
 |---|---|
 | The page with the browser, and in an iframe setup the top-level page | `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp` |
-| Worker and worklet scripts (`engine.js`, `sw.js`, `media-sw.js`, `audio-worklet.js`, `opfs-writer.js`) | Same as the page |
+| Worker and worklet scripts (`engine.js`, `sw.js`, `media-sw.js`, `audio-worklet.js`, `frame-reader-worker.js`, `opfs-writer.js`) | Same as the page |
 | Every subresource of the page | Same-origin, or `Cross-Origin-Resource-Policy` (`cross-origin` for shared CDNs) or CORS |
 
 The simplest rule: send COOP, COEP and CORP with every response of the browser route. That is
@@ -66,9 +66,10 @@ isolation.
 - Never bundle `engine.js`: the core loads it as a classic script at runtime. Copy the folder as
   it is. `audio-worklet.js` (export `@browser-lite/core/audio-worklet.js`) must stay a file next
   to the core's `dist/` code (Vite: keep `.js` assets out of `assetsInlineLimit`). The same for
-  the module worker `opfs-writer.js` of `@browser-lite/profile` (only started where
-  `createWritable` is missing, Safari 18), which bundlers that know `new Worker(new URL(...,
-  import.meta.url))` (Vite, webpack) emit by themselves.
+  the module workers `frame-reader-worker.js` of the core (reads video frames the engine paints,
+  on the main thread if it cannot start) and `opfs-writer.js` of `@browser-lite/profile` (only
+  started where `createWritable` is missing, Safari 18), which bundlers that know `new Worker(new
+  URL(..., import.meta.url))` (Vite, webpack) emit by themselves.
 - Put each engine version in its own folder (for example `engine/<hash>/`, as
   `tools/package-demo.sh` does) and cache it `public, max-age=31536000, immutable`.
 - After an update Chrome can load the new engine as deltas against the old one (Compression

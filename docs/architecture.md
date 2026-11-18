@@ -702,7 +702,10 @@ copies fall behind (#538). A hole the compositor cannot punch
 straight into the framebuffer (opacity, blend mode, color filter, perspective, inside the
 offscreen surface of an effect) is refused and that player goes back to copied frames painted
 into the tiles (#217), as do all players with `BL_VIDEO_OVERLAY=0` or without compositing. Copied
-frames keep the alpha of transparent VP8, VP9 and HEVC videos (RGBA, not premultiplied, #442). Sound
+frames keep the alpha of transparent VP8, VP9 and HEVC videos (RGBA, not premultiplied, #442).
+The host reads a copied frame off its main thread: it takes a `VideoFrame` of its `<video>` and a
+module worker (`frame-reader-worker.ts`) draws it at the size on screen and reads the pixels, the
+main thread only copies them into engine memory (`frame-reader.ts`, #608). Sound
 comes straight from the host element. A hidden page pauses media that never played with sound like
 Chrome: video without an audio track (#170) and media muted ever since it started (#555, Chrome's
 "was always muted"); media that played unmuted keeps playing. The host reports whether its element

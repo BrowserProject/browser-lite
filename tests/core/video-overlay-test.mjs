@@ -4,7 +4,8 @@
 // video stays above it, no frames are copied into the engine, requestVideoFrameCallback and
 // canvas.drawImage(video) still work (frames only on demand), the video follows scrolling, a
 // video with opacity falls back to frames painted into the page, getVideoPlaybackQuality() counts
-// the frames of both, and a video hidden and shown again gets its hole back.
+// the frames of both, a video hidden and shown again gets its hole back, and the frames copied
+// into the engine are read off the host's main thread (a worker, where the host has VideoFrame).
 //
 //   node tests/core/video-overlay-test.mjs [engine-dir]
 import {
@@ -78,6 +79,18 @@ const { url: siteURL } = await serve((req, res) => {
 const stack = await startStack();
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
 const results = collect(page);
+// drawImage(<video>) on the host's main thread: a synchronous GPU readback per frame copied into
+// the engine (95 ms for a 1080p frame with SwiftShader), the host UI waited for each
+await page.addInitScript(() => {
+  window.blVideoDrawsHere = 0;
+  for (const type of [CanvasRenderingContext2D, OffscreenCanvasRenderingContext2D]) {
+    const drawImage = type.prototype.drawImage;
+    type.prototype.drawImage = function (source, ...rest) {
+      if (source instanceof HTMLVideoElement) window.blVideoDrawsHere++;
+      return drawImage.call(this, source, ...rest);
+    };
+  }
+});
 const result = (key, timeout = TIMEOUT) => results.wait(key, timeout);
 
 const isRed = (p) => !!p && p.r > 180 && p.g < 60 && p.b < 60;
@@ -139,6 +152,15 @@ check(
   'no frames copied for the overlay, all for the fallback',
   before.length === 2 && after[0] - before[0] <= 2 && after[1] - before[1] > 10,
   `${before.join('/')} -> ${after.join('/')}`,
+);
+const here = await page.evaluate(() => ({
+  draws: window.blVideoDrawsHere,
+  videoFrame: typeof VideoFrame === 'function',
+}));
+check(
+  'copied frames are read off the host main thread',
+  !here.videoFrame || here.draws === 0,
+  JSON.stringify(here),
 );
 
 // getVideoPlaybackQuality(): the frames the host decoded, for the overlay and the fallback;

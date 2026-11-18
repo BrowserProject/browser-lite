@@ -1,4 +1,5 @@
 import type { ViewImpl } from '../view.js';
+import { FrameReader } from './frame-reader.js';
 import { mediaSourceClass } from './host-apis.js';
 import { FrameQuality } from './media-quality.js';
 import { MediaUnlock } from './media-unlock.js';
@@ -66,6 +67,7 @@ export interface MediaHost {
   readonly container: HTMLElement;
   readonly players: Map<number, Player>;
   readonly unlock: MediaUnlock;
+  readonly frames: FrameReader;
   mediaUrl(player: number): string;
   view(id: number): ViewImpl | undefined;
 }
@@ -87,8 +89,6 @@ export class Player {
   private forceFrame = true;
   private hidden: boolean;
   private raf = 0;
-  private canvas: OffscreenCanvas | null = null;
-  private context2d: OffscreenCanvasRenderingContext2D | null = null;
   private readonly mediaSource: MediaSource | null = null;
   private readonly sourceBuffers = new Map<number, SourceBuffer>();
   private readonly queue: Operation[] = [];
@@ -441,36 +441,34 @@ export class Player {
     this.lastTime = video.currentTime;
     const restart = this.forceFrame;
     this.forceFrame = false;
-    if (this.copyFrame() && !this.overlay) this.quality.copied(restart);
+    if (!this.overlay) this.quality.copied(restart);
+    this.copyFrame();
   }
 
   // Every frame into its own buffer, RGBA not premultiplied; the engine takes it over and frees it
-  // (MediaPlayerPrivateWasm::hostFrame). We never touch it again. false: nothing copied.
-  private copyFrame(): boolean {
-    const { module } = this.host.ctx;
+  // (MediaPlayerPrivateWasm::hostFrame). We never touch it again. The engine's answer ("frame")
+  // asks for the next one.
+  private copyFrame(): void {
     const [width, height] = this.frameSize();
-    if (!this.canvas || this.canvas.width !== width || this.canvas.height !== height) {
-      this.canvas = new OffscreenCanvas(width, height);
-      // With alpha: VP9 and HEVC videos can be transparent. Each frame replaces the last one.
-      this.context2d = this.canvas.getContext('2d', { willReadFrequently: true });
-      if (this.context2d) this.context2d.globalCompositeOperation = 'copy';
-    }
-    const context = this.context2d;
-    if (!context) return false;
-    context.drawImage(this.video, 0, 0, width, height);
-    const pixels = context.getImageData(0, 0, width, height).data;
-    const ptr = module._malloc(pixels.length);
-    if (!ptr) return false;
-    module.blHeap().set(pixels, ptr);
     this.frameInFlight = true;
-    this.frames++;
-    module._bl_media_frame(this.id, ptr, width, height);
-    return true;
+    this.host.frames.read(this.id, this.video, width, height).then((pixels) => {
+      const { ctx } = this.host;
+      if (this.destroyed || ctx.signal.aborted) return;
+      const ptr = pixels ? ctx.module._malloc(pixels.length) : 0;
+      if (!pixels || !ptr) {
+        this.frameInFlight = false;
+        return;
+      }
+      ctx.module.blHeap().set(pixels, ptr);
+      this.frames++;
+      ctx.module._bl_media_frame(this.id, ptr, width, height);
+    });
   }
 
   destroy(): void {
     this.destroyed = true;
     cancelAnimationFrame(this.raf);
+    this.host.frames.release(this.id);
     const video = this.video;
     video.pause();
     if (this.mediaSource) URL.revokeObjectURL(video.src);
@@ -528,12 +526,14 @@ export class MediaService extends Service {
       'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0.01;pointer-events:none';
     document.body.append(container);
     const unlock = new MediaUnlock();
+    const frames = new FrameReader();
     ctx.onUserGesture(() => unlock.gesture([...players.values()].map((player) => player.video)));
     const host: MediaHost = {
       ctx,
       container,
       players,
       unlock,
+      frames,
       mediaUrl: (player) =>
         new URL(`bl-media/${instance}/${player}/${Date.now().toString(36)}`, scope).href,
       view: (id) => views.get(id),
@@ -619,6 +619,7 @@ export class MediaService extends Service {
     ctx.signal.addEventListener('abort', () => {
       for (const player of players.values()) player.destroy();
       players.clear();
+      frames.close();
       container.remove();
     });
     return registered;

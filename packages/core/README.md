@@ -268,7 +268,10 @@ extension with the global `extension`), `onMessage` and `postMessage`, `storage`
   Without it a `warning` event with code `sw-missing` follows. In a hidden view media that
   never played with sound (no audio track, or muted since it started) pauses like in Chrome, the
   host element too (it tells the engine which media have an audio track). `getVideoPlaybackQuality()` of the pages counts the frames of the host element,
-  with copied frames also those it showed that never reached the engine as dropped. A view gets `picture-in-picture` events when one of its videos enters or leaves that window.
+  with copied frames also those it showed that never reached the engine as dropped. Frames
+  copied into the engine are read in a module worker (`dist/services/frame-reader-worker.js`,
+  started on the first copy; on the main thread without `VideoFrame` or when the worker fails).
+  A view gets `picture-in-picture` events when one of its videos enters or leaves that window.
   Picture-in-picture needs the host's `requestPictureInPicture` (not in Firefox): without it the
   pages do not see the API.
 - `capture()`: camera, microphone and screen.

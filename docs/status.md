@@ -219,7 +219,12 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   ad and opened the advertiser in a new tab; a report of the host from before a pause no longer
   starts the video again with sound, #590). Transparent videos (VP8,
   VP9, HEVC with alpha) keep their alpha when frames are copied (#442; the filtered hero video of
-  zoo.ch covered the photo with opaque green). A video in fullscreen shows its whole picture like
+  zoo.ch covered the photo with opaque green). Copied frames are read in a worker of the host
+  (#608): with a page that drew a 1080p video into a canvas every frame (YouTube's ambient mode),
+  the host's main thread spent most of its time reading frames back and keys in the address bar
+  waited a median of 40 to 134 ms (up to 0.4 s), now 5 to 8 ms. Under SwiftShader the copies come
+  at about half the rate in that case, since they now share the GPU process with the host's own
+  frames; the copy is still as large as the video on screen, not as the reader needs (open). A video in fullscreen shows its whole picture like
   the native players of phones, also with the page's `object-fit: cover` (#474; m.youtube.com
   fullscreens its `<video>` for the iPhone it sees and showed only a slice of the frame). The media
   controls show their icons (play, pause, skip, mute, fullscreen) and their exit button leaves
@@ -1198,10 +1203,14 @@ browser (Safari keeps Cmd+L, T and W for itself).
   `vmEntryToJavaScript`, `CLoop::execute` and the slow path). Calling getters and setters from
   the interpreter and the JIT like JS calls would lift it for those; the other paths re-enter
   through C++ in JavaScriptCore itself.
-- `damage-test` "changed while hidden" (local, 2026-11-08): in about one of three runs the
-  selected text of the input differs in 45 pixels from the reference, with and without damage
-  tiles (#454): the selection looks focused in one run and unfocused in the other after the view
-  switch, a matter of focus timing, not of damage tracking.
+- A text field that gets its focus ring back when its view is shown again is not repainted
+  whole (local, 2026-11-18, found by `damage-test` "changed while hidden"): rows of the old
+  unfocused border stay at the top edge of the ring, with and without damage tracking, in 32 to
+  96 px wide pieces along tile columns (x 224 to 255 in every run, up to 319 when no other paint
+  touched that tile afterwards; a copied video frame in the same tile had covered it, so its timing
+  decided how much stayed old, #608). Not a matter of damage tracking: the test now takes the focus
+  from the field before that step. Before, in about one of three runs the selected text differed
+  in 45 pixels from the reference (#454).
 - Firefox CI 2026-11-03: `ui-test` once "Page crashed" at the navigation after the 9 s script
   timeout check (3 of 3 local runs and the rerun clean).
 - `cache-threads-test` (local, 2026-11-15, Chromium, in a full core run on a loaded machine): once

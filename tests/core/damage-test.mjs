@@ -358,11 +358,13 @@ const STEPS = [
   ],
   [
     'changed while hidden',
-    // The change comes while another view is in front, then the view is shown again
+    // The change comes while another view is in front, then the view is shown again. The field
+    // loses its focus first: the focus ring it gets back is not repainted whole (status.md), and
+    // which part stays old depends on the timing of other paints in its tiles
     async ({ page }) => {
       await evalPage(
         page,
-        `setTimeout(() => { document.getElementById('stripes').style.background = 'rgb(0, 160, 80)'; }, 200)`,
+        `document.getElementById('field').blur(); setTimeout(() => { document.getElementById('stripes').style.background = 'rgb(0, 160, 80)'; }, 200)`,
       );
       await openView(page, `${siteURL}other`);
       await page.waitForTimeout(2500);
