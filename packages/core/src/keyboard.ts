@@ -273,7 +273,10 @@ function keyText(e: KeyLike): string {
  */
 export function sendKey(view: ViewImpl, type: 0 | 1, e: KeyLike): void {
   const { host } = view;
-  if (type === 0) view.tabFromFieldArrow = false;
+  if (type === 0) {
+    view.tabFromFieldArrow = false;
+    view.menuByTouch = false;
+  }
   host.module._bl_key(
     view.id,
     type,
@@ -331,6 +334,14 @@ const BACKSPACE = key('Backspace', 'Backspace', 8);
 const PASTE = key('v', 'KeyV', 86, { ctrlKey: true });
 const TAB = key('Tab', 'Tab', 9);
 const SHIFT_TAB = key('Tab', 'Tab', 9, { shiftKey: true });
+const CONTEXT_MENU = key('ContextMenu', 'ContextMenu', 93);
+
+// The keys of the context menu (the engine opens it for them, WebView::keyEvent)
+const isMenuKey = (e: KeyboardEvent) =>
+  !e.ctrlKey &&
+  !e.altKey &&
+  !e.metaKey &&
+  ((e.key === 'ContextMenu' && !e.shiftKey) || (e.key === 'F10' && e.shiftKey));
 
 function pressKey(view: ViewImpl, e: KeyLike): void {
   sendKey(view, 0, e);
@@ -431,6 +442,8 @@ export function createImeField(
   let compositionBase: string | null = null;
   // The Enter key down moved to the next field: its key up stays out of the page as well
   let nextFieldKey = false;
+  // The last keydown was the menu key or Shift+F10: the page got it and the engine opens the menu
+  let menuKeySent = false;
   const isTextInput = (e: KeyboardEvent) =>
     e.isComposing ||
     composing ||
@@ -482,9 +495,11 @@ export function createImeField(
   // Autofill and some on-screen keyboards send key events without a key: no key to forward
   on('keydown', (e) => {
     if (typeof e.key !== 'string') return;
+    menuKeySent = false;
     // Paste: wait for the paste event, it carries the content
     if (isPasteShortcut(e) || isTextInput(e)) return;
     view.userInput(false);
+    menuKeySent = isMenuKey(e);
     // The keyboard's character enters the field: it no longer follows the page's text, whose
     // next "caret" may come before that input
     const entersField = keyboardTypes && ime.inputMode !== 'none' && isCharacter(e);
@@ -516,6 +531,19 @@ export function createImeField(
     }
     view.keys.run({ page: () => sendKey(view, 1, e), host: () => keyToHost('keyup', e) });
     e.preventDefault();
+  });
+  // The host's context menu of this field comes from the keyboard (the field takes no pointer).
+  // Firefox on Linux turns the menu key and Shift+F10 into it without a keydown: the page gets the
+  // menu key instead, like in Chrome, and the engine opens the menu. After a keydown the page got
+  // already (Firefox on Windows sends it after the key) the menu is open.
+  on('contextmenu', (e) => {
+    e.preventDefault();
+    if (menuKeySent) {
+      menuKeySent = false;
+      return;
+    }
+    view.userInput(false);
+    view.keys.run({ page: () => pressKey(view, CONTEXT_MENU) });
   });
   on('compositionstart', () => {
     composing = true;

@@ -74,6 +74,7 @@
 #include <WebCore/ScreenOrientationManager.h>
 #include <WebCore/StorageProvider.h>
 #include <WebCore/UserContentProvider.h>
+#include <WebCore/MouseEvent.h>
 #include <WebCore/PlatformKeyboardEvent.h>
 #include <WebCore/PlatformMouseEvent.h>
 #include <WebCore/PlatformWheelEvent.h>
@@ -1675,9 +1676,22 @@ static String keyIdentifierForKey(const String& key)
     return key; // Enter, Home, End, PageUp, PageDown, F1, ... have the same names
 }
 
+// The keys of the context menu, like Chrome (WebFrameWidgetImpl) on Linux and ChromeOS: the menu
+// key without Shift, Ctrl, Alt or Meta, and Shift+F10, on keydown
+static bool isContextMenuKey(const String& key, int modifiers)
+{
+    constexpr int shift = 1;
+    constexpr int inputModifiers = 15;
+    return (key == "ContextMenu"_s && !(modifiers & inputModifiers)) || (key == "F10"_s && (modifiers & inputModifiers) == shift);
+}
+
 void WebView::keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers)
 {
     bool handled = dispatchKeyEvent(type, key, code, text, keyCode, repeat, modifiers);
+    if (!type && !handled && isContextMenuKey(key, modifiers)) {
+        contextMenuForKey();
+        handled = true;
+    }
     if (!type)
         keyResult(m_id, handled, key, code, modifiers);
 }
@@ -1758,7 +1772,32 @@ void WebView::contextMenu(double x, double y)
     auto& controller = m_page->contextMenuController();
     controller.clearContextMenu();
     frame->eventHandler().sendContextMenuEvent(event);
+    showContextMenu(position);
+}
+
+// The menu key or Shift+F10, like WebKit2's WebPage::contextMenuForKeyEvent: the contextmenu event
+// goes to the focused element (at its lower left corner), the end of the selection or the corner
+// of the view, in the focused frame, and the menu opens there
+void WebView::contextMenuForKey()
+{
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return;
+    auto& controller = m_page->contextMenuController();
+    controller.clearContextMenu();
+    frame->eventHandler().sendContextMenuEventForKey();
+    RefPtr event = dynamicDowncast<MouseEvent>(controller.context().event());
+    showContextMenu(event ? event->windowLocation() : DoublePoint { });
+}
+
+// The host's menu at the point in the view, if WebCore's ContextMenuController built one: the page
+// did not handle its contextmenu event
+void WebView::showContextMenu(DoublePoint position)
+{
+    auto& controller = m_page->contextMenuController();
     bool show = controller.contextMenu();
+    double x = position.x();
+    double y = position.y();
     debugLog("Context menu at %.0f,%.0f: %s", x, y, show ? "show" : "the page has its own");
     if (!show)
         return;

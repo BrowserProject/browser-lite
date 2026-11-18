@@ -1,0 +1,19 @@
+diff --git a/Source/WebCore/page/EventHandler.cpp b/Source/WebCore/page/EventHandler.cpp
+index 64537e16dd..64ae6f2d35 100644
+--- a/Source/WebCore/page/EventHandler.cpp
++++ b/Source/WebCore/page/EventHandler.cpp
+@@ -3992,9 +3992,12 @@ bool EventHandler::sendContextMenuEventForKey()
+         IntRect boundingBoxRect = box->absoluteBoundingBoxRect(true);
+         location = IntPoint(boundingBoxRect.x(), boundingBoxRect.maxY() - 1);
+     } else {
++        // The corner of the visible part, like Chrome: the document's corner can lie above it
++        // once the page is scrolled, with the menu out of sight and the hit test outside the view
++        IntRect visibleRect = view->visibleContentRect();
+         location = IntPoint(
+-            rightAligned ? view->contentsWidth() - kContextMenuMargin : kContextMenuMargin,
+-            kContextMenuMargin);
++            rightAligned ? visibleRect.maxX() - kContextMenuMargin : visibleRect.x() + kContextMenuMargin,
++            visibleRect.y() + kContextMenuMargin);
+     }
+ 
+     protect(frame->view())->setCursor(pointerCursor());

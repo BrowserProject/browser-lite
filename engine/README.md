@@ -98,7 +98,7 @@ from `patches/`.
     memory limit, memory pressure
     `moderate` above the budget and `critical` when memory is still short after the release of the JS code),
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
-  - Views: `WebView.cpp` (also Copy image and Save as of the context menu, the word selection of a long press, paint holding: the page
+  - Views: `WebView.cpp` (also Copy image and Save as of the context menu, the menu of the menu key and Shift+F10, the word selection of a long press, paint holding: the page
     left stays in view until the new one paints), `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
     restore, Tab to links, the popup blocker: a gesture or 5 s of transient activation, the link
     address and tooltip of the mouse, none after a tap), `EditorClient.cpp` (the focused field's

@@ -67,6 +67,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   context menus and the demo's menus (tabs, the lists of Back and Forward) worked with the keyboard
   like Chrome's: arrows that wrap, Home, End, Enter or Space and a letter, and no key reaches the
   page behind an open menu (before, only Escape worked and the arrows scrolled the page, #610),
+  the context menu from the menu key and Shift+F10 like Chrome on Linux, for the focused element,
+  the end of the selection or the visible corner of the view, also from Firefox on Linux, which
+  sends no keydown for them (before, the page got only the keydown and no `contextmenu`, and no
+  menu opened, so keyboard users reached neither Copy nor Open link in new tab, #621),
   synchronous `XMLHttpRequest`, where only its page waits like below a dialog (before it always
   failed with `NetworkError`, so Akamai's bot check reloaded amazon.de in a loop, #471),
   permission prompts like Chrome's that go away when their page is left and close with Escape

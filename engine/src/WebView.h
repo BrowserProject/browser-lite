@@ -296,6 +296,9 @@ private:
     void endDrag(WebCore::IntPoint, bool drop, int modifiers);
     void dropOutside(std::optional<WebCore::DragOperation>);
     void finishDrag(const DragSession&, WebCore::IntPoint, int modifiers, std::optional<WebCore::DragOperation> result);
+    // The menu key or Shift+F10 that the page did not handle: the menu of the focused element
+    void contextMenuForKey();
+    void showContextMenu(WebCore::DoublePoint);
     // True when the page handled the key (also when it called preventDefault)
     bool dispatchKeyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
     std::optional<DragSession> m_drag;

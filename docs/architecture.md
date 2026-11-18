@@ -462,6 +462,16 @@ finger lifts (#353), like Chrome's `HandleGestureLongPress` (`selectForLongPress
 the text of a button, a date field or media controls selects nothing (as for a mouse press), the
 pressed frame gets the focus, an editable element first gets the caret there, which focuses it,
 and white space or an empty field keeps only that caret (#607).
+The menu key and Shift+F10 open the context menu like Chrome on Linux (#621): a keydown of one of
+them that the page did not handle (`WebView::contextMenuForKey`, like WebKit2's
+`contextMenuForKeyEvent`) sends the page a `contextmenu` event through WebCore's
+`sendContextMenuEventForKey`, in the focused frame, at the lower left corner of the focused
+element, at the end of the selection, or without either at the visible corner of the view (patch
+0162; WebKit took the document's corner, above the view on a scrolled page), and the menu opens
+at that point unless the page cancelled the event. Firefox on Linux sends no keydown for these
+keys but a `contextmenu` event of the focused element, the core's input field: the core cancels
+it and sends the page the menu key instead (`keyboard.ts`), and after a menu key the page got
+already (Firefox on Windows sends the event after the key) it only cancels it.
 Two fingers zoom the view (`touch-pinch.ts`) once the page answered both touchstarts without
 `preventDefault` and touch-action allows it; the movement until then is kept and the zoom catches
 up with it, also after the fingers lifted, so a pinch while the page keeps the engine thread busy

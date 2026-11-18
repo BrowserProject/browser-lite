@@ -101,9 +101,12 @@ export class ViewImpl implements View {
   /** @internal The on-screen keyboard's Enter key moves to the next field (opensNextField). */
   nextFieldOnEnter = false;
   private readonly nextKey = hasNextKey();
-  // The last context menu request came from a finger (long press), not a right click: the
-  // engine answers the latest request, a long press only once the finger lifts
-  private menuByTouch = false;
+  /**
+   * @internal The last context menu request came from a finger (long press), not a right click
+   * or a key (the menu key, Shift+F10): the engine answers the latest request, a long press only
+   * once the finger lifts.
+   */
+  menuByTouch = false;
   private readonly ime: HTMLTextAreaElement;
   private readonly forgetImeText: () => void;
   private readonly setImeContext: (before: string) => void;

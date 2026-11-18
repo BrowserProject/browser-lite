@@ -709,7 +709,10 @@ export interface ViewEvents {
    * that uses the key itself (its own find, Ctrl+U in a rich text editor) keeps it.
    */
   'unhandled-key': UnhandledKey;
-  /** Right click or long press the page did not handle itself: show a context menu. */
+  /**
+   * Right click, long press, menu key or Shift+F10 the page did not handle itself: show a
+   * context menu.
+   */
   'context-menu': ContextMenuInfo;
   /** A PDF of the page from {@link View.print} or window.print(). */
   print: { pdf: Blob; title: string };
@@ -737,7 +740,8 @@ export interface UnhandledKey {
 }
 
 /**
- * Where the user right clicked or long pressed; empty strings when there is no link, image or
+ * Where the user right clicked or long pressed, or for the menu key and Shift+F10 the focused
+ * element, the selection or the corner of the view; empty strings when there is no link, image or
  * selection.
  */
 export interface ContextMenuInfo {
@@ -759,7 +763,7 @@ export interface ContextMenuInfo {
   canGoForward: boolean;
   /**
    * A long press of a finger (also of an emulated touch device) opened the menu, not a right
-   * click: phones show a shorter menu for what was pressed, without the page commands.
+   * click or a key: phones show a shorter menu for what was pressed, without the page commands.
    */
   touch: boolean;
 }
