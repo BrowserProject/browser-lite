@@ -305,7 +305,8 @@ tab overview (a card per tab with title, the site's icon and host: tap to switch
 new tab and Done at the bottom; like Chrome on Android and Safari a card swiped sideways past a
 good third of its width, or flung, slides out and closes its tab, a shorter swipe slides it back,
 `swipe-away.ts`); menu, panels and the permission prompt are bottom sheets on the
-toolbar over a backdrop, as high as the visible part at most and scrolling (in landscape the menu
+toolbar over a backdrop, as high as the visible part at most and scrolling (one scroll container
+`#side-panel`: a panel opened from the menu or another panel starts at its top, #616; in landscape the menu
 has two columns and the toolbar is 44 px high); like mobile Chrome the bar slides away while the
 user scrolls a page down and comes back when they scroll up, the page is at its top, a page
 starts loading, another tab comes to the front or the focus goes into the bar (`bar-hiding.ts` on

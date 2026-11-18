@@ -423,6 +423,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   settings section chips as wide as their names, so "Device and browser" stays on one line on
   an iPhone (#445),
   the empty bookmarks sheet names the menu's Bookmark button, not the hidden star (#428),
+  a sheet opened from a scrolled menu starts at its top with its title (#616),
   a long press shows the address of the pressed link or image and only its commands, no page
   commands (#429), a long press on a word in a text field or a frame selects it and focuses the
   field like Chrome (#607), the page keeps its size under the keyboard of the address bar and the demo's

@@ -117,6 +117,8 @@ export function togglePanel(name: PanelName | null): void {
   // The back of a phone closes the menu and the sheets; a panel beside the page stays
   if (name === 'menu' || compactLayout()) stopWatch = watchClose(() => togglePanel(null));
   render();
+  // The menu and the panels share this scroll container: one opened from another starts at its top
+  panel.scrollTop = 0;
 }
 
 function refresh(name: PanelName): void {
