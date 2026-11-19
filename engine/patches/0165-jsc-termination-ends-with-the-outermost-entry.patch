@@ -1,0 +1,43 @@
+diff --git a/Source/JavaScriptCore/runtime/VM.cpp b/Source/JavaScriptCore/runtime/VM.cpp
+index 808600c421..229c2933eb 100644
+--- a/Source/JavaScriptCore/runtime/VM.cpp
++++ b/Source/JavaScriptCore/runtime/VM.cpp
+@@ -1781,6 +1781,18 @@ void VM::executeEntryScopeServicesOnEntry()
+         VMManager::singleton().notifyVMActivation(*this);
+ }
+ 
++#if OS(EMSCRIPTEN)
++// browser-lite: the embedder terminates single entries into JS of this VM (the main thread's: its
++// script watchdog, a navigation of the user; engine/src/EngineLoop.cpp) and the VM goes on. Set at
++// run time, so no header changes.
++static VM* s_vmTerminatingSingleEntries;
++extern "C" void bl_jsc_set_vm_terminating_single_entries(VM*);
++extern "C" void bl_jsc_set_vm_terminating_single_entries(VM* vm)
++{
++    s_vmTerminatingSingleEntries = vm;
++}
++#endif
++
+ void VM::executeEntryScopeServicesOnExit()
+ {
+     if (hasEntryScopeServiceRequest(ConcurrentEntryScopeService::NeedStopTheWorld)) [[unlikely]]
+@@ -1812,8 +1824,18 @@ void VM::executeEntryScopeServicesOnExit()
+     // requested (after all, the request came from the client). However, this is how the
+     // client code currently works. Changing that will take some significant effort to hunt
+     // down all the places in client code that currently rely on this behavior.
+-    if (!traps().needHandling(VMTraps::NeedTermination))
++    if (!traps().needHandling(VMTraps::NeedTermination)) {
+         clearHasTerminationRequest();
++#if OS(EMSCRIPTEN)
++        // browser-lite: there the termination ends with the outermost entry. WebCore's microtask
++        // checkpoint and JSC's DeferredWorkTimer leave its TerminationException pending, for the
++        // VM of a worker, which ends: here the next checkpoints dropped their microtasks with it
++        // and the DeferredWorkTimer forbade execution in the VM for good (no promise reaction of
++        // any page ran again).
++        if (this == s_vmTerminatingSingleEntries && hasPendingTerminationException())
++            clearException();
++#endif
++    }
+ 
+     clearScratchBuffers();
+ }

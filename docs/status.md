@@ -18,7 +18,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   replace the caller's frame like in the interpreter (#626: before, the frames of
   `Function.prototype.call`, `apply` and `Reflect.apply` stayed, so `postMessage` through them
   from another frame's realm came with that frame as `source`, and Cloudflare's Turnstile dropped
-  its `complete` message).
+  its `complete` message). A script stopped in a promise reaction or a `FinalizationRegistry`
+  callback (the user left the page, the watchdog) ends alone (#627: before, leaving hCaptcha's
+  demo while its `hsw.js` ran stopped every promise reaction of every view until a restart).
   Above 2 GB of engine memory the JS glue gets unsigned pointers (#465: before, uploads sent other
   memory of the page, the HTTP cache stored wrong bodies, compiled JS failed to install and
   `decodeAudioData` threw).

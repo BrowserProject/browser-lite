@@ -191,7 +191,10 @@ it waits (`bl_host_wait_address`), and the user's "wait" (`keepWaiting()`) gives
 whole limit again. A script nobody waits for runs to its end, like in Chrome (#501). A typed address,
 Back or Forward that leaves the document of a page stops the page's running script within 0.1 s
 instead of waiting for it, like Firefox, and keeps that page out of the back/forward cache
-(`UserNavigation.cpp`, #583). A page dialog holds only its page: until the answer the engine thread
+(`UserNavigation.cpp`, #583). Either stop ends with the outermost entry into JS, also inside a
+microtask checkpoint or a task JSC runs itself (a `FinalizationRegistry` callback): the
+termination does not outlive it, so the microtasks of all views go on (patch 0165, #627). A page
+dialog holds only its page: until the answer the engine thread
 runs the other views in a nested event loop (`runNestedEventLoop`, #258). The question before a
 form is sent again waits without a nested loop: the navigation policy answers later (#369). Input to a visible view
 makes the hidden views without sound wait like the pages below a dialog (timers, tasks, scripts,

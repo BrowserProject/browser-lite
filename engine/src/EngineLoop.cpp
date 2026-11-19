@@ -34,6 +34,7 @@
 #include <JavaScriptCore/DeferGCInlines.h>
 #include <JavaScriptCore/HeapInlines.h>
 #include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/TopExceptionScope.h>
 #include <JavaScriptCore/VM.h>
 #include <JavaScriptCore/Watchdog.h>
 #include <WebCore/CommonVM.h>
@@ -520,11 +521,15 @@ static bool stopScript(JSC::JSGlobalObject* entryGlobalObject, void*, void*)
     return true;
 }
 
+// A terminated entry ends alone, the VM goes on (patch 0165)
+extern "C" void bl_jsc_set_vm_terminating_single_entries(JSC::VM*);
+
 // Also without a limit and with navigationStopsScripts off: it tells which script runs long
 static void installScriptWatchdog()
 {
     auto& vm = WebCore::commonVM();
     JSC::JSLockHolder lock(vm);
+    bl_jsc_set_vm_terminating_single_entries(&vm);
     armScriptWatchdog(vm);
     // Start the timer's thread right away, otherwise the engine thread waits
     // in the first script until a worker is ready for it
@@ -545,17 +550,22 @@ static void restartScriptWatchdog()
 
 // A work item of the nested event loop. The script watchdog restarts, so its
 // limit applies to each item and not to the dialog's script below. A script
-// it stopped leaves a termination request until the outermost VM entry ends,
-// cleared here like there (VM::executeEntryScopeServicesOnExit), so the next
-// script of another view runs.
+// it stopped leaves a termination request, and a microtask checkpoint its
+// TerminationException, until the outermost VM entry ends; both are cleared
+// here like there (VM::executeEntryScopeServicesOnExit, patch 0165), so the
+// next script of another view runs and the dialog's script goes on.
 template<typename Work>
 static void runNestedWork(JSC::VM& vm, Work&& work)
 {
     restartScriptWatchdog();
     work();
     JSC::JSLockHolder lock(vm);
-    if (vm.hasTerminationRequest() && !vm.traps().hasTrapBit(JSC::VMTraps::NeedTermination))
+    if (vm.hasTerminationRequest() && !vm.traps().hasTrapBit(JSC::VMTraps::NeedTermination)) {
         vm.clearHasTerminationRequest();
+        auto scope = DECLARE_TOP_EXCEPTION_SCOPE(vm);
+        if (vm.hasPendingTerminationException())
+            scope.clearException();
+    }
 }
 
 // A dialog's page waits until the user answered, the other views go on (#258),
