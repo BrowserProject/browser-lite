@@ -107,7 +107,9 @@ never baked into the code (the GC resets inline caches).
   itself; the call function of a compiled caller moves the callee's `this` and arguments to where
   the frame ended (`prepareForTailCall`) and calls a compiled callee there again, also the next
   tail calls, so a chain of them neither nests nor grows the JS stack, and a host function there
-  too; everything else (varargs, other callees) goes through `finishTailCall`, which does the same
+  too (its frame is the top frame for the stack check: with more arguments than the caller had,
+  it covers the caller's header, whose code block a stale top frame pointed to and the check read
+  garbage, an abort on developer.friendlycaptcha.com); everything else (varargs, other callees) goes through `finishTailCall`, which does the same
   in C++ through the general path. Speed against the ordinary call before: about the same for
   compiled and host callees from compiled code, a strict recursion of 100 levels 7 to 9 times
   faster (it nested before), a compiled function with a tail call called from interpreted code

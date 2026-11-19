@@ -61,8 +61,8 @@ function stackChecks() {
 }
 
 // What tail calls give: more and fewer arguments than the caller had, missing parameters, spread,
-// exceptions, a callee that is no function, a host function, tail recursion deeper than the
-// machine stack holds
+// exceptions, a callee that is no function, a host function (also with more arguments from a
+// caller C++ entered), tail recursion deeper than the machine stack holds
 function sum() {
   let total = 0;
   for (let i = 0; i < arguments.length; i++) total += arguments[i];
@@ -116,6 +116,19 @@ function hopMore(a) {
   'use strict';
   return more(a);
 }
+// A host function with more arguments than the caller's frame holds, after a call that made the
+// caller the top frame: the tail call's frame covers the caller's header
+function hostWide2(a) {
+  'use strict';
+  const x = Math.abs(a);
+  return Math.max(x, 1, 2, 3);
+}
+function hostWide4(a) {
+  'use strict';
+  const x = Math.abs(a);
+  return Math.max(x, 1, 2, 3, 4, 5);
+}
+const boundWide = hostWide2.bind(null, 1);
 function countDown(n) {
   'use strict';
   return n === 0 ? 'done' : countDown(n - 1);
@@ -130,6 +143,10 @@ function resultChecks() {
     if (hopSpread([i, 2]) !== i + 2) return check(`chain spread ${i}`, false);
     if (hopHost(i, 5) !== Math.max(i, 5)) return check(`chain host ${i}`, false);
     if (hopMore(i) !== 8 * i) return check(`chain more ${i}`, false);
+    if (hostWide2(i) !== Math.max(i, 3)) return check(`wide host ${i}`, false);
+    if (hostWide4(i) !== Math.max(i, 5)) return check(`wider host ${i}`, false);
+    if (boundWide() !== 3) return check(`bound host ${i}`, false);
+    if ([i].map(hostWide2)[0] !== Math.max(i, 3)) return check(`callback host ${i}`, false);
     let caught = null;
     try {
       throws();

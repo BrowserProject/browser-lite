@@ -781,6 +781,9 @@ UGPRPair hostTailCallFromCompiledCode(CallFrame* frame, const JSInstruction*)
     VM& vm = function->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
     CallFrame* caller = frame->callerFrame();
+    // The stack check reads the top frame: the tail call's frame, the caller's frame it replaced
+    // may be overwritten (its code block slot by this frame's header)
+    vm.topCallFrame = frame;
     if (!vm.isSafeToRecurseSoft()) [[unlikely]] {
         // Through JSC's generic call, which throws the RangeError
         JSValue result = callInFrame<false>(vm, caller->codeBlock()->globalObject(), scope, caller, frame, function, frame->argumentCountIncludingThis());
