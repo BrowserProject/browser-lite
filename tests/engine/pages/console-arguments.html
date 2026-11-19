@@ -1,0 +1,91 @@
+<!doctype html>
+<title>Console arguments</title>
+<!-- console.log and the others run page code only for their first argument, like Safari
+     (patch 0056): scripts count toString and getter calls to tell whether the console is open.
+     The engine's log still shows every argument (pages-test.mjs checks the PREVIEW line):
+     primitives as text, errors by their name and message, other objects by class name -->
+<script>
+const counts = { first: 0, other: 0, styled: 0, message: 0, getter: 0, regexp: 0, proxy: 0 };
+const counted = (key, text) => ({
+  toString() {
+    counts[key]++;
+    return text;
+  },
+});
+
+// Safari converts the first argument once
+console.log(counted('first', 'first'));
+console.log('second', counted('other', 'other'), counted('other', 'other'));
+console.error('%c', counted('styled', 'color: red'));
+console.warn('%s and %o', counted('other', 'a'), counted('other', 'b'));
+
+const error = new Error('m');
+Object.defineProperty(error, 'message', {
+  get() {
+    counts.message++;
+    return 'm';
+  },
+});
+console.log(error);
+console.error('failed:', error);
+
+const regexp = /x/;
+regexp.toString = () => {
+  counts.regexp++;
+  return '/x/';
+};
+console.log('%o', regexp);
+
+class Widget {}
+Object.defineProperty(Widget.prototype, 'constructor', {
+  get() {
+    counts.getter++;
+    return Widget;
+  },
+});
+const tagged = {};
+Object.defineProperty(tagged, Symbol.toStringTag, {
+  get() {
+    counts.getter++;
+    return 'Tagged';
+  },
+});
+const watched = new Proxy(
+  {},
+  {
+    get() {
+      counts.proxy++;
+    },
+    getOwnPropertyDescriptor() {
+      counts.proxy++;
+    },
+    getPrototypeOf() {
+      counts.proxy++;
+      return null;
+    },
+  },
+);
+console.info('objects', new Widget(), tagged, watched);
+
+class Point {}
+console.log(
+  'PREVIEW %s|%d|%c|%o|%%',
+  'text',
+  42,
+  'color: red',
+  new Point(),
+  true,
+  null,
+  undefined,
+  Symbol('s'),
+  12n,
+  [1, 2],
+  document.documentElement,
+  new TypeError('bad'),
+  watched,
+);
+
+const expected = { first: 1, other: 0, styled: 0, message: 1, getter: 0, regexp: 0, proxy: 0 };
+const ok = Object.keys(expected).every((key) => counts[key] === expected[key]);
+console.log(`CONSOLEARGS done=${ok ? 'ok' : JSON.stringify(counts)}`);
+</script>

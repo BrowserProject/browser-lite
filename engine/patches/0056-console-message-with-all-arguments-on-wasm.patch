@@ -1,7 +1,17 @@
 diff --git a/Source/WebCore/page/FrameConsoleClient.cpp b/Source/WebCore/page/FrameConsoleClient.cpp
+index bc7d636798..22b88a7160 100644
 --- a/Source/WebCore/page/FrameConsoleClient.cpp
 +++ b/Source/WebCore/page/FrameConsoleClient.cpp
-@@ -76,6 +76,7 @@
+@@ -69,13 +69,16 @@
+ #include "Settings.h"
+ #include "StringCallback.h"
+ #include <JavaScriptCore/ConsoleMessage.h>
++#include <JavaScriptCore/ErrorInstance.h>
+ #include <JavaScriptCore/JSCInlines.h>
++#include <JavaScriptCore/ProxyObject.h>
+ #include <JavaScriptCore/ScriptArguments.h>
+ #include <JavaScriptCore/ScriptCallStack.h>
+ #include <JavaScriptCore/ScriptCallStackFactory.h>
  #include <JavaScriptCore/StrongInlines.h>
  #include <wtf/Stopwatch.h>
  #include <wtf/TZoneMallocInlines.h>
@@ -9,44 +19,63 @@ diff --git a/Source/WebCore/page/FrameConsoleClient.cpp b/Source/WebCore/page/Fr
  #include <wtf/text/WTFString.h>
  
  #if ENABLE(OFFSCREEN_CANVAS)
-@@ -208,6 +209,44 @@
+@@ -208,6 +211,63 @@ void FrameConsoleClient::addMessage(MessageSource source, MessageLevel level, co
      addMessage(WTF::move(message));
  }
  
 +#if PLATFORM(WASM)
-+// browser-lite: the embedder gets the whole message like Chrome's console, not only the first
-+// argument: format specifiers of the first argument take the next arguments (%c drops its
-+// style), the remaining arguments follow separated by spaces.
-+static String messageWithAllArguments(const Inspector::ScriptArguments& arguments)
++// browser-lite: an argument after the first as text for the embedder, without running page code:
++// Safari converts only the first argument, and scripts count toString and getter calls to tell
++// whether the console is open. Primitives as strings, errors by their name and message data
++// properties, other objects by class name like the inspector's preview.
++static String argumentPreview(JSC::JSGlobalObject& globalObject, JSC::JSValue value)
 +{
-+    auto strings = arguments.getArgumentsAsStrings();
-+    if (strings.isEmpty())
-+        return { };
++    if (value.isSymbol())
++        return asSymbol(value)->tryGetDescriptiveString().value_or(String());
++    auto* object = value.isObject() ? asObject(value) : nullptr;
++    if (object && is<JSC::ProxyObject>(object))
++        return "Proxy"_s;
++    if (object && !is<JSC::ErrorInstance>(object))
++        return JSC::JSObject::calculatedClassName(object);
++    auto scope = DECLARE_TOP_EXCEPTION_SCOPE(globalObject.vm());
++    auto text = object ? downcast<JSC::ErrorInstance>(object)->sanitizedToString(&globalObject) : value.toWTFString(&globalObject);
++    scope.clearException();
++    if (object && text.isEmpty())
++        return JSC::JSObject::calculatedClassName(object);
++    return text;
++}
++
++// browser-lite: the embedder gets the whole message like Chrome's console, not only the first
++// argument: messageText (WebKit's own conversion of the first argument), whose format specifiers
++// take the next arguments (%c drops its style), then the remaining arguments separated by spaces.
++static String messageWithAllArguments(const String& messageText, const Inspector::ScriptArguments& arguments)
++{
 +    StringBuilder builder;
 +    size_t next = 1;
++    size_t count = arguments.argumentCount();
++    auto& globalObject = *arguments.globalObject();
 +    bool formatted = arguments.argumentAt(0).isString();
-+    auto first = strings[0];
-+    for (unsigned i = 0; i < first.length(); ++i) {
-+        char16_t character = first[i];
-+        if (!formatted || character != '%' || i + 1 >= first.length()) {
++    for (unsigned i = 0; i < messageText.length(); ++i) {
++        char16_t character = messageText[i];
++        if (!formatted || character != '%' || i + 1 >= messageText.length()) {
 +            builder.append(character);
 +            continue;
 +        }
-+        char16_t specifier = first[i + 1];
++        char16_t specifier = messageText[i + 1];
 +        if (specifier == '%') {
 +            builder.append('%');
 +            ++i;
-+        } else if (specifier == 'c' && next < strings.size()) {
++        } else if (specifier == 'c' && next < count) {
 +            ++next;
 +            ++i;
-+        } else if ((specifier == 's' || specifier == 'd' || specifier == 'i' || specifier == 'f' || specifier == 'o' || specifier == 'O') && next < strings.size()) {
-+            builder.append(strings[next++]);
++        } else if ((specifier == 's' || specifier == 'd' || specifier == 'i' || specifier == 'f' || specifier == 'o' || specifier == 'O') && next < count) {
++            builder.append(argumentPreview(globalObject, arguments.argumentAt(next++)));
 +            ++i;
 +        } else
 +            builder.append(character);
 +    }
-+    for (; next < strings.size(); ++next)
-+        builder.append(' ', strings[next]);
++    for (; next < count; ++next)
++        builder.append(' ', argumentPreview(globalObject, arguments.argumentAt(next)));
 +    return builder.toString();
 +}
 +#endif
@@ -54,12 +83,12 @@ diff --git a/Source/WebCore/page/FrameConsoleClient.cpp b/Source/WebCore/page/Fr
  void FrameConsoleClient::messageWithTypeAndLevel(MessageType type, MessageLevel level, JSC::JSGlobalObject* lexicalGlobalObject, Ref<Inspector::ScriptArguments>&& arguments)
  {
      String messageText;
-@@ -238,7 +277,11 @@
+@@ -238,7 +298,11 @@ void FrameConsoleClient::messageWithTypeAndLevel(MessageType type, MessageLevel
          return;
  
      if (arguments->argumentCount()) {
 +#if PLATFORM(WASM)
-+        page->chrome().client().addMessageToConsole(MessageSource::ConsoleAPI, level, messageWithAllArguments(arguments.get()), lineNumber, columnNumber, url);
++        page->chrome().client().addMessageToConsole(MessageSource::ConsoleAPI, level, messageWithAllArguments(messageText, arguments.get()), lineNumber, columnNumber, url);
 +#else
          page->chrome().client().addMessageToConsole(MessageSource::ConsoleAPI, level, messageText, lineNumber, columnNumber, url);
 +#endif

@@ -236,7 +236,10 @@ controls (the demo's `bar-hiding.ts`).
 
 Console messages come as `console` of the view (`ConsoleMessage`: `level`, `message`, `source`,
 `line`); those of service workers, which have no view, as `service-worker-console` of the browser
-with the worker's script URL as `source`.
+with the worker's script URL as `source`. `message` holds every argument: the first converted like
+Safari does, its format specifiers filled with the next ones, the others after it. Like Safari the
+engine runs no page code for those: primitives as text, errors as name and message, other objects
+by class name (`Object`, `HTMLDivElement`).
 
 `view.load(url)` reads `url` like Chrome's address bar, so pass typed text as it is. Without a
 scheme it loads `https://` and, when that fails without an answer of the site (no connection, no

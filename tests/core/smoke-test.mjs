@@ -391,7 +391,7 @@ try {
   check(
     'console event with all arguments and format specifiers',
     await waitFor(() =>
-      window.blHost.events.includes('console:log:styled text and 42% [object Object] rest'),
+      window.blHost.events.includes('console:log:styled text and 42% Object rest'),
     ),
     (await page.evaluate(() => window.blHost.events.filter((e) => e.includes('styled')).join())) ||
       'no event',

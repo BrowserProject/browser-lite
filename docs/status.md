@@ -21,6 +21,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   its `complete` message). A script stopped in a promise reaction or a `FinalizationRegistry`
   callback (the user left the page, the watchdog) ends alone (#627: before, leaving hCaptcha's
   demo while its `hsw.js` ran stopped every promise reaction of every view until a restart).
+  `console.log` and the others run page code only for their first argument, like Safari (#629:
+  before, the first argument's `toString` ran twice and every other argument's once, a count
+  that scripts read as an open DevTools panel); the engine's log shows the other arguments
+  without running page code.
   Above 2 GB of engine memory the JS glue gets unsigned pointers (#465: before, uploads sent other
   memory of the page, the HTTP cache stored wrong bodies, compiled JS failed to install and
   `decodeAudioData` threw).
@@ -1099,6 +1103,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
+- DataDome's slider on www.nytimes.com (2026-11-19, local, Chromium host, desktop viewport, the
+  slider dragged once like a person): plain headed Chromium passes in 3 of 3 runs (the check
+  answers with a cookie), browser-lite is blocked in 6 of 6, before and after #629. The check
+  request has the same 18 fields in the same order; its encoded payload is about 8.9 KB against
+  10.0 KB and `plv3` 547 against 568 characters, so some signal the challenge collects differs.
+  Not yet found which.
 - Spell checking (#624): only the English dictionary (en_US of SCOWL) ships, so pages whose first
   language is not English are not checked; more dictionaries are a `dict-*` line pair in
   `deps/sources.txt` each, after a look at their licenses (most are GPL or LGPL). Chrome's Spell

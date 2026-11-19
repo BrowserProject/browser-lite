@@ -66,6 +66,10 @@
 //                  postMessage's source through Function.prototype.call and apply, Reflect.apply
 //                  and bound functions of another (also a removed) frame is still the page,
 //                  Error.stack without them, results of tail calls; with the JIT and without
+//   console-arguments.html  console calls run page code only for their first argument, like
+//                  Safari (patch 0056): counts of toString and getter calls of console.log,
+//                  console.error('%c', o) and console.log(error); `expect` checks the engine's log
+//                  line with every argument (primitives as text, errors, objects by class name)
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -123,6 +127,15 @@ const CASES = [
     wait: 'COOKIES done',
     env: { RENDER_URL: 'https://user.github.io/test/' },
   },
+  {
+    name: 'console-arguments',
+    wait: 'CONSOLEARGS done',
+    expect: [
+      '[page] PREVIEW text|42||Point|% true null undefined Symbol(s) 12 Array HTMLHtmlElement TypeError: bad Proxy',
+      '[page] failed: Error',
+      '[page] objects Object Object Proxy',
+    ],
+  },
   { name: 'tail-calls', wait: 'TAILCALLS done' },
   {
     name: 'tail-calls',
@@ -151,7 +164,7 @@ const CASES = [
 ];
 
 let failed = 0;
-for (const { name, label = name, size = [200, 200], wait, env = {}, check } of CASES) {
+for (const { name, label = name, size = [200, 200], wait, env = {}, check, expect = [] } of CASES) {
   const ppm = path.join(out, `${label.replace(/\W+/g, '-')}.ppm`);
   const run = spawnSync(
     process.execPath,
@@ -173,6 +186,11 @@ for (const { name, label = name, size = [200, 200], wait, env = {}, check } of C
   let info = wait
     ? (output.match(new RegExp(`${wait}=\\S*`))?.[0] ?? `exit ${run.status}`)
     : `exit ${run.status}`;
+  const missing = expect.find((line) => !output.split('\n').includes(line));
+  if (ok && missing) {
+    ok = false;
+    info = `log misses: ${missing}`;
+  }
   if (ok && check) {
     const frame = spawnSync(process.execPath, [path.join(here, check), ppm], {
       encoding: 'utf8',
