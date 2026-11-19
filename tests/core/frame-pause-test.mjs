@@ -6,7 +6,8 @@
 // observer wait for its task instead of running inside it or being dropped; the frame's script
 // is stopped when the page removes the frame meanwhile; a frame of the same site (one event loop
 // with the page) does not pause, its keys wait as before. Only a long task pauses: a frame that
-// runs a little script per animation frame keeps running while the user types next to it.
+// runs a little script per animation frame keeps running while the user types next to it. While
+// the user keeps typing, a paused task still runs a slice every 500 ms.
 //
 //   node tests/core/frame-pause-test.mjs [engine-dir]
 import {
@@ -150,15 +151,16 @@ async function taskReport(results, number) {
   return null;
 }
 
-// Keys into the field during one task of the frame: their latencies (ms) and reports
-async function typeDuringTask(page, keys) {
+// Keys into the field during one task of the frame, one every interval ms: their latencies (ms)
+// and reports
+async function typeDuringTask(page, keys, interval = 150) {
   const task = await inFrameTask(page.results);
   const before = all(page.results, 'keydown').length;
   const sent = [];
   for (const key of keys) {
     sent.push(Date.now());
     await page.tab.keyboard.press(key);
-    await sleep(150);
+    await sleep(interval);
   }
   for (
     const end = Date.now() + 20000;
@@ -202,6 +204,20 @@ async function typeDuringTask(page, keys) {
     'cross-site frame: its task paused while the user typed and went on with intact locals',
     report && report.gap >= 400 && report.broken === 0,
     JSON.stringify(report),
+  );
+
+  // The user keeps typing through a task: it pauses at most 500 ms at a time and then runs a slice
+  const steady = await typeDuringTask(page, [...'ghijklmnop'], 250);
+  const steadyReport = await taskReport(page.results, steady.task);
+  check(
+    'cross-site frame: while the user keeps typing its task goes on, paused under 1 s at a time',
+    steadyReport && steadyReport.gap < 1000 && steadyReport.broken === 0,
+    JSON.stringify(steadyReport),
+  );
+  check(
+    'cross-site frame: keys during its slices still wait under 500 ms',
+    steady.latencies.length === 10 && Math.max(...steady.latencies) < 500,
+    `latencies ${steady.latencies.join(', ')} ms`,
   );
 
   // A click into the frame during its task waits for the task and is not dropped

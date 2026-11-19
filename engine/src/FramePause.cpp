@@ -17,6 +17,9 @@
 // paused (WebCore runs no event listener and no script of a paused frame, as in the debugger),
 // and the rendering update leaves out the steps that run their script (patch 0152).
 //
+// While input keeps coming, the script runs a slice of 100 ms after every 500 ms paused, so the
+// frame's script and loads go on (#628).
+//
 // Input of the user waits for the paused script when it would reach a paused frame (the focus is
 // in one, it lands in one or the pointer leaves one): the pause ends, the script goes on and the
 // input runs after it, in order with later input of its view, like input to a busy frame in
@@ -86,7 +89,19 @@ struct HeldInput {
 
 } // namespace
 
+// While the user keeps working, a pause ends after this long once the urgent work is done, and the
+// script runs a slice: input every few hundred ms (a person tapping, scrolling or typing through a
+// page load) kept a frame paused for as long, Stripe's frame on edition.cnn.com for a minute, with
+// its loads deferred and so the page's load event.
+static constexpr Seconds pauseWhileUserWorks = 500_ms;
+
+// The slice: the script runs without pausing for a fifth of the time while the user works. Like
+// the interval of the script watchdog: input that comes meanwhile waits no longer than input
+// early in a long task (scriptRunsLong).
+static constexpr Seconds sliceTime = 100_ms;
+
 static PausedAgent* s_paused;
+static MonotonicTime s_sliceEnd;
 // Per view: input that waits for a paused frame's script. The entry stays while its input runs,
 // so input that comes meanwhile queues behind it.
 static HashMap<int, Deque<HeldInput>>& heldInput()
@@ -176,6 +191,8 @@ bool pauseFrameScriptForUser()
 {
     if (s_paused || !scriptRunsLong())
         return false;
+    if (MonotonicTime::now() < s_sliceEnd)
+        return false;
     auto& vm = commonVM();
     auto* globalObject = dynamicDowncast<JSDOMGlobalObject>(threadGlobalDataSingleton().currentState());
     RefPtr document = dynamicDowncast<Document>(globalObject ? globalObject->scriptExecutionContext() : nullptr);
@@ -215,14 +232,28 @@ bool pauseFrameScriptForUser()
     s_paused = &agent;
     // Without a hold only what the user waits for runs meanwhile, during one everything else.
     // Until the last input is a moment ago: the hold of hidden views lasts up to 10 s after
-    // typing, a challenge in a frame of the form the user fills in would wait as long. Input that
-    // waits for the script ends it once the urgent work is done (a call of the host still runs).
+    // typing, a challenge in a frame of the form the user fills in would wait as long. While input
+    // keeps coming, until pauseWhileUserWorks. Input that waits for the script ends it once the
+    // urgent work is done (a call of the host still runs).
+    bool slice = false;
     runNestedEventLoop([&] {
-        return (!urgentWorkWaiting() && (hasHeldInput(agent.viewIds) || !userJustWorked())) || !document->frame();
+        if (!document->frame())
+            return true;
+        if (urgentWorkWaiting())
+            return false;
+        if (hasHeldInput(agent.viewIds) || !userJustWorked())
+            return true;
+        slice = MonotonicTime::now() - start >= pauseWhileUserWorks;
+        return slice;
     }, [] {
         return !hiddenViewsWaitForUser();
     });
     s_paused = nullptr;
+    // The input that comes during the slice pauses the script at its end
+    if (slice) {
+        s_sliceEnd = MonotonicTime::now() + sliceTime;
+        requestSafepointAfter(sliceTime);
+    }
     bool left = !document->frame();
     for (auto& paused : agent.frames) {
         paused.frame->script().setPaused(false);
@@ -242,7 +273,7 @@ bool pauseFrameScriptForUser()
         if (framePage && framePage->lastRenderingUpdateTimestamp() >= start)
             framePage->scheduleRenderingUpdate(allRenderingUpdateSteps);
     }
-    debugLog("Frame script of %s paused %.0f ms for the user%s", document->url().host().utf8().data(), (MonotonicTime::now() - start).milliseconds(), left ? ", its document went away: stopped" : "");
+    debugLog("Frame script of %s paused %.0f ms for the user%s", document->url().host().utf8().data(), (MonotonicTime::now() - start).milliseconds(), left ? ", its document went away: stopped" : slice ? ", runs a slice" : "");
     if (left)
         vm.notifyNeedTermination();
     scheduleHeldInput();

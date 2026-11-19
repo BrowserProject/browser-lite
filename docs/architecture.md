@@ -224,7 +224,10 @@ script of a paused frame, as in its debugger), the rendering update leaves out t
 their script until it goes on (patch 0152). The page answers and renders meanwhile; input that
 would reach the frame (focus, pointer in it or leaving it) ends the pause and runs right after the
 script, in order with later input of its view. A frame removed or left meanwhile stops its script
-when it goes on. The pause lasts until no input came for 1 s.
+when it goes on. The pause lasts until no input came for 1 s, but while input keeps coming at most
+500 ms: then the script runs a slice of 100 ms (a safepoint request ends it) before it may pause
+again, so the frame's script, its loads and with them the page's load event go on while the user
+taps or types through a load (#628).
 
 ## Frames
 

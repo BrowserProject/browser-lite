@@ -52,6 +52,9 @@ bool engineThreadInLongScript(WTF::Seconds minimum);
 // On the engine thread: whether the running script (the outermost entry into JS) has run for
 // 100 ms or more, a long task; until the entry ends
 bool scriptRunsLong();
+// Brings the script that runs then to its next safepoint after the delay (patch 0149), where
+// urgent work that waits may pause it (EngineLoop.cpp)
+void requestSafepointAfter(WTF::Seconds delay);
 // A page dialog or a paused script: runs the work of the engine thread nested
 // until done() returns true, only the urgent work while onlyUrgent() returns
 // true; the views of the waiting page's group hold back (WebView.h)

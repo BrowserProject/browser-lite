@@ -333,6 +333,13 @@ static void requestSafepoint()
         vm->traps().fireTrap(JSC::VMTraps::NeedSafepointGC);
 }
 
+void requestSafepointAfter(WTF::Seconds delay)
+{
+    JSC::VMTraps::queue().dispatchAfter(delay, [] {
+        requestSafepoint();
+    });
+}
+
 void runUrgentOnEngineThread(Function<void()>&& function)
 {
     // Counted before the queueing and uncounted when it runs: the count never stays above what waits

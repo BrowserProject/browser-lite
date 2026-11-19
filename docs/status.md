@@ -757,7 +757,18 @@ browser (Safari keeps Cmd+L, T and W for itself).
    `unresponsive` in 2 runs, now at most 51 ms. Only a long script pauses, one that has run for
    100 ms (#602): a frame with a little script per animation frame (a map, a player's controls)
    was frozen while the user typed next to it and 1 s after, now it keeps running (2026-11-17,
-   66 keys in 10 s: 0 ticks before, 33 per second now like idle). Input into the frame itself, the script of a
+   66 keys in 10 s: 0 ticks before, 33 per second now like idle). While input keeps coming a
+   paused frame runs a slice of 100 ms after every 500 ms (#628): a touch every 250 ms through
+   edition.cnn.com's load (2026-11-19, local, 1x) kept its Stripe frame paused for 69 to 78 s and
+   the load event away in 3 of 4 runs; now the longest pause is 0.7 to 0.9 s and the load event
+   comes after 18 to 20 s (14.6 to 21.6 s without touches). Friendly Captcha's playground
+   (developer.friendlycaptcha.com, emulated phone at a fourth of the CPU) gives its token in 5 of
+   5 runs, 13 to 17 s after a tap on the widget, but its agent frame logs "Root signals request
+   timed out" once at its start in every run, also before #628 and without any input: it waits
+   300 ms for the page's answer, which got the request only when the engine thread was through
+   with the page's own work (a rendering update of 980 ms right before in one run); plain
+   Chromium logs it in none of 3 runs. The
+   agent asks again and goes on. Input into the frame itself, the script of a
    challenge page that is the top-level document (canva.com's "Just a moment...") and a debug
    `eval` still wait for the script. Cloudflare Turnstile on kaufland.de (local, Chromium host):
    every challenge brings a VM obfuscated anew (other function names and sizes each run), so its

@@ -119,7 +119,8 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
     switched to and until a page a visible one loads fired its load event; their style, layout and load events wait too, and a script of theirs that runs
     when input comes pauses at its next safepoint, patch 0149), `FramePause.cpp` (a long script
     of a cross-site frame, 100 ms and more, pauses there too while the user works in its page; input that reaches the
-    frame waits for the script, patch 0152 keeps its rendering steps for later)
+    frame waits for the script, patch 0152 keeps its rendering steps for later; while input keeps coming it runs a
+    slice of 100 ms after every 500 ms paused)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
     (layers on the compositor thread, the stall log's state; a closing view's host waits for its
     tile jobs and detaches every layer that names it; a view hidden for 10 s releases its tiles), `DamageTiles.cpp` (a frame with a
