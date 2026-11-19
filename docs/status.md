@@ -791,9 +791,11 @@ browser (Safari keeps Cmd+L, T and W for itself).
    samples of one phase) and bound functions call their target directly (#456), loops entered
    once get V8's optimized code (#457), jumps forward and dense switches branch directly (#458).
    What is left is compiled code, half of the engine thread: the VM's functions of 40 to 90 KB of
-   bytecode become about 1 MB of WASM each, which V8 runs in Liftoff for seconds before its
+   bytecode became about 1 MB of WASM each, which V8 runs in Liftoff for seconds before its
    optimized code is ready (phase 4 of [jit.md](jit.md)); then `get_by_val` with string keys 7 %,
-   array literals 4.5 %. Its garbage no longer stays (#448), but while the challenge runs
+   array literals 4.5 %. Such a module ran little faster than the interpreter (`BL_JIT=0` was no
+   slower): its code did not fit the processor's instruction caches, and the warm-up of the VM's
+   large functions started again at every GC; both changed with #630 (below). Its garbage no longer stays (#448), but while the challenge runs
    malloc's use still rises by about 3 MB/s with a JS heap of about 25 MB (2026-11-07, not
    found yet). OpenStreetMap's sign-up (2026-11-11, local, Chromium host, load 3 to 10): the
    widget shows its checkbox after 45 to 75 s (plain Chromium within 30 s, its challenge frame
@@ -815,7 +817,26 @@ browser (Safari keeps Cmd+L, T and W for itself).
    of the non-interactive one after 84 s, of the invisible one after 166 s; scrapingcourse 8.6 s
    and nopecha 6.6 s after the click; on a Pixel 9 with the build served through the tunnel the
    token 4 s and scrapingcourse 7 s after the tap). The time until the checkbox is the speed of
-   JS above. Open: on the Pixel, scrapingcourse's widget logged one "Ignored message from
+   JS above. peet.ws's managed widget on 2026-11-19 (#630, local, Chromium host, 5 interleaved
+   runs each): from the widget's `init` to its checkbox (`interactiveBegin`) 31.5 to
+   44.2 s (median 40.1) instead of 40.8 to 72.5 s (median 54.0), the longest RunLoop step 9.7 to
+   17.3 s instead of 12.9 to 26.3 s; on a Firefox host 43 to 52 s instead of 44 to 68 s (3 runs
+   each), no `widgetStale` before the checkbox in any run (it comes 120 s after `init` without a
+   click, the widget's own timeout). Plain Chromium: 4.6 s. The challenge's first phase ends with
+   its `pat` request, which carries the challenge's start: sent more than about 20 s after the
+   `fo` request it gets 400 instead of 401 (2 of 8 runs with #630, 1 of 13 before; the widget
+   goes on to its checkbox). The VM's main function of 45 to 66 KB of bytecode is now about 0.6
+   MB of WASM instead of 1.6 MB, the engine thread runs 0.77 instead of 0.58 instructions per
+   cycle in it (the interpreter 1.22); of the JS samples at the watchdog's checks 17 % are
+   interpreted instead of 37 % with the old warm-up, mostly in the first 30 s. Of the engine
+   thread (CPU profile, warm-up still capped at 2048 fires): compiled code 44 %, the interpreter 20 %, slow paths 16 %
+   (`get_by_val` of the interpreter, array literals 4 %, `slow_path_enter`), the rest of JSC 13 %.
+   A single entry of the challenge cannot be cut into slices: the script of the frame's agent
+   runs to completion, its network events wait like in Chrome's process of the frame; the frame
+   already pauses for input of the user (#589, #628), and the debug `eval` of the measurement is
+   no input. Open: compiled code itself (values in WASM locals, the slow paths of arithmetic
+   and conditions out of line, phase 4 of [jit.md](jit.md)); the criterion of 30 s on this
+   machine and of 5 s for the longest step is not reached. Open: on the Pixel, scrapingcourse's widget logged one "Ignored message from
    unexpected source" for `interactiveEnd`, after the token, when it had already removed the
    widget; not seen locally. LinkedIn Learning
    (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain

@@ -39,15 +39,28 @@ never baked into the code (the GC resets inline caches).
   ones before, 0.9 to 1.3x now).
 - **Tier-up**: the interpreter's counters with the JIT off (`llint_replace` at returns,
   `llint_loop_osr` at loops) call the compiler instead of giving up, after 64 firings plus one
-  per 2 bytes of bytecode, at most 2048 (one is about 50 calls or 500 loop iterations; #566). A
-  compile costs in proportion to the code: the module is 25 to 40 times the bytecode and V8
-  compiles it with Liftoff on the engine thread at its first call (in the engine about 4 ms for
-  25 KB, 0.35 ms of that our compiler), and code fresh from Liftoff runs little faster than the
-  interpreter, so a function compiles once it ran long enough to pay that back. The counter
+  per 6 bytes of bytecode, at most 512 (one is about 50 calls or 500 loop iterations; #566,
+  #630). A compile costs in proportion to the code: the module is 8 to 20 times the bytecode and
+  V8 compiles it with Liftoff on the engine thread at its first call (in the engine about 4 ms
+  for 25 KB, 0.35 ms of that our compiler), and code fresh from Liftoff runs little faster than
+  the interpreter, so a function compiles once it ran long enough to pay that back. The counter
   belongs to the `UnlinkedCodeBlock`, which all `CodeBlock`s of the same code share (the same
   script in other frames, the builtins of every global object, the one that replaces a
   `CodeBlock` thrown away), so it keeps firing after a compile instead of stopping for good, which
-  had kept all of them interpreted.
+  had kept all of them interpreted. The JIT counts the firings by `UnlinkedCodeBlock` too: a full
+  GC throws away a `CodeBlock` that is not compiled and older than 5 s, and counted by
+  `CodeBlock` a large function started its warm-up again at every GC (#630).
+- **Code size**: the fast paths of property access by id, element and keyed access, scope
+  access (`resolve_scope`, `get_from_scope`, `put_to_scope`) and `Math.imul` are functions of the
+  module that every site of the instruction calls with its operands' values, the metadata and
+  the destination's address, and a slow path is called through one function of the module
+  (#630). Inline at every site they made a module 25 to 40 times the bytecode, now 8 to 20 times:
+  an obfuscated VM of 50 KB of bytecode was 1.6 MB of WASM, about 3 MB of machine code, and ran
+  little faster than the interpreter, its code too large for the processor's instruction caches
+  (`perf stat` on the engine thread: 0.58 instructions per cycle against the interpreter's 1.22,
+  24 % of instruction fetches missed the L1 cache, 23 % of the cycles waited for them). A
+  variable the bytecode generator resolved in a closure (`ResolvedClosureVar`) is read inline
+  without a slow path, as linking makes it a `ClosureVar` for good.
 - **Fast paths**: the interpreter's, reading its caches at run time: int32 and double arithmetic
   and comparisons, equality, property access (own, prototype, array length, unset, transitions;
   reads of own properties also from the last 4 structures of the site, until the next GC, looked
@@ -209,6 +222,25 @@ to 916 against 961 to 977, DeltaBlue 864 to 883 against 945 to 952, the score 14
 against 1510 to 1517. A VM function of 45 KB of bytecode with 800 call sites: 988 against 1058 KB
 of WASM, 40 runs 1033 against 863 ms (with the call's work at every site 1.4 MB and slower).
 
+Code size (#630, 2026-11-19): the module of a VM-like function (`tests/jsc/jit-size.js`, 74 KB of
+bytecode: global variables, closure variables, element and keyed access in 200 cases of a
+switch) is 0.61 MB instead of 2.29 MB, per statement `s = g` 114 instead of 674 bytes, `s =
+arr[i]` 179 instead of 1510, `arr[j] = s` 195 instead of 1534, `s = obj[k]` 287 instead of
+2192, `s = obj.p` 179 instead of 1088, a call 359 instead of 536. The same dispatch with 256
+cases (2.0 MB of WASM before, 0.58 MB now) ran a million steps in 470 ms in Liftoff and 270 ms
+once optimized (after 5 s), with 16 cases (0.13 MB) in 85 ms: the work was the same, the code
+too large. Now 120 to 160 ms from the start, with 16 cases 85 to 100 ms. On the engine thread
+with Turnstile's challenge (`perf stat`): 0.58 instructions per cycle before, 24 % of the
+instruction fetches missed the L1 cache and 23 % of the cycles waited for them (the interpreter
+alone: 1.22, 7.5 %, 6 %); now 0.77, 19.5 % and 17 %. V8's optimizing compile of the VM's main
+function took 12.3 s in the background before (1.6 MB). With the warm-up counted by
+`UnlinkedCodeBlock` and the lower threshold, 17 % of the JS samples at the watchdog's checks are
+interpreted instead of 37 % (the VM's functions of 4 to 12 KB stayed interpreted for a minute).
+peet.ws's managed widget: the checkbox 31.5 to 44.2 s after the widget's start (median 40.1)
+instead of 40.8 to 72.5 s (median 54.0), the longest step 9.7 to 17.3 s instead of 12.9 to
+26.3 s (5 interleaved runs each). 20min.ch compiles 241 functions into 1.4 MB in its first
+50 s instead of 181 into 1.1 MB.
+
 Hashing code (#424, `tests/jsc/jit-hash.js`, jsc shell): bit operations on uint32 values 5x and
 typed array elements 3x the time of their int32 twins before, now 1.8x and 1.3x; `Math.imul` 6.5x
 an addition before, 2x now; a host call about 20 % cheaper. In the engine, the loops of
@@ -224,6 +256,8 @@ to 2.7 s, Chromium 24 to 44 ms).
 4. Speed: values in WASM locals between safepoints, type checks folded, inlining of small
    functions; less code per bytecode. Calls of compiled functions run in WASM through the
    callee table (#459). Obfuscated VMs (Cloudflare's Turnstile) bring functions of
-   40 to 90 KB of bytecode, which become about 17 times that in WASM (54 KB: 0.9 MB), and V8 runs
-   such a function in Liftoff for seconds while it optimizes it (`jsc` shell: 470 ms a run in
-   Liftoff, 240 ms once optimized after about 2.5 s).
+   40 to 90 KB of bytecode; the fast paths of property, element, keyed and scope access in
+   functions of the module made them 8 to 10 times that in WASM instead of 25 to 31 (#630).
+   Next: the double and slow paths of arithmetic, comparisons and conditions out of line (a
+   statement `if (s) t = u` is still about 270 bytes, `s = s ^ c` and `s = s + j` about 200),
+   values in locals.

@@ -50,6 +50,16 @@ run jit "$here/jit.js"
 [ "$jit" = 0 ] || run jit-keyed "$here/jit-keyed.js"
 done
 
+# The module of a large VM-like function: wasm bytes per byte of bytecode (fast paths of scope
+# and element access in functions of the module, not inline at every site)
+size="$(BL_JIT=2 node "$jsc" "$here/jit-size.js" 2>&1 | sed -n 's/^\[jit\] vmDispatch#.*LLIntFunctionCall, \([0-9]*\)\]: \([0-9]*\) bytes.*/\2 \1/p' | head -1)"
+if [ -n "$size" ] && [ "$(awk -v s="$size" 'BEGIN { split(s, a, " "); print (a[1] <= 12 * a[2]) }')" = 1 ]; then
+    echo "ok    jit-size (jit): $size"
+else
+    echo "FAIL  jit-size (jit): module and bytecode bytes '$size' (at most 12 times the bytecode)"
+    fail=1
+fi
+
 # Compiled code stays through a full GC of old code, code thrown away compiles again
 kept="$(compiles)"
 again="$(compiles --forceCodeBlockToJettisonDueToOldAge=true)"

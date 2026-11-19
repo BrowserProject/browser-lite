@@ -58,9 +58,11 @@
 #include "WasmModule.h"
 #include <emscripten.h>
 #include <optional>
+#include <tuple>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
+#include <wtf/MonotonicTime.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace JSC::LLInt {
@@ -217,23 +219,56 @@ HashSet<const CodeBlock*>& compiledCodeBlocks() WTF_REQUIRES_LOCK(compiledCodeBl
 }
 
 // How often the interpreter's counter must fire (about 50 calls or 500 loop iterations each)
-// before a CodeBlock compiles. A compile costs in proportion to the code: the module is 25 to 40
-// times the bytecode, and V8 compiles it on the engine thread at its first call (Liftoff, about
-// 4 ms for 25 KB in the engine), while code fresh from Liftoff runs little faster than the
-// interpreter. So a function warms up the longer the larger it is, and compiles only once it ran
-// long enough to pay that back: 64 fires plus one per 2 bytes, at most 2048 (about 100000 calls or
-// a million loop iterations, #566).
+// before a CodeBlock compiles. A compile costs in proportion to the code: V8 compiles the module on
+// the engine thread at its first call (Liftoff, about 4 ms for 25 KB in the engine), while code
+// fresh from Liftoff runs little faster than the interpreter. So a function warms up the longer the
+// larger it is, and compiles only once it ran long enough to pay that back (#566): 64 fires plus
+// one per 6 bytes, at most 512 (about 25000 calls or 250000 loop iterations). The module was 25
+// to 40 times the bytecode then, one fire per 2 bytes and at most 2048; with the fast paths of
+// scope, element and property access in functions of the module it is 8 to 20 times, and the
+// large functions of an obfuscated VM (Turnstile's challenge, 4 to 12 KB) ran interpreted for most
+// of a minute at a fire every 30 to 50 ms (#630).
 unsigned warmUpFires(CodeBlock* codeBlock)
 {
     size_t size = codeBlock->instructions().size();
-    return static_cast<unsigned>(std::min<size_t>(64 + size / 2, 2048));
+    return static_cast<unsigned>(std::min<size_t>(64 + size / 6, 512));
 }
 
-// How often the counter fired for CodeBlocks not compiled yet
-HashMap<CodeBlock*, unsigned>& warmUp()
+// How often the counter fired for the code of CodeBlocks not compiled yet. By UnlinkedCodeBlock,
+// like the counter: a full GC throws away a CodeBlock that is not compiled and older than 5 s, and
+// the next call makes a new one of the same code. Counted per CodeBlock, the large functions of an
+// obfuscated VM (Turnstile's challenge) started their warm-up again at every GC and ran interpreted
+// for a minute (#630). The entry stays after a compile, so the next CodeBlock of hot code (another
+// frame's, a builtin's in another realm) compiles at its first fire.
+struct WarmUp {
+    unsigned fires { 0 };
+    MonotonicTime lastFire;
+};
+HashMap<UnlinkedCodeBlock*, WarmUp>& warmUp()
 {
-    static thread_local HashMap<CodeBlock*, unsigned> map;
+    static thread_local HashMap<UnlinkedCodeBlock*, WarmUp> map;
     return map;
+}
+
+// The code of entries not fired for this long went away or cooled down: dropped once the map is
+// large, so a page that runs for hours does not keep one for every function it ever warmed up (an
+// UnlinkedCodeBlock that went away may leave its entry to another one at its address, which then
+// compiles sooner)
+constexpr unsigned warmUpEntriesBeforePruning = 4096;
+constexpr Seconds warmUpEntryLifetime = 60_s;
+
+WarmUp& warmUpOf(CodeBlock* codeBlock)
+{
+    auto& map = warmUp();
+    auto now = MonotonicTime::now();
+    if (map.size() >= warmUpEntriesBeforePruning) {
+        map.removeIf([&](auto& entry) {
+            return now - entry.value.lastFire > warmUpEntryLifetime;
+        });
+    }
+    auto& entry = map.add(codeBlock->unlinkedCodeBlock(), WarmUp { }).iterator->value;
+    entry.lastFire = now;
+    return entry;
 }
 
 uint32_t compiledFunction(CodeBlock* codeBlock)
@@ -1320,32 +1355,65 @@ private:
     // Bytecode offsets a switch can go to, its default first
     Vector<unsigned> switchTargets(const JSInstructionStream::Ref&);
 
-    // Value of a virtual register: tag or payload, from the frame or the constant pool
-    void loadTag(VirtualRegister);
-    void loadPayload(VirtualRegister);
+    static constexpr uint32_t noLocal = UINT32_MAX;
+    // An operand of an instruction as its fast paths see it: a register of the frame or a
+    // constant, or in a function of the module that does the fast paths of all instructions of a
+    // kind (emitFastPathFunction) locals with its tag and payload (an input) or with the address
+    // of its register (the destination)
+    struct Operand {
+        Operand(VirtualRegister reg)
+            : reg(reg)
+        {
+        }
+        static Operand value(uint32_t tagLocal, uint32_t payloadLocal)
+        {
+            Operand operand { VirtualRegister() };
+            operand.tag = tagLocal;
+            operand.payload = payloadLocal;
+            return operand;
+        }
+        static Operand at(uint32_t addressLocal)
+        {
+            Operand operand { VirtualRegister() };
+            operand.address = addressLocal;
+            return operand;
+        }
+        bool inLocals() const { return tag != noLocal; }
+        bool isConstant() const { return !inLocals() && address == noLocal && reg.isConstant(); }
+        VirtualRegister reg;
+        uint32_t tag { noLocal };
+        uint32_t payload { noLocal };
+        uint32_t address { noLocal };
+    };
+
+    // Value of an operand: tag or payload, from the frame, the constant pool or locals
+    void loadTag(const Operand&);
+    void loadPayload(const Operand&);
     // Tag and payload into the locals
-    void load(VirtualRegister, uint32_t tagLocal, uint32_t payloadLocal);
-    void storeTagAndPayload(VirtualRegister, uint32_t tagLocal, uint32_t payloadLocal);
-    void storeTag(VirtualRegister, int32_t tag, uint32_t payloadLocal);
-    void storeInt32(VirtualRegister reg, uint32_t payloadLocal) { storeTag(reg, int32Tag, payloadLocal); }
-    void storeBoolean(VirtualRegister reg, uint32_t payloadLocal) { storeTag(reg, booleanTag, payloadLocal); }
-    void storeCell(VirtualRegister reg, uint32_t payloadLocal) { storeTag(reg, cellTag, payloadLocal); }
-    void storeDouble(VirtualRegister, uint32_t doubleLocal);
-    void address(VirtualRegister);
-    // Offset of a register from the base
-    uint32_t slot(VirtualRegister) const;
+    void load(const Operand&, uint32_t tagLocal, uint32_t payloadLocal);
+    void storeTagAndPayload(const Operand&, uint32_t tagLocal, uint32_t payloadLocal);
+    void storeTag(const Operand&, int32_t tag, uint32_t payloadLocal);
+    void storeInt32(const Operand& operand, uint32_t payloadLocal) { storeTag(operand, int32Tag, payloadLocal); }
+    void storeBoolean(const Operand& operand, uint32_t payloadLocal) { storeTag(operand, booleanTag, payloadLocal); }
+    void storeCell(const Operand& operand, uint32_t payloadLocal) { storeTag(operand, cellTag, payloadLocal); }
+    void storeDouble(const Operand&, uint32_t doubleLocal);
+    void address(const Operand&);
+    // Offset of a register from the base (0 for an address in a local)
+    uint32_t slot(const Operand&) const;
+    // Pushes the address of a register (the destination a fast path function writes)
+    void registerAddress(VirtualRegister);
     // Pushes whether the tag in the local is a number's (int32 or double)
     void isNumberTag(uint32_t tagLocal);
-    // Pushes a number register as f64, its tag in the local
-    void loadNumber(VirtualRegister, uint32_t tagLocal);
+    // Pushes a number operand as f64, its tag in the local
+    void loadNumber(const Operand&, uint32_t tagLocal);
     // Pushes the JSType of the cell in the local
     void cellType(uint32_t cellLocal);
     // The write barrier of the cell in the local, like the interpreter's
     void writeBarrier(uint32_t cellLocal);
     // The interpreter's barrier on a store of `value` into `base`: when both are cells
-    void writeBarrierOnOperands(VirtualRegister base, VirtualRegister value);
+    void writeBarrierOnOperands(const Operand& base, const Operand& value);
     // The same into a cell known now (the global object)
-    void writeBarrierOnConstant(JSCell*, VirtualRegister value);
+    void writeBarrierOnConstant(JSCell*, const Operand& value);
 
     // Calls a slow path of the interpreter for the instruction; leaves the returned instruction
     // pointer in m_next, and on an exception goes to the instruction's handler (a try around it)
@@ -1356,6 +1424,7 @@ private:
     // (emitTailCallExit)
     template<typename Bytecode> void emitCall(const JSInstructionStream::Ref&);
     void emitInlineHostCall(VirtualRegister callee, unsigned argv, VirtualRegister dst);
+    void emitInlineHostCallFunction();
     void emitCompiledCall(const JSInstructionStream::Ref&, VirtualRegister callee, unsigned argc, unsigned argv, VirtualRegister dst, bool isConstruct);
     void emitCompiledCallFunction();
     void emitTailCallExit(const JSInstructionStream::Ref&);
@@ -1365,10 +1434,27 @@ private:
     void emitKeyedStoreFunction();
     // Functions of the module beside the compiled one: index of each, numbered in the order the
     // sites first need them (the module emits them in that order)
-    enum class Helper : uint8_t { CompiledCall, KeyedLoad, KeyedStore };
+    enum class Helper : uint8_t { CompiledCall, KeyedLoad, KeyedStore, SlowPathCall, GetById, GetByVal, PutByVal, ResolveScope, GetFromScope, PutToScope, InlineHostCall };
     uint32_t helper(Helper);
     void emitHelpers();
     Vector<Helper> m_helpers;
+    // A function of the module that does the fast paths of all instructions of a kind, emitted by
+    // `emit` with the scratch locals of its own: returns m_next (1 when a fast path did it). One
+    // copy for all sites instead of one per site keeps the compiled code small, which large
+    // functions need: their code no longer fit the processor's instruction caches (#630).
+    template<typename Emit> void emitFastPathFunction(std::span<const ValueType> parameters, const Emit&);
+    void addScratchLocals();
+    // (frame, instruction, slow path) -> the slow path's result: the call through the table once
+    void emitSlowPathCallFunction();
+    void emitGetByIdFunction();
+    void emitGetByValFunction();
+    void getByValFastPaths(const Operand& dst, const Operand& base, const Operand& property);
+    void emitPutByValFunction();
+    void putByValFastPaths(const Operand& base, const Operand& property, const Operand& value);
+    void emitResolveScopeFunction();
+    void emitGetFromScopeFunction();
+    void emitPutToScopeFunction();
+    void closureVariableAddress(const Operand& scope, const void* operand);
     // Pushes the address of the cache entry for the base's structure ID in `structureLocal` and
     // the key in `uidLocal`, or returns 0 from the helper function when neither table has a current
     // one (JSC's lookup: the primary table, then the secondary one)
@@ -1391,7 +1477,7 @@ private:
     template<typename Bytecode> void emitArithmetic(const JSInstructionStream::Ref&, uint8_t i64Op, uint8_t f64Op, SlowPath);
     void emitDivide(const JSInstructionStream::Ref&);
     // ToInt32 of a number register inline: pushes whether it converts, the int32 in `resultLocal`
-    void toInt32(VirtualRegister, uint32_t tagLocal, uint32_t resultLocal, uint32_t doubleLocal);
+    void toInt32(const Operand&, uint32_t tagLocal, uint32_t resultLocal, uint32_t doubleLocal);
     template<typename Bytecode> void emitBitOp(const JSInstructionStream::Ref&, uint8_t i32Op, SlowPath);
     template<typename Bytecode> void emitCompare(const JSInstructionStream::Ref&, unsigned block, uint8_t i32Op, uint8_t f64Op, bool negate, SlowPath);
     template<typename Bytecode> void emitEquality(const JSInstructionStream::Ref&, unsigned block, bool strict, bool negate, SlowPath);
@@ -1456,72 +1542,89 @@ private:
 
 // Registers are at negative offsets from the frame down to its locals: addressed from a base below
 // them, so every access is one load or store with the register's offset as its immediate
-void Compiler::address(VirtualRegister)
+void Compiler::address(const Operand& operand)
 {
-    m_body->localGet(m_base);
+    m_body->localGet(operand.address != noLocal ? operand.address : m_base);
 }
 
-uint32_t Compiler::slot(VirtualRegister reg) const
+uint32_t Compiler::slot(const Operand& operand) const
 {
-    int offset = reg.offset() * static_cast<int>(sizeof(Register)) + static_cast<int>(m_baseBias);
+    if (operand.address != noLocal)
+        return 0;
+    int offset = operand.reg.offset() * static_cast<int>(sizeof(Register)) + static_cast<int>(m_baseBias);
     RELEASE_ASSERT(offset >= 0);
     return offset;
 }
 
-void Compiler::loadTag(VirtualRegister reg)
+void Compiler::registerAddress(VirtualRegister reg)
 {
-    if (reg.isConstant()) {
-        m_body->i32Const(static_cast<int32_t>(m_codeBlock->getConstant(reg).tag()));
-        return;
-    }
-    address(reg);
-    m_body->i32Load(slot(reg) + TagOffset);
+    m_body->localGet(m_base);
+    m_body->i32Const(slot(reg));
+    m_body->op(Op::I32Add);
 }
 
-void Compiler::loadPayload(VirtualRegister reg)
+void Compiler::loadTag(const Operand& operand)
 {
-    if (reg.isConstant()) {
-        m_body->i32Const(m_codeBlock->getConstant(reg).payload());
+    if (operand.inLocals()) {
+        m_body->localGet(operand.tag);
         return;
     }
-    address(reg);
-    m_body->i32Load(slot(reg) + PayloadOffset);
+    if (operand.isConstant()) {
+        m_body->i32Const(static_cast<int32_t>(m_codeBlock->getConstant(operand.reg).tag()));
+        return;
+    }
+    address(operand);
+    m_body->i32Load(slot(operand) + TagOffset);
 }
 
-void Compiler::load(VirtualRegister reg, uint32_t tagLocal, uint32_t payloadLocal)
+void Compiler::loadPayload(const Operand& operand)
 {
-    loadTag(reg);
+    if (operand.inLocals()) {
+        m_body->localGet(operand.payload);
+        return;
+    }
+    if (operand.isConstant()) {
+        m_body->i32Const(m_codeBlock->getConstant(operand.reg).payload());
+        return;
+    }
+    address(operand);
+    m_body->i32Load(slot(operand) + PayloadOffset);
+}
+
+void Compiler::load(const Operand& operand, uint32_t tagLocal, uint32_t payloadLocal)
+{
+    loadTag(operand);
     m_body->localSet(tagLocal);
-    loadPayload(reg);
+    loadPayload(operand);
     m_body->localSet(payloadLocal);
 }
 
-void Compiler::storeTagAndPayload(VirtualRegister reg, uint32_t tagLocal, uint32_t payloadLocal)
+void Compiler::storeTagAndPayload(const Operand& operand, uint32_t tagLocal, uint32_t payloadLocal)
 {
-    address(reg);
+    address(operand);
     m_body->localGet(tagLocal);
-    m_body->i32Store(slot(reg) + TagOffset);
-    address(reg);
+    m_body->i32Store(slot(operand) + TagOffset);
+    address(operand);
     m_body->localGet(payloadLocal);
-    m_body->i32Store(slot(reg) + PayloadOffset);
+    m_body->i32Store(slot(operand) + PayloadOffset);
 }
 
-void Compiler::storeTag(VirtualRegister reg, int32_t tag, uint32_t payloadLocal)
+void Compiler::storeTag(const Operand& operand, int32_t tag, uint32_t payloadLocal)
 {
-    address(reg);
+    address(operand);
     m_body->i32Const(tag);
-    m_body->i32Store(slot(reg) + TagOffset);
-    address(reg);
+    m_body->i32Store(slot(operand) + TagOffset);
+    address(operand);
     m_body->localGet(payloadLocal);
-    m_body->i32Store(slot(reg) + PayloadOffset);
+    m_body->i32Store(slot(operand) + PayloadOffset);
 }
 
 // A double in the register's 8 bytes, as the interpreter stores them (not made int32)
-void Compiler::storeDouble(VirtualRegister reg, uint32_t doubleLocal)
+void Compiler::storeDouble(const Operand& operand, uint32_t doubleLocal)
 {
-    address(reg);
+    address(operand);
     m_body->localGet(doubleLocal);
-    m_body->f64Store(slot(reg));
+    m_body->f64Store(slot(operand));
 }
 
 void Compiler::isNumberTag(uint32_t tagLocal)
@@ -1535,17 +1638,29 @@ void Compiler::isNumberTag(uint32_t tagLocal)
     m_body->op(Op::I32Or);
 }
 
-void Compiler::loadNumber(VirtualRegister reg, uint32_t tagLocal)
+void Compiler::loadNumber(const Operand& operand, uint32_t tagLocal)
 {
-    if (reg.isConstant()) {
-        JSValue value = m_codeBlock->getConstant(reg);
+    if (operand.isConstant()) {
+        JSValue value = m_codeBlock->getConstant(operand.reg);
         m_body->f64Const(value.isNumber() ? value.asNumber() : 0);
         return;
     }
-    loadPayload(reg);
+    loadPayload(operand);
     m_body->op(Op::F64ConvertI32S);
-    address(reg);
-    m_body->f64Load(slot(reg));
+    if (operand.inLocals()) {
+        // The bits of a double: the tag is its high word
+        m_body->localGet(operand.tag);
+        m_body->op(Op::I64ExtendI32U);
+        m_body->i64Const(32);
+        m_body->op(Op::I64Shl);
+        m_body->localGet(operand.payload);
+        m_body->op(Op::I64ExtendI32U);
+        m_body->op(Op::I64Or);
+        m_body->op(Op::F64ReinterpretI64);
+    } else {
+        address(operand);
+        m_body->f64Load(slot(operand));
+    }
     m_body->localGet(tagLocal);
     m_body->i32Const(int32Tag);
     m_body->op(Op::I32Eq);
@@ -1572,7 +1687,7 @@ void Compiler::writeBarrier(uint32_t cellLocal)
     m_body->end();
 }
 
-void Compiler::writeBarrierOnOperands(VirtualRegister base, VirtualRegister value)
+void Compiler::writeBarrierOnOperands(const Operand& base, const Operand& value)
 {
     loadTag(value);
     m_body->i32Const(cellTag);
@@ -1588,7 +1703,7 @@ void Compiler::writeBarrierOnOperands(VirtualRegister base, VirtualRegister valu
     m_body->end();
 }
 
-void Compiler::writeBarrierOnConstant(JSCell* cell, VirtualRegister value)
+void Compiler::writeBarrierOnConstant(JSCell* cell, const Operand& value)
 {
     loadTag(value);
     m_body->i32Const(cellTag);
@@ -1605,7 +1720,7 @@ void Compiler::callSlowPath(SlowPath slowPath, const JSInstructionStream::Ref& i
     m_body->localGet(cfr);
     m_body->i32Const(reinterpret_cast<uintptr_t>(instruction.ptr()));
     m_body->i32Const(reinterpret_cast<uintptr_t>(slowPath));
-    m_body->callIndirect(m_slowPathType);
+    m_body->call(helper(Helper::SlowPathCall));
     checkException(instruction);
 }
 
@@ -2135,13 +2250,66 @@ uint32_t Compiler::helper(Helper kind)
 
 void Compiler::emitHelpers()
 {
-    for (auto kind : m_helpers) {
-        switch (kind) {
+    // A function may need others, which come after it
+    for (size_t i = 0; i < m_helpers.size(); ++i) {
+        switch (m_helpers[i]) {
         case Helper::CompiledCall: emitCompiledCallFunction(); break;
         case Helper::KeyedLoad: emitKeyedLoadFunction(); break;
         case Helper::KeyedStore: emitKeyedStoreFunction(); break;
+        case Helper::SlowPathCall: emitSlowPathCallFunction(); break;
+        case Helper::GetById: emitGetByIdFunction(); break;
+        case Helper::GetByVal: emitGetByValFunction(); break;
+        case Helper::PutByVal: emitPutByValFunction(); break;
+        case Helper::ResolveScope: emitResolveScopeFunction(); break;
+        case Helper::GetFromScope: emitGetFromScopeFunction(); break;
+        case Helper::PutToScope: emitPutToScopeFunction(); break;
+        case Helper::InlineHostCall: emitInlineHostCallFunction(); break;
         }
     }
+}
+
+void Compiler::addScratchLocals()
+{
+    m_a = m_body->addLocal(ValueType::I32);
+    m_b = m_body->addLocal(ValueType::I32);
+    m_c = m_body->addLocal(ValueType::I32);
+    m_d = m_body->addLocal(ValueType::I32);
+    m_e = m_body->addLocal(ValueType::I32);
+    m_g = m_body->addLocal(ValueType::I32);
+    m_t1 = m_body->addLocal(ValueType::I32);
+    m_t2 = m_body->addLocal(ValueType::I32);
+    m_next = m_body->addLocal(ValueType::I32);
+    m_wide = m_body->addLocal(ValueType::I64);
+    m_x = m_body->addLocal(ValueType::F64);
+    m_y = m_body->addLocal(ValueType::F64);
+}
+
+template<typename Emit>
+void Compiler::emitFastPathFunction(std::span<const ValueType> parameters, const Emit& emit)
+{
+    const ValueType status[] = { ValueType::I32 };
+    auto* main = m_body;
+    auto locals = std::tuple { m_a, m_b, m_c, m_d, m_e, m_g, m_t1, m_t2, m_next, m_wide, m_x, m_y };
+    m_body = &m_module.addFunction(m_module.addType(parameters, status), parameters.size());
+    addScratchLocals();
+    beginFastPaths();
+    emit();
+    m_body->localGet(m_next);
+    m_body = main;
+    std::tie(m_a, m_b, m_c, m_d, m_e, m_g, m_t1, m_t2, m_next, m_wide, m_x, m_y) = locals;
+}
+
+void Compiler::emitSlowPathCallFunction()
+{
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32 };
+    const ValueType result[] = { ValueType::I64 };
+    auto* main = m_body;
+    m_body = &m_module.addFunction(m_module.addType(parameters, result), std::size(parameters));
+    m_body->localGet(0);
+    m_body->localGet(1);
+    m_body->localGet(2);
+    m_body->callIndirect(m_slowPathType);
+    m_body = main;
 }
 
 void Compiler::stringKeyUid(uint32_t keyLocal, uint32_t uidLocal)
@@ -2354,64 +2522,90 @@ void Compiler::emitKeyedStoreFunction()
     m_body = main;
 }
 
-// Math.imul(a, b) of two numbers inline: sets m_next when it did the call
+// Math.imul(a, b) of two numbers without a call into C++ (emitInlineHostCallFunction): sets m_next
+// when it did the call
 void Compiler::emitInlineHostCall(VirtualRegister callee, unsigned argv, VirtualRegister dst)
 {
-    uintptr_t imul = imulHostFunction(m_codeBlock->globalObject());
     auto argument = [&](int index) {
         return virtualRegisterForArgumentIncludingThis(index, -static_cast<int>(argv));
     };
-    beginFastPaths();
-    m_body->block();
     loadTag(callee);
-    m_body->i32Const(cellTag);
-    m_body->op(Op::I32Ne);
-    m_body->brIf(0);
     loadPayload(callee);
-    m_body->localTee(m_d);
-    m_body->i32Load8U(JSCell::typeInfoTypeOffset());
-    m_body->i32Const(JSFunctionType);
-    m_body->op(Op::I32Ne);
-    m_body->brIf(0);
-    // The executable, also through the function's rare data
-    m_body->localGet(m_d);
-    m_body->i32Load(JSFunction::offsetOfExecutableOrRareData());
-    m_body->localTee(m_e);
-    m_body->i32Const(JSFunction::rareDataTag);
-    m_body->op(Op::I32And);
-    m_body->ifThen();
-    m_body->localGet(m_e);
-    m_body->i32Load(FunctionRareData::offsetOfExecutable() - JSFunction::rareDataTag);
-    m_body->localSet(m_e);
-    m_body->end();
-    m_body->localGet(m_e);
-    m_body->i32Load8U(JSCell::typeInfoTypeOffset());
-    m_body->i32Const(NativeExecutableType);
-    m_body->op(Op::I32Ne);
-    m_body->brIf(0);
-    m_body->localGet(m_e);
-    m_body->i32Load(NativeExecutable::offsetOfNativeFunctionFor(CodeSpecializationKind::CodeForCall));
-    m_body->i32Const(imul);
-    m_body->op(Op::I32Ne);
-    m_body->brIf(0);
-    // Numbers through ToInt32, hashes multiply uint32 values above 2^31
     loadTag(argument(1));
-    m_body->localSet(m_t1);
+    loadPayload(argument(1));
     loadTag(argument(2));
-    m_body->localSet(m_t2);
-    toInt32(argument(1), m_t1, m_a, m_x);
-    toInt32(argument(2), m_t2, m_b, m_y);
-    m_body->op(Op::I32And);
-    m_body->op(Op::I32Eqz);
-    m_body->brIf(0);
-    m_body->localGet(m_a);
-    m_body->localGet(m_b);
-    m_body->op(Op::I32Mul);
-    m_body->localSet(m_c);
+    loadPayload(argument(2));
     if (dst.isValid())
-        storeInt32(dst, m_c);
-    fastPathDone();
-    m_body->end();
+        registerAddress(dst);
+    else
+        m_body->i32Const(0);
+    m_body->call(helper(Helper::InlineHostCall));
+    m_body->localSet(m_next);
+}
+
+// (callee tag and payload, two arguments' tags and payloads, destination address or 0) -> 1 when
+// the callee is Math.imul and it did the call
+void Compiler::emitInlineHostCallFunction()
+{
+    uintptr_t imul = imulHostFunction(m_codeBlock->globalObject());
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32 };
+    constexpr uint32_t calleeTag = 0, calleePayload = 1, dst = 6;
+    const Operand first = Operand::value(2, 3);
+    const Operand second = Operand::value(4, 5);
+    emitFastPathFunction(parameters, [&] {
+        m_body->block();
+        m_body->localGet(calleeTag);
+        m_body->i32Const(cellTag);
+        m_body->op(Op::I32Ne);
+        m_body->brIf(0);
+        m_body->localGet(calleePayload);
+        m_body->localTee(m_d);
+        m_body->i32Load8U(JSCell::typeInfoTypeOffset());
+        m_body->i32Const(JSFunctionType);
+        m_body->op(Op::I32Ne);
+        m_body->brIf(0);
+        // The executable, also through the function's rare data
+        m_body->localGet(m_d);
+        m_body->i32Load(JSFunction::offsetOfExecutableOrRareData());
+        m_body->localTee(m_e);
+        m_body->i32Const(JSFunction::rareDataTag);
+        m_body->op(Op::I32And);
+        m_body->ifThen();
+        m_body->localGet(m_e);
+        m_body->i32Load(FunctionRareData::offsetOfExecutable() - JSFunction::rareDataTag);
+        m_body->localSet(m_e);
+        m_body->end();
+        m_body->localGet(m_e);
+        m_body->i32Load8U(JSCell::typeInfoTypeOffset());
+        m_body->i32Const(NativeExecutableType);
+        m_body->op(Op::I32Ne);
+        m_body->brIf(0);
+        m_body->localGet(m_e);
+        m_body->i32Load(NativeExecutable::offsetOfNativeFunctionFor(CodeSpecializationKind::CodeForCall));
+        m_body->i32Const(imul);
+        m_body->op(Op::I32Ne);
+        m_body->brIf(0);
+        // Numbers through ToInt32, hashes multiply uint32 values above 2^31
+        loadTag(first);
+        m_body->localSet(m_t1);
+        loadTag(second);
+        m_body->localSet(m_t2);
+        toInt32(first, m_t1, m_a, m_x);
+        toInt32(second, m_t2, m_b, m_y);
+        m_body->op(Op::I32And);
+        m_body->op(Op::I32Eqz);
+        m_body->brIf(0);
+        m_body->localGet(m_a);
+        m_body->localGet(m_b);
+        m_body->op(Op::I32Mul);
+        m_body->localSet(m_c);
+        m_body->localGet(dst);
+        m_body->ifThen();
+        storeInt32(Operand::at(dst), m_c);
+        m_body->end();
+        fastPathDone();
+        m_body->end();
+    });
 }
 
 void Compiler::checkException(const JSInstructionStream::Ref& instruction)
@@ -2545,108 +2739,17 @@ template<typename Bytecode>
 void Compiler::emitGetById(const JSInstructionStream::Ref& instruction, SlowPath slowPath)
 {
     auto bytecode = instruction->as<Bytecode>();
-    auto& cache = bytecode.metadata(m_codeBlock).m_modeMetadata;
     PropertyCache* propertyCache = nullptr;
     if constexpr (std::is_same_v<Bytecode, OpGetById>) {
         m_propertyCaches.append(makeUnique<PropertyCache>());
         propertyCache = m_propertyCaches.last().get();
     }
-    auto mode = [&](GetByIdMode value) {
-        m_body->localGet(m_t1);
-        m_body->i32Const(static_cast<int32_t>(value));
-        m_body->op(Op::I32Eq);
-    };
-    auto structureIs = [&](const StructureID* cached) {
-        m_body->localGet(m_d);
-        m_body->i32Load(JSCell::structureIDOffset());
-        m_body->i32Const(reinterpret_cast<uintptr_t>(cached));
-        m_body->i32Load(0);
-        m_body->op(Op::I32Eq);
-    };
-    auto loadCached = [&](const void* field) {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(field));
-        m_body->i32Load(0);
-    };
-    beginFastPaths();
     loadTag(bytecode.m_base);
-    m_body->i32Const(cellTag);
-    m_body->op(Op::I32Eq);
-    m_body->ifThen();
-    {
-        loadPayload(bytecode.m_base);
-        m_body->localSet(m_d);
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.mode));
-        m_body->i32Load8U(0);
-        m_body->localSet(m_t1);
-
-        mode(GetByIdMode::Default);
-        structureIs(&cache.defaultMode.structureID);
-        m_body->op(Op::I32And);
-        m_body->ifThen();
-        loadCached(&cache.defaultMode.cachedOffset);
-        m_body->localSet(m_t2);
-        loadProperty(m_d, m_t2);
-        storeTagAndPayload(bytecode.m_dst, m_a, m_b);
-        fastPathDone();
-        m_body->end();
-
-        mode(GetByIdMode::ProtoLoad);
-        structureIs(&cache.protoLoadMode.structureID);
-        m_body->op(Op::I32And);
-        m_body->ifThen();
-        loadCached(&cache.protoLoadMode.cachedOffset);
-        m_body->localSet(m_t2);
-        loadCached(&cache.protoLoadMode.cachedSlot);
-        m_body->localSet(m_d);
-        loadProperty(m_d, m_t2);
-        storeTagAndPayload(bytecode.m_dst, m_a, m_b);
-        fastPathDone();
-        m_body->end();
-
-        // An array's length: a public length that is an int32
-        mode(GetByIdMode::ArrayLength);
-        m_body->ifThen();
-        m_body->localGet(m_d);
-        m_body->i32Load8U(JSCell::indexingTypeAndMiscOffset());
-        m_body->localTee(m_t2);
-        m_body->i32Const(IsArray);
-        m_body->op(Op::I32And);
-        m_body->i32Const(0);
-        m_body->op(Op::I32Ne);
-        m_body->localGet(m_t2);
-        m_body->i32Const(IndexingShapeMask);
-        m_body->op(Op::I32And);
-        m_body->i32Const(0);
-        m_body->op(Op::I32Ne);
-        m_body->op(Op::I32And);
-        m_body->ifThen();
-        m_body->localGet(m_d);
-        m_body->i32Load(JSObject::butterflyOffset());
-        m_body->i32Const(Butterfly::offsetOfPublicLength());
-        m_body->op(Op::I32Add);
-        m_body->i32Load(0);
-        m_body->localTee(m_b);
-        m_body->i32Const(0);
-        m_body->op(Op::I32GeS);
-        m_body->ifThen();
-        storeInt32(bytecode.m_dst, m_b);
-        fastPathDone();
-        m_body->end();
-        m_body->end();
-        m_body->end();
-
-        mode(GetByIdMode::Unset);
-        structureIs(&cache.unsetMode.structureID);
-        m_body->op(Op::I32And);
-        m_body->ifThen();
-        m_body->i32Const(0);
-        m_body->localSet(m_b);
-        storeTag(bytecode.m_dst, static_cast<int32_t>(JSValue::UndefinedTag), m_b);
-        fastPathDone();
-        m_body->end();
-
-    }
-    m_body->end();
+    loadPayload(bytecode.m_base);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(&bytecode.metadata(m_codeBlock).m_modeMetadata));
+    registerAddress(bytecode.m_dst);
+    m_body->call(helper(Helper::GetById));
+    m_body->localSet(m_next);
     if (propertyCache) {
         m_body->localGet(m_next);
         m_body->op(Op::I32Eqz);
@@ -2660,6 +2763,109 @@ void Compiler::emitGetById(const JSInstructionStream::Ref& instruction, SlowPath
         m_body->end();
     } else
         endFastPaths(slowPath, instruction);
+}
+
+// (base tag and payload, the cache's mode metadata, destination address) -> 1 when done
+void Compiler::emitGetByIdFunction()
+{
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32 };
+    constexpr uint32_t baseTag = 0, basePayload = 1, cache = 2;
+    const Operand dst = Operand::at(3);
+    auto mode = [&](GetByIdMode value) {
+        m_body->localGet(m_t1);
+        m_body->i32Const(static_cast<int32_t>(value));
+        m_body->op(Op::I32Eq);
+    };
+    auto loadCached = [&](ptrdiff_t offset) {
+        m_body->localGet(cache);
+        m_body->i32Load(offset);
+    };
+    auto structureIs = [&](ptrdiff_t offset) {
+        m_body->localGet(m_d);
+        m_body->i32Load(JSCell::structureIDOffset());
+        loadCached(offset);
+        m_body->op(Op::I32Eq);
+    };
+    emitFastPathFunction(parameters, [&] {
+        m_body->localGet(baseTag);
+        m_body->i32Const(cellTag);
+        m_body->op(Op::I32Eq);
+        m_body->ifThen();
+        {
+            m_body->localGet(basePayload);
+            m_body->localSet(m_d);
+            m_body->localGet(cache);
+            m_body->i32Load8U(OBJECT_OFFSETOF(GetByIdModeMetadata, mode));
+            m_body->localSet(m_t1);
+
+            mode(GetByIdMode::Default);
+            structureIs(OBJECT_OFFSETOF(GetByIdModeMetadata, defaultMode.structureID));
+            m_body->op(Op::I32And);
+            m_body->ifThen();
+            loadCached(OBJECT_OFFSETOF(GetByIdModeMetadata, defaultMode.cachedOffset));
+            m_body->localSet(m_t2);
+            loadProperty(m_d, m_t2);
+            storeTagAndPayload(dst, m_a, m_b);
+            fastPathDone();
+            m_body->end();
+
+            mode(GetByIdMode::ProtoLoad);
+            structureIs(OBJECT_OFFSETOF(GetByIdModeMetadata, protoLoadMode.structureID));
+            m_body->op(Op::I32And);
+            m_body->ifThen();
+            loadCached(OBJECT_OFFSETOF(GetByIdModeMetadata, protoLoadMode.cachedOffset));
+            m_body->localSet(m_t2);
+            loadCached(OBJECT_OFFSETOF(GetByIdModeMetadata, protoLoadMode.cachedSlot));
+            m_body->localSet(m_d);
+            loadProperty(m_d, m_t2);
+            storeTagAndPayload(dst, m_a, m_b);
+            fastPathDone();
+            m_body->end();
+
+            // An array's length: a public length that is an int32
+            mode(GetByIdMode::ArrayLength);
+            m_body->ifThen();
+            m_body->localGet(m_d);
+            m_body->i32Load8U(JSCell::indexingTypeAndMiscOffset());
+            m_body->localTee(m_t2);
+            m_body->i32Const(IsArray);
+            m_body->op(Op::I32And);
+            m_body->i32Const(0);
+            m_body->op(Op::I32Ne);
+            m_body->localGet(m_t2);
+            m_body->i32Const(IndexingShapeMask);
+            m_body->op(Op::I32And);
+            m_body->i32Const(0);
+            m_body->op(Op::I32Ne);
+            m_body->op(Op::I32And);
+            m_body->ifThen();
+            m_body->localGet(m_d);
+            m_body->i32Load(JSObject::butterflyOffset());
+            m_body->i32Const(Butterfly::offsetOfPublicLength());
+            m_body->op(Op::I32Add);
+            m_body->i32Load(0);
+            m_body->localTee(m_b);
+            m_body->i32Const(0);
+            m_body->op(Op::I32GeS);
+            m_body->ifThen();
+            storeInt32(dst, m_b);
+            fastPathDone();
+            m_body->end();
+            m_body->end();
+            m_body->end();
+
+            mode(GetByIdMode::Unset);
+            structureIs(OBJECT_OFFSETOF(GetByIdModeMetadata, unsetMode.structureID));
+            m_body->op(Op::I32And);
+            m_body->ifThen();
+            m_body->i32Const(0);
+            m_body->localSet(m_b);
+            storeTag(dst, static_cast<int32_t>(JSValue::UndefinedTag), m_b);
+            fastPathDone();
+            m_body->end();
+        }
+        m_body->end();
+    });
 }
 
 // An own property: same structure, value at the offset
@@ -2768,9 +2974,33 @@ void Compiler::emitPutById(const JSInstructionStream::Ref& instruction)
 
 // Like the interpreter: an int32 index into an int32, double, contiguous or array storage
 // butterfly, within its length and not a hole
+// The fast paths of get_by_val, in a function of the module that all its sites call (they made
+// compiled code 20 to 40 times its bytecode, too much code for the processor's caches: an
+// obfuscated VM's function of 50 KB ran little faster than the interpreter, #630)
 void Compiler::emitGetByVal(const JSInstructionStream::Ref& instruction)
 {
     auto bytecode = instruction->as<OpGetByVal>();
+    loadTag(bytecode.m_base);
+    loadPayload(bytecode.m_base);
+    loadTag(bytecode.m_property);
+    loadPayload(bytecode.m_property);
+    registerAddress(bytecode.m_dst);
+    m_body->call(helper(Helper::GetByVal));
+    m_body->localSet(m_next);
+    endFastPaths(getByValFromCompiledCode, instruction);
+}
+
+// (base tag, base payload, property tag, property payload, destination address) -> 1 when done
+void Compiler::emitGetByValFunction()
+{
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32 };
+    emitFastPathFunction(parameters, [&] {
+        getByValFastPaths(Operand::at(4), Operand::value(0, 1), Operand::value(2, 3));
+    });
+}
+
+void Compiler::getByValFastPaths(const Operand& dst, const Operand& base, const Operand& property)
+{
     auto shapeIs = [&](int32_t shape) {
         m_body->localGet(m_t1);
         m_body->i32Const(shape);
@@ -2806,21 +3036,20 @@ void Compiler::emitGetByVal(const JSInstructionStream::Ref& instruction)
         m_body->localGet(m_c);
         m_body->i32Load(PayloadOffset);
         m_body->localSet(m_e);
-        storeTagAndPayload(bytecode.m_dst, m_a, m_e);
+        storeTagAndPayload(dst, m_a, m_e);
         fastPathDone();
         m_body->end();
     };
-    beginFastPaths();
-    loadTag(bytecode.m_base);
+    loadTag(base);
     m_body->i32Const(cellTag);
     m_body->op(Op::I32Eq);
-    loadTag(bytecode.m_property);
+    loadTag(property);
     m_body->i32Const(int32Tag);
     m_body->op(Op::I32Eq);
     m_body->op(Op::I32And);
     m_body->ifThen();
     {
-        loadPayload(bytecode.m_base);
+        loadPayload(base);
         m_body->localTee(m_d);
         m_body->i32Load8U(JSCell::indexingTypeAndMiscOffset());
         m_body->i32Const(IndexingShapeMask);
@@ -2829,7 +3058,7 @@ void Compiler::emitGetByVal(const JSInstructionStream::Ref& instruction)
         m_body->localGet(m_d);
         m_body->i32Load(JSObject::butterflyOffset());
         m_body->localSet(m_t2);
-        loadPayload(bytecode.m_property);
+        loadPayload(property);
         m_body->localSet(m_b);
 
         // The shape first: without one there may be no butterfly
@@ -2856,7 +3085,7 @@ void Compiler::emitGetByVal(const JSInstructionStream::Ref& instruction)
         m_body->localGet(m_x);
         m_body->op(Op::F64Eq);
         m_body->ifThen();
-        storeDouble(bytecode.m_dst, m_x);
+        storeDouble(dst, m_x);
         fastPathDone();
         m_body->end();
         m_body->end();
@@ -2899,7 +3128,7 @@ void Compiler::emitGetByVal(const JSInstructionStream::Ref& instruction)
                 m_body->op(Op::F64Eq);
                 m_body->select();
                 m_body->localSet(m_x);
-                storeDouble(bytecode.m_dst, m_x);
+                storeDouble(dst, m_x);
                 return;
             }
             m_body->localSet(m_c);
@@ -2911,28 +3140,28 @@ void Compiler::emitGetByVal(const JSInstructionStream::Ref& instruction)
                 m_body->localGet(m_c);
                 m_body->op(Op::F64ConvertI32U);
                 m_body->localSet(m_x);
-                storeDouble(bytecode.m_dst, m_x);
+                storeDouble(dst, m_x);
                 m_body->elseThen();
-                storeInt32(bytecode.m_dst, m_c);
+                storeInt32(dst, m_c);
                 m_body->end();
                 return;
             }
-            storeInt32(bytecode.m_dst, m_c);
+            storeInt32(dst, m_c);
         });
     }
     m_body->end();
 
     // A string key: the VM's megamorphic cache (emitKeyedLoadFunction)
-    loadTag(bytecode.m_base);
+    loadTag(base);
     m_body->i32Const(cellTag);
     m_body->op(Op::I32Eq);
-    loadTag(bytecode.m_property);
+    loadTag(property);
     m_body->i32Const(cellTag);
     m_body->op(Op::I32Eq);
     m_body->op(Op::I32And);
     m_body->ifThen();
-    loadPayload(bytecode.m_base);
-    loadPayload(bytecode.m_property);
+    loadPayload(base);
+    loadPayload(property);
     m_body->call(helper(Helper::KeyedLoad));
     m_body->localTee(m_c);
     m_body->ifThen();
@@ -2942,11 +3171,10 @@ void Compiler::emitGetByVal(const JSInstructionStream::Ref& instruction)
     m_body->localGet(m_c);
     m_body->i32Load(PayloadOffset);
     m_body->localSet(m_b);
-    storeTagAndPayload(bytecode.m_dst, m_a, m_b);
+    storeTagAndPayload(dst, m_a, m_b);
     fastPathDone();
     m_body->end();
     m_body->end();
-    endFastPaths(getByValFromCompiledCode, instruction);
 }
 
 // For an element of a typed array (not Float16, BigInt or resizable) at an index within its
@@ -2998,6 +3226,29 @@ void Compiler::typedArrayElement(uint32_t viewLocal, uint32_t indexLocal, const 
 void Compiler::emitPutByVal(const JSInstructionStream::Ref& instruction)
 {
     auto bytecode = instruction->as<OpPutByVal>();
+    m_body->localGet(cfr);
+    loadTag(bytecode.m_base);
+    loadPayload(bytecode.m_base);
+    loadTag(bytecode.m_property);
+    loadPayload(bytecode.m_property);
+    loadTag(bytecode.m_value);
+    loadPayload(bytecode.m_value);
+    m_body->call(helper(Helper::PutByVal));
+    m_body->localSet(m_next);
+    endFastPaths(putByValFromCompiledCode, instruction);
+}
+
+// (frame, base tag and payload, property tag and payload, value tag and payload) -> 1 when done
+void Compiler::emitPutByValFunction()
+{
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32 };
+    emitFastPathFunction(parameters, [&] {
+        putByValFastPaths(Operand::value(1, 2), Operand::value(3, 4), Operand::value(5, 6));
+    });
+}
+
+void Compiler::putByValFastPaths(const Operand& base, const Operand& property, const Operand& value)
+{
     auto shapeIs = [&](int32_t shape) {
         m_body->localGet(m_t1);
         m_body->i32Const(shape);
@@ -3008,18 +3259,17 @@ void Compiler::emitPutByVal(const JSInstructionStream::Ref& instruction)
         m_body->i32Const(offset);
         m_body->op(Op::I32Add);
     };
-    writeBarrierOnOperands(bytecode.m_base, bytecode.m_value);
-    beginFastPaths();
-    loadTag(bytecode.m_base);
+    writeBarrierOnOperands(base, value);
+    loadTag(base);
     m_body->i32Const(cellTag);
     m_body->op(Op::I32Eq);
-    loadTag(bytecode.m_property);
+    loadTag(property);
     m_body->i32Const(int32Tag);
     m_body->op(Op::I32Eq);
     m_body->op(Op::I32And);
     m_body->ifThen();
     {
-        loadPayload(bytecode.m_base);
+        loadPayload(base);
         m_body->localTee(m_d);
         m_body->i32Load8U(JSCell::indexingTypeAndMiscOffset());
         m_body->localTee(m_t1);
@@ -3030,9 +3280,9 @@ void Compiler::emitPutByVal(const JSInstructionStream::Ref& instruction)
         m_body->i32Const(IndexingShapeMask);
         m_body->op(Op::I32And);
         m_body->localSet(m_t1);
-        loadTag(bytecode.m_value);
+        loadTag(value);
         m_body->localSet(m_a);
-        loadNumber(bytecode.m_value, m_a);
+        loadNumber(value, m_a);
         m_body->localSet(m_x);
         // The value fits the shape
         shapeIs(Int32Shape);
@@ -3058,7 +3308,7 @@ void Compiler::emitPutByVal(const JSInstructionStream::Ref& instruction)
             m_body->localGet(m_d);
             m_body->i32Load(JSObject::butterflyOffset());
             m_body->localSet(m_t2);
-            loadPayload(bytecode.m_property);
+            loadPayload(property);
             m_body->localTee(m_b);
             length(Butterfly::offsetOfPublicLength());
             m_body->i32Load(0);
@@ -3099,7 +3349,7 @@ void Compiler::emitPutByVal(const JSInstructionStream::Ref& instruction)
                 m_body->localGet(m_a);
                 m_body->i32Store(TagOffset);
                 m_body->localGet(m_c);
-                loadPayload(bytecode.m_value);
+                loadPayload(value);
                 m_body->i32Store(PayloadOffset);
                 m_body->end();
                 fastPathDone();
@@ -3115,9 +3365,9 @@ void Compiler::emitPutByVal(const JSInstructionStream::Ref& instruction)
         isNumberTag(m_a);
         m_body->op(Op::I32And);
         m_body->ifThen();
-        toInt32(bytecode.m_value, m_a, m_e, m_x);
+        toInt32(value, m_a, m_e, m_x);
         m_body->localSet(m_c);
-        loadPayload(bytecode.m_property);
+        loadPayload(property);
         m_body->localSet(m_b);
         typedArrayElement(m_d, m_b, [&](JSType type) {
             m_body->localSet(m_t2);
@@ -3168,19 +3418,19 @@ void Compiler::emitPutByVal(const JSInstructionStream::Ref& instruction)
 
     // A string key: the VM's megamorphic cache (emitKeyedStoreFunction), the write barrier again
     // after a transition
-    loadTag(bytecode.m_base);
+    loadTag(base);
     m_body->i32Const(cellTag);
     m_body->op(Op::I32Eq);
-    loadTag(bytecode.m_property);
+    loadTag(property);
     m_body->i32Const(cellTag);
     m_body->op(Op::I32Eq);
     m_body->op(Op::I32And);
     m_body->ifThen();
-    loadPayload(bytecode.m_base);
+    loadPayload(base);
     m_body->localTee(m_d);
-    loadPayload(bytecode.m_property);
-    loadTag(bytecode.m_value);
-    loadPayload(bytecode.m_value);
+    loadPayload(property);
+    loadTag(value);
+    loadPayload(value);
     m_body->call(helper(Helper::KeyedStore));
     m_body->localTee(m_e);
     m_body->ifThen();
@@ -3193,7 +3443,6 @@ void Compiler::emitPutByVal(const JSInstructionStream::Ref& instruction)
     fastPathDone();
     m_body->end();
     m_body->end();
-    endFastPaths(putByValFromCompiledCode, instruction);
 }
 
 // add, sub, mul: two int32 in 64 bit, the result back if it fits (and is no -0 for mul); other
@@ -3310,10 +3559,10 @@ void Compiler::emitDivide(const JSInstructionStream::Ref& instruction)
 // ToInt32 of a number register (its tag in the local): pushes whether it converts inline (an int32,
 // NaN or a double of less than 2^63 in magnitude, which i64.trunc_sat makes exact), the int32 into
 // `resultLocal`, the register as f64 through `doubleLocal`
-void Compiler::toInt32(VirtualRegister reg, uint32_t tagLocal, uint32_t resultLocal, uint32_t doubleLocal)
+void Compiler::toInt32(const Operand& operand, uint32_t tagLocal, uint32_t resultLocal, uint32_t doubleLocal)
 {
-    if (reg.isConstant() && m_codeBlock->getConstant(reg).isNumber()) {
-        double value = m_codeBlock->getConstant(reg).asNumber();
+    if (operand.isConstant() && m_codeBlock->getConstant(operand.reg).isNumber()) {
+        double value = m_codeBlock->getConstant(operand.reg).asNumber();
         m_body->f64Const(value);
         m_body->localSet(doubleLocal);
         m_body->i32Const(JSC::toInt32(value));
@@ -3321,7 +3570,7 @@ void Compiler::toInt32(VirtualRegister reg, uint32_t tagLocal, uint32_t resultLo
         m_body->i32Const(1);
         return;
     }
-    loadNumber(reg, tagLocal);
+    loadNumber(operand, tagLocal);
     m_body->localTee(doubleLocal);
     m_body->prefixedOp(Op::I64TruncSatF64S);
     m_body->op(Op::I32WrapI64);
@@ -3797,82 +4046,98 @@ void Compiler::emitToThis(const JSInstructionStream::Ref& instruction)
 }
 
 // Like the interpreter: by the resolve type in the cache, the constant scope or the scope some
-// levels up; dynamic cases and the ones with var injection checks in the slow path
+// levels up; dynamic cases and the ones with var injection checks in the slow path. The scope
+// operations of an obfuscated VM (its strings and state in global variables) were half its
+// instructions: their fast paths, which dispatch on the type in the metadata at run time, are
+// functions of the module that the sites call with the metadata (#630).
 void Compiler::emitResolveScope(const JSInstructionStream::Ref& instruction)
 {
     auto bytecode = instruction->as<OpResolveScope>();
-    auto& cache = bytecode.metadata(m_codeBlock);
+    loadPayload(bytecode.m_scope);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(&bytecode.metadata(m_codeBlock)));
+    registerAddress(bytecode.m_dst);
+    m_body->call(helper(Helper::ResolveScope));
+    m_body->localSet(m_next);
+    endFastPaths(slow_path_resolve_scope, instruction);
+}
+
+// (scope, metadata, destination address) -> 1 when done
+void Compiler::emitResolveScopeFunction()
+{
+    using Metadata = OpResolveScope::Metadata;
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32 };
+    constexpr uint32_t scope = 0, metadata = 1;
+    const Operand dst = Operand::at(2);
+    auto field = [&](ptrdiff_t offset) {
+        m_body->localGet(metadata);
+        m_body->i32Load(offset);
+    };
     auto resolveType = [&] {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_resolveType));
-        m_body->i32Load(0);
+        field(OBJECT_OFFSETOF(Metadata, m_resolveType));
     };
     auto constantScope = [&] {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_constantScope));
-        m_body->i32Load(0);
+        field(OBJECT_OFFSETOF(Metadata, m_constantScope));
     };
-    beginFastPaths();
-
-    resolveType();
-    m_body->i32Const(GlobalProperty);
-    m_body->op(Op::I32Eq);
-    m_body->ifThen();
-    {
-        // The global lexical bindings did not change since the cache was made
-        constantScope();
-        m_body->localTee(m_a);
-        m_body->i32Load(JSGlobalObject::offsetOfGlobalLexicalBindingEpoch());
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_globalLexicalBindingEpoch));
-        m_body->i32Load(0);
-        m_body->op(Op::I32Eq);
-        m_body->ifThen();
-        storeCell(bytecode.m_dst, m_a);
-        fastPathDone();
-        m_body->end();
-    }
-    m_body->end();
-
-    for (auto type : { GlobalVar, GlobalLexicalVar, ModuleVar }) {
+    emitFastPathFunction(parameters, [&] {
         resolveType();
-        m_body->i32Const(type);
+        m_body->i32Const(GlobalProperty);
         m_body->op(Op::I32Eq);
         m_body->ifThen();
-        constantScope();
-        m_body->localSet(m_a);
-        storeCell(bytecode.m_dst, m_a);
-        fastPathDone();
+        {
+            // The global lexical bindings did not change since the cache was made
+            constantScope();
+            m_body->localTee(m_a);
+            m_body->i32Load(JSGlobalObject::offsetOfGlobalLexicalBindingEpoch());
+            field(OBJECT_OFFSETOF(Metadata, m_globalLexicalBindingEpoch));
+            m_body->op(Op::I32Eq);
+            m_body->ifThen();
+            storeCell(dst, m_a);
+            fastPathDone();
+            m_body->end();
+        }
         m_body->end();
-    }
 
-    resolveType();
-    m_body->i32Const(ClosureVar);
-    m_body->op(Op::I32Eq);
-    m_body->ifThen();
-    {
-        loadPayload(bytecode.m_scope);
-        m_body->localSet(m_a);
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_localScopeDepth));
-        m_body->i32Load(0);
-        m_body->localSet(m_b);
-        m_body->block();
-        m_body->loop();
-        m_body->localGet(m_b);
-        m_body->op(Op::I32Eqz);
-        m_body->brIf(1);
-        m_body->localGet(m_a);
-        m_body->i32Load(JSScope::offsetOfNext());
-        m_body->localSet(m_a);
-        m_body->localGet(m_b);
-        m_body->i32Const(1);
-        m_body->op(Op::I32Sub);
-        m_body->localSet(m_b);
-        m_body->br(0);
+        for (auto type : { GlobalVar, GlobalLexicalVar, ModuleVar }) {
+            resolveType();
+            m_body->i32Const(type);
+            m_body->op(Op::I32Eq);
+            m_body->ifThen();
+            constantScope();
+            m_body->localSet(m_a);
+            storeCell(dst, m_a);
+            fastPathDone();
+            m_body->end();
+        }
+
+        resolveType();
+        m_body->i32Const(ClosureVar);
+        m_body->op(Op::I32Eq);
+        m_body->ifThen();
+        {
+            m_body->localGet(scope);
+            m_body->localSet(m_a);
+            field(OBJECT_OFFSETOF(Metadata, m_localScopeDepth));
+            m_body->localSet(m_b);
+            m_body->block();
+            m_body->loop();
+            m_body->localGet(m_b);
+            m_body->op(Op::I32Eqz);
+            m_body->brIf(1);
+            m_body->localGet(m_a);
+            m_body->i32Load(JSScope::offsetOfNext());
+            m_body->localSet(m_a);
+            m_body->localGet(m_b);
+            m_body->i32Const(1);
+            m_body->op(Op::I32Sub);
+            m_body->localSet(m_b);
+            m_body->br(0);
+            m_body->end();
+            m_body->end();
+            storeCell(dst, m_a);
+            fastPathDone();
+        }
         m_body->end();
-        m_body->end();
-        storeCell(bytecode.m_dst, m_a);
-        fastPathDone();
-    }
-    m_body->end();
-    endFastPaths(slow_path_resolve_scope, instruction);
+    });
 }
 
 // Like the interpreter: a global property behind a structure check, a global variable through its
@@ -3881,89 +4146,131 @@ void Compiler::emitGetFromScope(const JSInstructionStream::Ref& instruction)
 {
     auto bytecode = instruction->as<OpGetFromScope>();
     auto& cache = bytecode.metadata(m_codeBlock);
+    // A variable the bytecode generator resolved in a closure: linking made it a ClosureVar for
+    // good (CodeBlock::finishCreation), at its offset in the environment, which the interpreter
+    // reads without a slow path
+    if (bytecode.m_getPutInfo.resolveType() == ResolvedClosureVar) {
+        closureVariableAddress(bytecode.m_scope, &cache.m_operand);
+        m_body->localTee(m_c);
+        m_body->i32Load(TagOffset);
+        m_body->localSet(m_a);
+        m_body->localGet(m_c);
+        m_body->i32Load(PayloadOffset);
+        m_body->localSet(m_b);
+        storeTagAndPayload(bytecode.m_dst, m_a, m_b);
+        return;
+    }
+    loadPayload(bytecode.m_scope);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(&cache));
+    registerAddress(bytecode.m_dst);
+    m_body->call(helper(Helper::GetFromScope));
+    m_body->localSet(m_next);
+    endFastPaths(llint_slow_path_get_from_scope, instruction);
+}
+
+// Pushes the address of the closure variable at the offset in `operand` (the metadata's) in the
+// scope's environment
+void Compiler::closureVariableAddress(const Operand& scope, const void* operand)
+{
+    loadPayload(scope);
+    m_body->i32Const(JSLexicalEnvironment::offsetOfVariables());
+    m_body->op(Op::I32Add);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(operand));
+    m_body->i32Load(0);
+    m_body->i32Const(3);
+    m_body->op(Op::I32Shl);
+    m_body->op(Op::I32Add);
+}
+
+// (scope, metadata, destination address) -> 1 when done
+void Compiler::emitGetFromScopeFunction()
+{
+    using Metadata = OpGetFromScope::Metadata;
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32 };
+    constexpr uint32_t scope = 0, metadata = 1;
+    const Operand dst = Operand::at(2);
     auto resolveType = [&] {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_getPutInfo));
-        m_body->i32Load(0);
+        m_body->localGet(metadata);
+        m_body->i32Load(OBJECT_OFFSETOF(Metadata, m_getPutInfo));
         m_body->i32Const(GetPutInfo::typeBits);
         m_body->op(Op::I32And);
     };
     auto operand = [&] {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_operand));
-        m_body->i32Load(0);
+        m_body->localGet(metadata);
+        m_body->i32Load(OBJECT_OFFSETOF(Metadata, m_operand));
     };
     auto finish = [&] {
-        storeTagAndPayload(bytecode.m_dst, m_a, m_b);
+        storeTagAndPayload(dst, m_a, m_b);
         fastPathDone();
     };
-    beginFastPaths();
-
-    resolveType();
-    m_body->i32Const(GlobalProperty);
-    m_body->op(Op::I32Eq);
-    m_body->ifThen();
-    {
-        loadPayload(bytecode.m_scope);
-        m_body->localTee(m_d);
-        m_body->i32Load(JSCell::structureIDOffset());
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_structureID));
-        m_body->i32Load(0);
-        m_body->op(Op::I32Eq);
-        m_body->ifThen();
-        operand();
-        m_body->localSet(m_t2);
-        loadProperty(m_d, m_t2);
-        finish();
-        m_body->end();
-    }
-    m_body->end();
-
-    for (auto type : { GlobalVar, GlobalLexicalVar }) {
+    emitFastPathFunction(parameters, [&] {
         resolveType();
-        m_body->i32Const(type);
+        m_body->i32Const(GlobalProperty);
         m_body->op(Op::I32Eq);
         m_body->ifThen();
-        operand();
-        m_body->localTee(m_c);
-        m_body->i32Load(TagOffset);
-        m_body->localSet(m_a);
-        m_body->localGet(m_c);
-        m_body->i32Load(PayloadOffset);
-        m_body->localSet(m_b);
-        if (type == GlobalLexicalVar) {
-            // Not before its initialization (TDZ): the slow path throws
-            m_body->localGet(m_a);
-            m_body->i32Const(emptyTag);
-            m_body->op(Op::I32Ne);
+        {
+            m_body->localGet(scope);
+            m_body->localTee(m_d);
+            m_body->i32Load(JSCell::structureIDOffset());
+            m_body->localGet(metadata);
+            m_body->i32Load(OBJECT_OFFSETOF(Metadata, m_structureID));
+            m_body->op(Op::I32Eq);
             m_body->ifThen();
+            operand();
+            m_body->localSet(m_t2);
+            loadProperty(m_d, m_t2);
             finish();
             m_body->end();
-        } else
-            finish();
+        }
         m_body->end();
-    }
 
-    resolveType();
-    m_body->i32Const(ClosureVar);
-    m_body->op(Op::I32Eq);
-    m_body->ifThen();
-    {
-        loadPayload(bytecode.m_scope);
-        m_body->i32Const(JSLexicalEnvironment::offsetOfVariables());
-        m_body->op(Op::I32Add);
-        operand();
-        m_body->i32Const(3);
-        m_body->op(Op::I32Shl);
-        m_body->op(Op::I32Add);
-        m_body->localTee(m_c);
-        m_body->i32Load(TagOffset);
-        m_body->localSet(m_a);
-        m_body->localGet(m_c);
-        m_body->i32Load(PayloadOffset);
-        m_body->localSet(m_b);
-        finish();
-    }
-    m_body->end();
-    endFastPaths(llint_slow_path_get_from_scope, instruction);
+        for (auto type : { GlobalVar, GlobalLexicalVar }) {
+            resolveType();
+            m_body->i32Const(type);
+            m_body->op(Op::I32Eq);
+            m_body->ifThen();
+            operand();
+            m_body->localTee(m_c);
+            m_body->i32Load(TagOffset);
+            m_body->localSet(m_a);
+            m_body->localGet(m_c);
+            m_body->i32Load(PayloadOffset);
+            m_body->localSet(m_b);
+            if (type == GlobalLexicalVar) {
+                // Not before its initialization (TDZ): the slow path throws
+                m_body->localGet(m_a);
+                m_body->i32Const(emptyTag);
+                m_body->op(Op::I32Ne);
+                m_body->ifThen();
+                finish();
+                m_body->end();
+            } else
+                finish();
+            m_body->end();
+        }
+
+        resolveType();
+        m_body->i32Const(ClosureVar);
+        m_body->op(Op::I32Eq);
+        m_body->ifThen();
+        {
+            m_body->localGet(scope);
+            m_body->i32Const(JSLexicalEnvironment::offsetOfVariables());
+            m_body->op(Op::I32Add);
+            operand();
+            m_body->i32Const(3);
+            m_body->op(Op::I32Shl);
+            m_body->op(Op::I32Add);
+            m_body->localTee(m_c);
+            m_body->i32Load(TagOffset);
+            m_body->localSet(m_a);
+            m_body->localGet(m_c);
+            m_body->i32Load(PayloadOffset);
+            m_body->localSet(m_b);
+            finish();
+        }
+        m_body->end();
+    });
 }
 
 // Like the interpreter: a closure variable (one with a watchpoint set only when that is already
@@ -3972,24 +4279,43 @@ void Compiler::emitGetFromScope(const JSInstructionStream::Ref& instruction)
 void Compiler::emitPutToScope(const JSInstructionStream::Ref& instruction)
 {
     auto bytecode = instruction->as<OpPutToScope>();
-    auto& cache = bytecode.metadata(m_codeBlock);
+    m_body->localGet(cfr);
+    loadTag(bytecode.m_scope);
+    loadPayload(bytecode.m_scope);
+    loadTag(bytecode.m_value);
+    loadPayload(bytecode.m_value);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(&bytecode.metadata(m_codeBlock)));
+    m_body->call(helper(Helper::PutToScope));
+    m_body->localSet(m_next);
+    endFastPaths(llint_slow_path_put_to_scope, instruction);
+}
+
+// (frame, scope tag and payload, value tag and payload, metadata) -> 1 when done
+void Compiler::emitPutToScopeFunction()
+{
+    using Metadata = OpPutToScope::Metadata;
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32 };
+    const Operand scope = Operand::value(1, 2);
+    const Operand value = Operand::value(3, 4);
+    constexpr uint32_t metadata = 5;
     JSGlobalObject* globalObject = m_codeBlock->globalObject();
+    auto field = [&](ptrdiff_t offset) {
+        m_body->localGet(metadata);
+        m_body->i32Load(offset);
+    };
     auto resolveType = [&](ResolveType type) {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_getPutInfo));
-        m_body->i32Load(0);
+        field(OBJECT_OFFSETOF(Metadata, m_getPutInfo));
         m_body->i32Const(GetPutInfo::typeBits);
         m_body->op(Op::I32And);
         m_body->i32Const(type);
         m_body->op(Op::I32Eq);
     };
     auto operand = [&] {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_operand));
-        m_body->i32Load(0);
+        field(OBJECT_OFFSETOF(Metadata, m_operand));
     };
     // No watchpoint set, or an invalidated one (a write fires nothing)
     auto watchpointFree = [&] {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_watchpointSet));
-        m_body->i32Load(0);
+        field(OBJECT_OFFSETOF(Metadata, m_watchpointSet));
         m_body->localTee(m_e);
         m_body->op(Op::I32Eqz);
         m_body->localGet(m_e);
@@ -4001,15 +4327,15 @@ void Compiler::emitPutToScope(const JSInstructionStream::Ref& instruction)
     // The value at the address on the stack
     auto store = [&] {
         m_body->localTee(m_c);
-        loadTag(bytecode.m_value);
+        loadTag(value);
         m_body->i32Store(TagOffset);
         m_body->localGet(m_c);
-        loadPayload(bytecode.m_value);
+        loadPayload(value);
         m_body->i32Store(PayloadOffset);
         fastPathDone();
     };
     auto closureVariable = [&] {
-        loadPayload(bytecode.m_scope);
+        loadPayload(scope);
         m_body->i32Const(JSLexicalEnvironment::offsetOfVariables());
         m_body->op(Op::I32Add);
         operand();
@@ -4017,84 +4343,81 @@ void Compiler::emitPutToScope(const JSInstructionStream::Ref& instruction)
         m_body->op(Op::I32Shl);
         m_body->op(Op::I32Add);
         store();
-        writeBarrierOnOperands(bytecode.m_scope, bytecode.m_value);
+        writeBarrierOnOperands(scope, value);
     };
-    beginFastPaths();
-
-    resolveType(ClosureVar);
-    m_body->ifThen();
-    closureVariable();
-    m_body->end();
-
-    resolveType(ResolvedClosureVar);
-    m_body->ifThen();
-    watchpointFree();
-    m_body->ifThen();
-    closureVariable();
-    m_body->end();
-    m_body->end();
-
-    resolveType(GlobalProperty);
-    m_body->ifThen();
-    {
-        loadPayload(bytecode.m_scope);
-        m_body->localTee(m_d);
-        m_body->i32Load(JSCell::structureIDOffset());
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_structureID));
-        m_body->i32Load(0);
-        m_body->op(Op::I32Eq);
+    emitFastPathFunction(parameters, [&] {
+        resolveType(ClosureVar);
         m_body->ifThen();
-        operand();
-        m_body->localSet(m_t2);
-        propertyAddress(m_d, m_t2);
-        store();
-        writeBarrierOnOperands(bytecode.m_scope, bytecode.m_value);
+        closureVariable();
         m_body->end();
-    }
-    m_body->end();
 
-    // A global var while no var is read only
-    resolveType(GlobalVar);
-    m_body->ifThen();
-    m_body->i32Const(reinterpret_cast<uintptr_t>(&globalObject->varReadOnlyWatchpointSet()));
-    m_body->i32Load8U(WatchpointSet::offsetOfState());
-    m_body->i32Const(IsInvalidated);
-    m_body->op(Op::I32Ne);
-    watchpointFree();
-    m_body->op(Op::I32And);
-    m_body->ifThen();
-    operand();
-    store();
-    writeBarrierOnConstant(globalObject, bytecode.m_value);
-    m_body->end();
-    m_body->end();
+        resolveType(ResolvedClosureVar);
+        m_body->ifThen();
+        watchpointFree();
+        m_body->ifThen();
+        closureVariable();
+        m_body->end();
+        m_body->end();
 
-    // A global let or const: an assignment (not the initialization) only after the initialization
-    resolveType(GlobalLexicalVar);
-    m_body->ifThen();
-    watchpointFree();
-    m_body->ifThen();
-    {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_getPutInfo));
-        m_body->i32Load(0);
-        m_body->i32Const(GetPutInfo::initializationBits);
-        m_body->op(Op::I32And);
-        m_body->i32Const(static_cast<int32_t>(InitializationMode::NotInitialization) << GetPutInfo::initializationShift);
-        m_body->op(Op::I32LtU);
-        operand();
-        m_body->i32Load(TagOffset);
-        m_body->i32Const(emptyTag);
+        resolveType(GlobalProperty);
+        m_body->ifThen();
+        {
+            loadPayload(scope);
+            m_body->localTee(m_d);
+            m_body->i32Load(JSCell::structureIDOffset());
+            field(OBJECT_OFFSETOF(Metadata, m_structureID));
+            m_body->op(Op::I32Eq);
+            m_body->ifThen();
+            operand();
+            m_body->localSet(m_t2);
+            propertyAddress(m_d, m_t2);
+            store();
+            writeBarrierOnOperands(scope, value);
+            m_body->end();
+        }
+        m_body->end();
+
+        // A global var while no var is read only
+        resolveType(GlobalVar);
+        m_body->ifThen();
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&globalObject->varReadOnlyWatchpointSet()));
+        m_body->i32Load8U(WatchpointSet::offsetOfState());
+        m_body->i32Const(IsInvalidated);
         m_body->op(Op::I32Ne);
-        m_body->op(Op::I32Or);
+        watchpointFree();
+        m_body->op(Op::I32And);
         m_body->ifThen();
         operand();
         store();
-        writeBarrierOnConstant(globalObject->globalLexicalEnvironment(), bytecode.m_value);
+        writeBarrierOnConstant(globalObject, value);
         m_body->end();
-    }
-    m_body->end();
-    m_body->end();
-    endFastPaths(llint_slow_path_put_to_scope, instruction);
+        m_body->end();
+
+        // A global let or const: an assignment (not the initialization) only after the initialization
+        resolveType(GlobalLexicalVar);
+        m_body->ifThen();
+        watchpointFree();
+        m_body->ifThen();
+        {
+            field(OBJECT_OFFSETOF(Metadata, m_getPutInfo));
+            m_body->i32Const(GetPutInfo::initializationBits);
+            m_body->op(Op::I32And);
+            m_body->i32Const(static_cast<int32_t>(InitializationMode::NotInitialization) << GetPutInfo::initializationShift);
+            m_body->op(Op::I32LtU);
+            operand();
+            m_body->i32Load(TagOffset);
+            m_body->i32Const(emptyTag);
+            m_body->op(Op::I32Ne);
+            m_body->op(Op::I32Or);
+            m_body->ifThen();
+            operand();
+            store();
+            writeBarrierOnConstant(globalObject->globalLexicalEnvironment(), value);
+            m_body->end();
+        }
+        m_body->end();
+        m_body->end();
+    });
 }
 
 // == null jumps: undefined and null inline, a cell that masquerades as undefined (document.all)
@@ -4845,18 +5168,7 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     m_callType = m_module.addType(callParameters, slowPathResult);
     m_body = &m_module.function(2);
     m_block = m_body->addLocal(ValueType::I32);
-    m_a = m_body->addLocal(ValueType::I32);
-    m_b = m_body->addLocal(ValueType::I32);
-    m_c = m_body->addLocal(ValueType::I32);
-    m_d = m_body->addLocal(ValueType::I32);
-    m_e = m_body->addLocal(ValueType::I32);
-    m_g = m_body->addLocal(ValueType::I32);
-    m_t1 = m_body->addLocal(ValueType::I32);
-    m_t2 = m_body->addLocal(ValueType::I32);
-    m_next = m_body->addLocal(ValueType::I32);
-    m_wide = m_body->addLocal(ValueType::I64);
-    m_x = m_body->addLocal(ValueType::F64);
-    m_y = m_body->addLocal(ValueType::F64);
+    addScratchLocals();
     m_iterations = m_body->addLocal(ValueType::I32);
 
     m_base = m_body->addLocal(ValueType::I32);
@@ -4946,12 +5258,11 @@ void wasmJITTierUp(CodeBlock* codeBlock)
     bool otherVM = table && &table->vm != &codeBlock->vm();
     if (enabled() && !otherVM && !compiledCode().contains(codeBlock)) {
         // Not yet hot enough: the interpreter's counter once more
-        auto& fires = warmUp().add(codeBlock, 0).iterator->value;
-        if (++fires < warmUpFires(codeBlock)) {
+        auto& entry = warmUpOf(codeBlock);
+        if (entry.fires < warmUpFires(codeBlock) && ++entry.fires < warmUpFires(codeBlock)) {
             codeBlock->unlinkedCodeBlock()->llintExecuteCounter().setNewThreshold(Options::thresholdForJITAfterWarmUp(), codeBlock);
             return;
         }
-        warmUp().remove(codeBlock);
         if (!table)
             table = makeUnique<CallTargets>(codeBlock->vm());
         Compiled compiled;
@@ -5019,7 +5330,6 @@ GenericEntry::~GenericEntry()
 
 void wasmJITForget(CodeBlock* codeBlock)
 {
-    warmUp().remove(codeBlock);
     auto it = compiledCode().find(codeBlock);
     if (it == compiledCode().end())
         return;
