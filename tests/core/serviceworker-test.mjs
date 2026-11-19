@@ -233,7 +233,7 @@ self.addEventListener('message', (e) => {
   else if (e.data === 'navigate')
     e.source.navigate('/navigated').then((client) => client.postMessage('client:' + new URL(client.url).pathname), (error) => console.log('RESULT navigate=' + error.name));
   else if (e.data === 'navigate-blocked')
-    e.source.navigate('http://127.0.0.1:1/').then((client) => 'resolved:' + client, (error) => error.name).then((outcome) => fetch('/report?' + outcome));
+    e.source.navigate('http://127.0.0.1:1/').then((client) => 'resolved:' + client, (error) => error.name).then((outcome) => console.log('RESULT navblocked=' + outcome));
   else if (e.data === 'focus-without-click')
     e.source.focus().then(() => e.source.postMessage('focus:focused'), (error) => e.source.postMessage('focus:' + error.name));
   else if (e.data.startsWith('blob:'))
@@ -257,8 +257,6 @@ onconnect = (e) => {
 };
 `;
 
-// What the worker reports with fetch('/report?...')
-const reports = [];
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/shared.js')
     return res.writeHead(200, { 'Content-Type': 'text/javascript' }).end(SHARED);
@@ -273,10 +271,6 @@ const { url: siteURL } = await serve((req, res) => {
       scriptPending = false;
       reply();
     }, 3000);
-  }
-  if (req.url.startsWith('/report?')) {
-    reports.push(req.url.slice('/report?'.length));
-    return res.writeHead(204).end();
   }
   if (req.url === '/sw-pending')
     return res.writeHead(200, { 'Content-Type': 'text/plain' }).end(scriptPending ? 'yes' : 'no');
@@ -631,12 +625,13 @@ check(
 );
 
 // Blocked port: loading ends before a request starts and the window shows the error page (like
-// Chrome), so the worker reports to the server
-await waitFor(() => reports.length > 0, 30000);
+// Chrome). The worker logs the outcome right away: once the window left, its origin has no
+// client, and the engine stops the worker together with a request it would start (see
+// docs/status.md)
 check(
   'WindowClient.navigate to a blocked target fails',
-  reports[0] === 'TypeError',
-  reports.join(),
+  (await result('navblocked', 30000)) === 'TypeError',
+  results.get('navblocked'),
 );
 check(
   'WindowClient.navigate to a blocked target: error page under the address',

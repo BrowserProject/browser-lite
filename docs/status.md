@@ -1269,7 +1269,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
   host page through its clear parts instead of the page content under it; only copied frames
   keep the alpha (#442). A fix would find the alpha in a decoded frame and refuse the overlay;
   no media API tells it.
-- Service workers: Push, Background Sync, Background Fetch.
+- Service workers: Push, Background Sync, Background Fetch. A worker stops as soon as the last
+  client of its origin is gone (WebKit's behaviour without its process termination delay, which
+  Safari has at 10 s and Chrome keeps a worker 30 s idle), also with a request it just started or
+  a message event it extends with `waitUntil()`: a worker that reports after
+  `WindowClient.navigate()` took the window to another origin loses that request
+  (`serviceworker-test.mjs` logs the outcome instead).
 - Network: WebTransport, streams as request body, Storage Buckets,
   WebSocketStream without read backpressure (#120). Fingerprint (#283): no GREASE, OpenSSL's
   extension order and point formats (JA3 and peetprint differ from Safari's), Safari's header order
