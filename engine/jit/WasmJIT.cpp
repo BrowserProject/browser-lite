@@ -4,7 +4,8 @@
 // The function runs the CodeBlock from one of its basic blocks: (cfr, block) -> status, block 0
 // after op_enter or the one after a loop hint, status 0 when it returned (the value in the
 // frame's `this` slot, an op_ret of the C loop takes it from there), 1 on an exception (the C loop
-// unwinds), 2 plus a block to be called again from there (runCompiled). Virtual registers stay in
+// unwinds), 2 plus a block to be called again from there (runCompiled), -1 at a tail call, which
+// the interpreter or the compiled caller makes in its place (finishTailCall). Virtual registers stay in
 // the frame, as tag and payload in linear memory, so a safepoint inside sees every value like in
 // the interpreter.
 #include "config.h"
@@ -372,6 +373,24 @@ thread_local unsigned genericEntries;
 constexpr int32_t reenterStatus = 2;
 constexpr int32_t loopIterationsPerCall = 10000;
 
+// A compiled function returns this at a tail call (op_tail_call, op_tail_call_varargs), the frame's
+// bytecode offset at it. The call is made in place of the function's frame, like the interpreter's
+// tail calls: the interpreter goes on at that instruction, a compiled caller finishes it with
+// finishTailCall. The frame of a strict function that ends in `return f()` is gone before f runs:
+// JSC's Function.prototype.call and apply and Reflect.apply (`return this.@apply(...)`) leave no
+// frame that a stack walk sees (the incumbent realm of postMessage, Error.stack).
+constexpr int32_t tailCallStatus = -1;
+
+// The call of an op_tail_call that a compiled function returned at, for emitCompiledCallFunction,
+// which makes it in WASM for a compiled callee; argc 0 at an op_tail_call_varargs
+struct PendingTailCall {
+    uint32_t calleeTag { 0 };
+    uint32_t callee { 0 };
+    uint32_t argvBytes { 0 };
+    uint32_t argc { 0 };
+};
+thread_local PendingTailCall pendingTailCall;
+
 int32_t runCompiled(uint32_t function, CallFrame* callFrame, uint32_t block)
 {
     ++depth;
@@ -472,6 +491,8 @@ JSValue unwrapForwardingCall(VM& vm, CallFrame* calleeFrame, JSValue callee, uns
     return callee;
 }
 
+int32_t finishTailCall(CallFrame*);
+
 // Calls the callee in its frame below callFrame, where `this` (new.target for a construct) and
 // the arguments already are: a compiled callee directly in that frame, a host function like the
 // interpreter calls it, everything else through JSC's generic call or construct (bound functions
@@ -525,6 +546,8 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
                 auto* previous = vm.cloopStack().currentStackPointer();
                 vm.cloopStack().setCurrentStackPointer(top);
                 auto status = runCompiled(cache->function, calleeFrame, 0);
+                if (status == tailCallStatus)
+                    status = finishTailCall(calleeFrame);
                 vm.cloopStack().setCurrentStackPointer(previous);
                 vm.topCallFrame = callFrame;
                 if (status)
@@ -591,9 +614,9 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
     }
 }
 
-// A call from compiled code (op_call, op_call_ignore_result, op_tail_call, op_construct,
-// op_super_construct), with the signature of a slow path: in the frame the bytecode prepared (argv
-// slots below callFrame). A tail call is an ordinary call here.
+// A call from compiled code (op_call, op_call_ignore_result, op_construct, op_super_construct),
+// with the signature of a slow path: in the frame the bytecode prepared (argv slots below
+// callFrame).
 template<typename Bytecode>
 UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
 {
@@ -649,6 +672,8 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
             auto* previous = vm.cloopStack().currentStackPointer();
             vm.cloopStack().setCurrentStackPointer(top);
             auto status = runCompiled(cache->function, calleeFrame, 0);
+            if (status == tailCallStatus)
+                status = finishTailCall(calleeFrame);
             vm.cloopStack().setCurrentStackPointer(previous);
             vm.topCallFrame = callFrame;
             if (status)
@@ -670,7 +695,114 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
     return encodeResult(pc, callFrame);
 }
 
-// op_call_varargs, op_tail_call_varargs, op_construct_varargs, op_super_construct_varargs
+// The tail call a compiled function returned at (tailCallStatus), for its compiled caller, like the
+// interpreter's op_tail_call and op_tail_call_varargs: the callee and its arguments in a frame
+// below the function's registers, checked to be callable while the function is still on the stack,
+// then the frame moves into the function's place (prepareForTailCall: it ends where the function's
+// arguments ended) and the callee is called from the function's caller, which finds the result in
+// the `this` slot of the function's frame. Runs with the stack pointer below the function's
+// registers; counts as a level of nesting, so a chain of tail calls stays within the depth of
+// compiled code (beyond it the interpreter makes them). Returns 0, or 1 after an exception.
+int32_t finishTailCall(CallFrame* frame)
+{
+    CodeBlock* codeBlock = frame->codeBlock();
+    VM& vm = codeBlock->vm();
+    JSGlobalObject* globalObject = codeBlock->globalObject();
+    CallFrame* caller = frame->callerFrame();
+    const JSInstruction* pc = frame->currentVPC();
+    SlowPathFrameTracer tracer(vm, frame);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    auto* previous = vm.cloopStack().currentStackPointer();
+    auto exception = [&] {
+        vm.cloopStack().setCurrentStackPointer(previous);
+        return 1;
+    };
+
+    CallFrame* calleeFrame;
+    unsigned argumentCount;
+    VirtualRegister calleeRegister;
+    if (pc->is<OpTailCall>()) {
+        auto bytecode = pc->as<OpTailCall>();
+        calleeFrame = frame - bytecode.m_argv;
+        argumentCount = bytecode.m_argc;
+        calleeRegister = bytecode.m_callee;
+    } else {
+        auto bytecode = pc->as<OpTailCallVarargs>();
+        JSValue source = frame->r(bytecode.m_arguments).jsValue();
+        unsigned usedSlots = -bytecode.m_firstFree.offset();
+        unsigned length = sizeFrameForVarargs(globalObject, frame, vm, source, usedSlots, bytecode.m_firstVarArg);
+        if (scope.exception())
+            return exception();
+        calleeFrame = calleeFrameForVarargs(frame, usedSlots, length + 1);
+        vm.cloopStack().setCurrentStackPointer(reinterpret_cast<Register*>(calleeFrame));
+        setupVarargsFrameAndSetThis(globalObject, frame, calleeFrame, frame->r(bytecode.m_thisValue).jsValue(), source, bytecode.m_firstVarArg, length);
+        if (scope.exception())
+            return exception();
+        argumentCount = length + 1;
+        calleeRegister = bytecode.m_callee;
+    }
+    JSValue callee = frame->r(calleeRegister).jsValue();
+    if (!callee.isCell() || callee.asCell()->type() != JSFunctionType) {
+        if (JSC::getCallData(callee).type == CallData::Type::None) {
+            throwException(globalObject, scope, createNotAFunctionError(globalObject, callee));
+            return exception();
+        }
+    }
+
+    unsigned alignment = stackAlignmentRegisters();
+    unsigned frameSize = WTF::roundUpToMultipleOf(alignment, CallFrame::headerSizeInRegisters + std::max<unsigned>(frame->argumentCountIncludingThis(), codeBlock->numParameters()));
+    unsigned calleeFrameSize = WTF::roundUpToMultipleOf(alignment, CallFrame::headerSizeInRegisters + argumentCount);
+    auto* tailFrame = reinterpret_cast<CallFrame*>(reinterpret_cast<Register*>(frame) + frameSize - calleeFrameSize);
+    memmove(&tailFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)), &calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)), argumentCount * sizeof(Register));
+
+    vm.topCallFrame = caller;
+    ++depth;
+    JSValue result = callInFrame<false>(vm, globalObject, scope, caller, tailFrame, callee, argumentCount);
+    --depth;
+    vm.cloopStack().setCurrentStackPointer(previous);
+    vm.topCallFrame = caller;
+    if (scope.exception())
+        return 1;
+    frame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)) = result;
+    return 0;
+}
+
+// finishTailCall for the function of emitCompiledCall, with the signature of a slow path
+UGPRPair tailCallFromCompiledCode(CallFrame* frame, const JSInstruction*)
+{
+    return encodeResult(finishTailCall(frame) ? exceptionInstructions() : returnInstruction(), frame);
+}
+
+// A host function in the frame that a tail call moved into place (emitCompiledCallFunction), called
+// like callFromCompiledCode calls one; the result in the frame's `this` slot
+UGPRPair hostTailCallFromCompiledCode(CallFrame* frame, const JSInstruction*)
+{
+    auto* function = uncheckedDowncast<JSFunction>(frame->jsCallee());
+    VM& vm = function->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    CallFrame* caller = frame->callerFrame();
+    if (!vm.isSafeToRecurseSoft()) [[unlikely]] {
+        // Through JSC's generic call, which throws the RangeError
+        JSValue result = callInFrame<false>(vm, caller->codeBlock()->globalObject(), scope, caller, frame, function, frame->argumentCountIncludingThis());
+        if (scope.exception())
+            return encodeResult(exceptionInstructions(), frame);
+        frame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)) = result;
+        return encodeResult(returnInstruction(), frame);
+    }
+    auto* previous = vm.cloopStack().currentStackPointer();
+    vm.cloopStack().setCurrentStackPointer(reinterpret_cast<Register*>(frame));
+    vm.topCallFrame = frame;
+    auto hostFunction = uncheckedDowncast<NativeExecutable>(function->executable())->function();
+    JSValue result = JSValue::decode(hostFunction(function->realm(), frame));
+    vm.cloopStack().setCurrentStackPointer(previous);
+    vm.topCallFrame = caller;
+    if (scope.exception()) [[unlikely]]
+        return encodeResult(exceptionInstructions(), frame);
+    frame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)) = result;
+    return encodeResult(returnInstruction(), frame);
+}
+
+// op_call_varargs, op_construct_varargs, op_super_construct_varargs
 // (f.apply(this, arguments), new F(...args)): like the interpreter, a frame below the caller's
 // registers in use with the arguments of the array-like (the stack pointer covers it while they
 // load), then the call in that frame
@@ -1214,11 +1346,13 @@ private:
     // or returns 1
     void callSlowPath(SlowPath, const JSInstructionStream::Ref&);
     // The same for a call: compiled callees in WASM (emitCompiledCall), the rest through
-    // callFromCompiledCode or callVarargsFromCompiledCode
+    // callFromCompiledCode or callVarargsFromCompiledCode; a tail call leaves the function
+    // (emitTailCallExit)
     template<typename Bytecode> void emitCall(const JSInstructionStream::Ref&);
     void emitInlineHostCall(VirtualRegister callee, unsigned argv, VirtualRegister dst);
     void emitCompiledCall(const JSInstructionStream::Ref&, VirtualRegister callee, unsigned argc, unsigned argv, VirtualRegister dst, bool isConstruct);
     void emitCompiledCallFunction();
+    void emitTailCallExit(const JSInstructionStream::Ref&);
     static constexpr int32_t compiledCallNotDone = 2;
     // Lookups of the VM's megamorphic cache for string keys (keyed reads and writes)
     void emitKeyedLoadFunction();
@@ -1473,6 +1607,7 @@ template<typename Bytecode>
 void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
 {
     constexpr bool isVarargs = requires(Bytecode bytecode) { bytecode.m_firstVarArg; };
+    constexpr bool isTailCall = std::is_same_v<Bytecode, OpTailCall> || std::is_same_v<Bytecode, OpTailCallVarargs>;
     // Math.imul has two arguments and `this`
     bool inlineHostCall = false;
     if constexpr (std::is_same_v<Bytecode, OpCall> || std::is_same_v<Bytecode, OpCallIgnoreResult> || std::is_same_v<Bytecode, OpTailCall>) {
@@ -1489,7 +1624,9 @@ void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
             m_body->ifThen();
         }
     }
-    if constexpr (isVarargs)
+    if constexpr (isTailCall)
+        emitTailCallExit(instruction);
+    else if constexpr (isVarargs)
         callSlowPath(callVarargsFromCompiledCode<Bytecode>, instruction);
     else {
         constexpr bool isConstruct = std::is_same_v<Bytecode, OpConstruct> || std::is_same_v<Bytecode, OpSuperConstruct>;
@@ -1502,6 +1639,39 @@ void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
     }
     if (inlineHostCall)
         m_body->end();
+}
+
+// Out of the function at a tail call, with the frame's bytecode offset at it: the interpreter or
+// the compiled caller makes the call in place of this frame (tailCallStatus), an op_tail_call's
+// call also in pendingTailCall
+void Compiler::emitTailCallExit(const JSInstructionStream::Ref& instruction)
+{
+    auto store = [&](uint32_t* address) {
+        m_body->i32Const(reinterpret_cast<uintptr_t>(address));
+        m_body->localGet(m_a);
+        m_body->i32Store(0);
+    };
+    if (instruction->is<OpTailCall>()) {
+        auto bytecode = instruction->as<OpTailCall>();
+        loadTag(bytecode.m_callee);
+        m_body->localSet(m_a);
+        store(&pendingTailCall.calleeTag);
+        loadPayload(bytecode.m_callee);
+        m_body->localSet(m_a);
+        store(&pendingTailCall.callee);
+        m_body->i32Const(bytecode.m_argv * sizeof(Register));
+        m_body->localSet(m_a);
+        store(&pendingTailCall.argvBytes);
+        m_body->i32Const(bytecode.m_argc);
+    } else
+        m_body->i32Const(0);
+    m_body->localSet(m_a);
+    store(&pendingTailCall.argc);
+    m_body->localGet(cfr);
+    m_body->i32Const(CallSiteIndex(BytecodeIndex(instruction.offset())).bits());
+    m_body->i32Store(static_cast<uint32_t>(static_cast<int>(CallFrameSlot::argumentCountIncludingThis) * sizeof(Register) + TagOffset));
+    m_body->i32Const(tailCallStatus);
+    m_body->returnValue();
 }
 
 // A call of a compiled callee in the callee table, in WASM: what callFromCompiledCode does for it
@@ -1569,6 +1739,8 @@ void Compiler::emitCompiledCallFunction()
     uint32_t result = m_body->addLocal(ValueType::I32);
     uint32_t temporary = m_body->addLocal(ValueType::I32);
     uint32_t end = m_body->addLocal(ValueType::I32);
+    uint32_t first = m_body->addLocal(ValueType::I32);
+    uint32_t moved = m_body->addLocal(ValueType::I32);
     auto field = [](ptrdiff_t offset) { return static_cast<uint32_t>(offset); };
     auto header = [](CallFrameSlot slot, int32_t part) { return static_cast<uint32_t>(static_cast<int>(slot) * sizeof(Register) + part); };
     auto loadAddress = [&](const void* address) {
@@ -1587,64 +1759,203 @@ void Compiler::emitCompiledCallFunction()
         m_body->end();
     };
 
-    // A JSFunction, its executable (also through its rare data) and the key
-    m_body->localGet(calleeTag);
-    m_body->i32Const(cellTag);
-    m_body->op(Op::I32Ne);
-    notDoneIf();
-    m_body->localGet(callee);
-    m_body->i32Load8U(JSCell::typeInfoTypeOffset());
-    m_body->i32Const(JSFunctionType);
-    m_body->op(Op::I32Ne);
-    notDoneIf();
-    m_body->localGet(callee);
-    m_body->i32Load(JSFunction::offsetOfExecutableOrRareData());
-    m_body->localTee(key);
-    m_body->i32Const(JSFunction::rareDataTag);
-    m_body->op(Op::I32And);
-    m_body->ifThen();
-    m_body->localGet(key);
-    m_body->i32Load(FunctionRareData::offsetOfExecutable() - JSFunction::rareDataTag);
-    m_body->localSet(key);
-    m_body->end();
-    m_body->localGet(key);
-    m_body->localGet(isConstruct);
-    m_body->op(Op::I32Add);
-    m_body->localSet(key);
-    // Its entry (CallTargets::index): from this epoch, a compiled function, enough arguments
-    m_body->localGet(key);
-    m_body->i32Const(4);
-    m_body->op(Op::I32ShrU);
-    m_body->localGet(key);
-    m_body->i32Const(15);
-    m_body->op(Op::I32ShrU);
-    m_body->op(Op::I32Xor);
-    m_body->i32Const(CallTargets::count - 1);
-    m_body->op(Op::I32And);
-    m_body->i32Const(sizeof(CallTarget));
-    m_body->op(Op::I32Mul);
-    m_body->i32Const(reinterpret_cast<uintptr_t>(&table.targets[0]));
-    m_body->op(Op::I32Add);
-    m_body->localTee(entry);
-    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, key)));
-    m_body->localGet(key);
-    m_body->op(Op::I32Ne);
-    notDoneIf();
-    m_body->localGet(entry);
-    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, epoch)));
-    loadAddress(&table.epoch);
-    m_body->op(Op::I32Ne);
-    notDoneIf();
-    m_body->localGet(entry);
-    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, function)));
-    m_body->localTee(function);
-    m_body->op(Op::I32Eqz);
-    notDoneIf();
-    m_body->localGet(entry);
-    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, numParameters)));
-    m_body->localGet(argc);
-    m_body->op(Op::I32GtU);
-    notDoneIf();
+    // The callee: a JSFunction (its executable also through its rare data), its entry in the table
+    // (CallTargets::index) from this epoch with a compiled function and enough arguments, or with
+    // a host function (function 0) when hosts are taken. failIf leaves when the value on the stack
+    // is true.
+    auto lookUp = [&](const auto& failIf, bool hosts) {
+        m_body->localGet(calleeTag);
+        m_body->i32Const(cellTag);
+        m_body->op(Op::I32Ne);
+        failIf();
+        m_body->localGet(callee);
+        m_body->i32Load8U(JSCell::typeInfoTypeOffset());
+        m_body->i32Const(JSFunctionType);
+        m_body->op(Op::I32Ne);
+        failIf();
+        m_body->localGet(callee);
+        m_body->i32Load(JSFunction::offsetOfExecutableOrRareData());
+        m_body->localTee(key);
+        m_body->i32Const(JSFunction::rareDataTag);
+        m_body->op(Op::I32And);
+        m_body->ifThen();
+        m_body->localGet(key);
+        m_body->i32Load(FunctionRareData::offsetOfExecutable() - JSFunction::rareDataTag);
+        m_body->localSet(key);
+        m_body->end();
+        m_body->localGet(key);
+        m_body->localGet(isConstruct);
+        m_body->op(Op::I32Add);
+        m_body->localSet(key);
+        m_body->localGet(key);
+        m_body->i32Const(4);
+        m_body->op(Op::I32ShrU);
+        m_body->localGet(key);
+        m_body->i32Const(15);
+        m_body->op(Op::I32ShrU);
+        m_body->op(Op::I32Xor);
+        m_body->i32Const(CallTargets::count - 1);
+        m_body->op(Op::I32And);
+        m_body->i32Const(sizeof(CallTarget));
+        m_body->op(Op::I32Mul);
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&table.targets[0]));
+        m_body->op(Op::I32Add);
+        m_body->localTee(entry);
+        m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, key)));
+        m_body->localGet(key);
+        m_body->op(Op::I32Ne);
+        failIf();
+        m_body->localGet(entry);
+        m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, epoch)));
+        loadAddress(&table.epoch);
+        m_body->op(Op::I32Ne);
+        failIf();
+        m_body->localGet(entry);
+        m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, function)));
+        m_body->localTee(function);
+        if (hosts)
+            m_body->ifThen();
+        else {
+            m_body->op(Op::I32Eqz);
+            failIf();
+        }
+        m_body->localGet(entry);
+        m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, numParameters)));
+        m_body->localGet(argc);
+        m_body->op(Op::I32GtU);
+        failIf();
+        if (hosts)
+            m_body->end();
+    };
+    // Room in the JS stack below the frame in the local for the callee's locals: their end into top
+    auto roomIf = [&](uint32_t frameLocal, const auto& failIf) {
+        m_body->localGet(frameLocal);
+        m_body->localGet(entry);
+        m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, numCalleeLocals)));
+        m_body->i32Const(3);
+        m_body->op(Op::I32Shl);
+        m_body->op(Op::I32Sub);
+        m_body->localTee(top);
+        loadAddress(cloopStackLimitAddress(vm));
+        m_body->op(Op::I32LtU);
+        failIf();
+    };
+    // The call in the frame: the callee's frame like op_enter and slow_path_enter, runCompiled with
+    // the stack pointer below it, the status into result
+    auto runInFrame = [&] {
+        m_body->localGet(frame);
+        m_body->localGet(cfr);
+        m_body->i32Store(field(CallFrame::callerFrameOffset()));
+        m_body->localGet(frame);
+        m_body->i32Const(0);
+        m_body->i32Store(field(CallFrame::returnPCOffset()));
+        m_body->localGet(frame);
+        m_body->localGet(entry);
+        m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, codeBlock)));
+        m_body->localTee(temporary);
+        m_body->i32Store(header(CallFrameSlot::codeBlock, 0));
+        m_body->localGet(frame);
+        m_body->i32Const(cellTag);
+        m_body->i32Store(header(CallFrameSlot::callee, TagOffset));
+        m_body->localGet(frame);
+        m_body->localGet(callee);
+        m_body->i32Store(header(CallFrameSlot::callee, PayloadOffset));
+        m_body->localGet(frame);
+        m_body->localGet(argc);
+        m_body->i32Store(header(CallFrameSlot::argumentCountIncludingThis, PayloadOffset));
+        writeBarrier(temporary);
+        // Its variables undefined: locals from the callee save space up to numVars, downwards
+        m_body->localGet(frame);
+        m_body->localGet(entry);
+        m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, numVars)));
+        m_body->i32Const(3);
+        m_body->op(Op::I32Shl);
+        m_body->op(Op::I32Sub);
+        m_body->localSet(end);
+        m_body->localGet(frame);
+        m_body->i32Const((CodeBlock::llintBaselineCalleeSaveSpaceAsVirtualRegisters() + 1) * sizeof(Register));
+        m_body->op(Op::I32Sub);
+        m_body->localSet(temporary);
+        m_body->block();
+        m_body->loop();
+        m_body->localGet(temporary);
+        m_body->localGet(end);
+        m_body->op(Op::I32LtU);
+        m_body->brIf(1);
+        m_body->localGet(temporary);
+        m_body->i32Const(static_cast<int32_t>(JSValue::UndefinedTag));
+        m_body->i32Store(TagOffset);
+        m_body->localGet(temporary);
+        m_body->i32Const(0);
+        m_body->i32Store(PayloadOffset);
+        m_body->localGet(temporary);
+        m_body->i32Const(sizeof(Register));
+        m_body->op(Op::I32Sub);
+        m_body->localSet(temporary);
+        m_body->br(0);
+        m_body->end();
+        m_body->end();
+        // Its scope register
+        m_body->localGet(entry);
+        m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, scopeRegister)));
+        m_body->i32Const(3);
+        m_body->op(Op::I32Shl);
+        m_body->localGet(frame);
+        m_body->op(Op::I32Add);
+        m_body->localTee(temporary);
+        m_body->i32Const(cellTag);
+        m_body->i32Store(TagOffset);
+        m_body->localGet(temporary);
+        m_body->localGet(callee);
+        m_body->i32Load(JSCallee::offsetOfScopeChain());
+        m_body->i32Store(PayloadOffset);
+        storeAddress(cloopStackPointerAddress(vm), top);
+        loadAddress(&depth);
+        m_body->i32Const(1);
+        m_body->op(Op::I32Add);
+        m_body->localSet(temporary);
+        storeAddress(&depth, temporary);
+        m_body->localGet(frame);
+        m_body->i32Const(0);
+        m_body->localGet(function);
+        m_body->callIndirect(0);
+        m_body->localSet(result);
+        m_body->block();
+        m_body->loop();
+        m_body->localGet(result);
+        m_body->i32Const(reenterStatus);
+        m_body->op(Op::I32LtS);
+        m_body->brIf(1);
+        m_body->localGet(frame);
+        m_body->localGet(result);
+        m_body->i32Const(reenterStatus);
+        m_body->op(Op::I32Sub);
+        m_body->localGet(function);
+        m_body->callIndirect(0);
+        m_body->localSet(result);
+        m_body->br(0);
+        m_body->end();
+        m_body->end();
+        loadAddress(&depth);
+        m_body->i32Const(1);
+        m_body->op(Op::I32Sub);
+        m_body->localSet(temporary);
+        storeAddress(&depth, temporary);
+    };
+    // The end of the frame's arguments, aligned: where the frame of its tail call ends (the
+    // interpreter's prepareForTailCall), for a frame with argc arguments
+    auto alignedFrameSize = [&] {
+        const int32_t alignment = stackAlignmentRegisters();
+        m_body->localGet(argc);
+        m_body->i32Const(CallFrame::headerSizeInRegisters + alignment - 1);
+        m_body->op(Op::I32Add);
+        m_body->i32Const(-alignment);
+        m_body->op(Op::I32And);
+        m_body->i32Const(3);
+        m_body->op(Op::I32Shl);
+    };
+
+    lookUp(notDoneIf, false);
     // Shallow nesting (roomForCompiledCode without a probe)
     loadAddress(&depth);
     m_body->localTee(temporary);
@@ -1657,25 +1968,96 @@ void Compiler::emitCompiledCallFunction()
     m_body->op(Op::I32GeU);
     m_body->op(Op::I32And);
     notDoneIf();
-    // Room in the JS stack
     m_body->localGet(cfr);
     m_body->localGet(argvBytes);
     m_body->op(Op::I32Sub);
     m_body->localTee(frame);
-    m_body->localGet(entry);
-    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, numCalleeLocals)));
-    m_body->i32Const(3);
-    m_body->op(Op::I32Shl);
-    m_body->op(Op::I32Sub);
-    m_body->localTee(top);
-    loadAddress(cloopStackLimitAddress(vm));
-    m_body->op(Op::I32LtU);
-    notDoneIf();
+    m_body->localSet(first);
+    roomIf(frame, notDoneIf);
 
-    // The call: the caller's bytecode offset, the callee's frame like op_enter and slow_path_enter
+    // The caller's bytecode offset, the call
     m_body->localGet(cfr);
     m_body->localGet(callSite);
     m_body->i32Store(header(CallFrameSlot::argumentCountIncludingThis, TagOffset));
+    loadAddress(cloopStackPointerAddress(vm));
+    m_body->localSet(saved);
+    runInFrame();
+
+    // Its tail calls (tailCallStatus, the call in pendingTailCall): the frame of the call takes the
+    // place of the callee's, like the interpreter's prepareForTailCall, and a compiled callee in the
+    // table is called here again (a chain of them neither nests nor grows the JS stack); else
+    // finishTailCall makes the call
+    m_body->block();
+    m_body->loop();
+    m_body->localGet(result);
+    m_body->i32Const(tailCallStatus);
+    m_body->op(Op::I32Ne);
+    m_body->brIf(1);
+    m_body->block();
+    uint32_t viaFinishTailCall = m_body->depth();
+    auto finishIf = [&] { m_body->brIf(m_body->depth() - viaFinishTailCall); };
+    // The end of the frame, then the call it made: the callee, argv (a frame below the frame's
+    // registers) and argc, argc 0 for a varargs call
+    m_body->localGet(frame);
+    alignedFrameSize();
+    m_body->op(Op::I32Add);
+    m_body->localSet(end);
+    loadAddress(&pendingTailCall.argc);
+    m_body->localTee(argc);
+    m_body->op(Op::I32Eqz);
+    finishIf();
+    loadAddress(&pendingTailCall.calleeTag);
+    m_body->localSet(calleeTag);
+    loadAddress(&pendingTailCall.callee);
+    m_body->localSet(callee);
+    m_body->i32Const(0);
+    m_body->localSet(isConstruct);
+    lookUp(finishIf, true);
+    // The arguments (`this` first) from below the frame's registers to their place, from the last
+    // down: the place is above them
+    m_body->localGet(frame);
+    loadAddress(&pendingTailCall.argvBytes);
+    m_body->op(Op::I32Sub);
+    m_body->localSet(key);
+    m_body->localGet(end);
+    alignedFrameSize();
+    m_body->op(Op::I32Sub);
+    m_body->localTee(moved);
+    m_body->localGet(key);
+    m_body->op(Op::I32LtU);
+    finishIf();
+    roomIf(moved, finishIf);
+    m_body->localGet(moved);
+    m_body->localSet(frame);
+    m_body->localGet(argc);
+    m_body->i32Const(3);
+    m_body->op(Op::I32Shl);
+    m_body->localSet(temporary);
+    m_body->block();
+    m_body->loop();
+    m_body->localGet(temporary);
+    m_body->op(Op::I32Eqz);
+    m_body->brIf(1);
+    m_body->localGet(temporary);
+    m_body->i32Const(4);
+    m_body->op(Op::I32Sub);
+    m_body->localSet(temporary);
+    m_body->localGet(frame);
+    m_body->localGet(temporary);
+    m_body->op(Op::I32Add);
+    m_body->localGet(key);
+    m_body->localGet(temporary);
+    m_body->op(Op::I32Add);
+    m_body->i32Load(header(CallFrameSlot::thisArgument, 0));
+    m_body->i32Store(header(CallFrameSlot::thisArgument, 0));
+    m_body->br(0);
+    m_body->end();
+    m_body->end();
+    m_body->localGet(function);
+    m_body->ifThen();
+    runInFrame();
+    m_body->elseThen();
+    // A host function, like callFromCompiledCode calls one
     m_body->localGet(frame);
     m_body->localGet(cfr);
     m_body->i32Store(field(CallFrame::callerFrameOffset()));
@@ -1683,9 +2065,7 @@ void Compiler::emitCompiledCallFunction()
     m_body->i32Const(0);
     m_body->i32Store(field(CallFrame::returnPCOffset()));
     m_body->localGet(frame);
-    m_body->localGet(entry);
-    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, codeBlock)));
-    m_body->localTee(temporary);
+    m_body->i32Const(0);
     m_body->i32Store(header(CallFrameSlot::codeBlock, 0));
     m_body->localGet(frame);
     m_body->i32Const(cellTag);
@@ -1696,87 +2076,41 @@ void Compiler::emitCompiledCallFunction()
     m_body->localGet(frame);
     m_body->localGet(argc);
     m_body->i32Store(header(CallFrameSlot::argumentCountIncludingThis, PayloadOffset));
-    writeBarrier(temporary);
-    // Its variables undefined: locals from the callee save space up to numVars, downwards
-    m_body->localGet(frame);
-    m_body->localGet(entry);
-    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, numVars)));
-    m_body->i32Const(3);
-    m_body->op(Op::I32Shl);
-    m_body->op(Op::I32Sub);
-    m_body->localSet(end);
-    m_body->localGet(frame);
-    m_body->i32Const((CodeBlock::llintBaselineCalleeSaveSpaceAsVirtualRegisters() + 1) * sizeof(Register));
-    m_body->op(Op::I32Sub);
-    m_body->localSet(temporary);
-    m_body->block();
-    m_body->loop();
-    m_body->localGet(temporary);
-    m_body->localGet(end);
-    m_body->op(Op::I32LtU);
-    m_body->brIf(1);
-    m_body->localGet(temporary);
-    m_body->i32Const(static_cast<int32_t>(JSValue::UndefinedTag));
-    m_body->i32Store(TagOffset);
-    m_body->localGet(temporary);
-    m_body->i32Const(0);
-    m_body->i32Store(PayloadOffset);
-    m_body->localGet(temporary);
-    m_body->i32Const(sizeof(Register));
-    m_body->op(Op::I32Sub);
-    m_body->localSet(temporary);
-    m_body->br(0);
-    m_body->end();
-    m_body->end();
-    // Its scope register
-    m_body->localGet(entry);
-    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, scopeRegister)));
-    m_body->i32Const(3);
-    m_body->op(Op::I32Shl);
-    m_body->localGet(frame);
-    m_body->op(Op::I32Add);
-    m_body->localTee(temporary);
-    m_body->i32Const(cellTag);
-    m_body->i32Store(TagOffset);
-    m_body->localGet(temporary);
-    m_body->localGet(callee);
-    m_body->i32Load(JSCallee::offsetOfScopeChain());
-    m_body->i32Store(PayloadOffset);
-    // runCompiled with the stack pointer below the callee's frame
-    loadAddress(cloopStackPointerAddress(vm));
-    m_body->localSet(saved);
-    storeAddress(cloopStackPointerAddress(vm), top);
-    loadAddress(&depth);
-    m_body->i32Const(1);
-    m_body->op(Op::I32Add);
-    m_body->localSet(temporary);
-    storeAddress(&depth, temporary);
     m_body->localGet(frame);
     m_body->i32Const(0);
-    m_body->localGet(function);
-    m_body->callIndirect(0);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(hostTailCallFromCompiledCode));
+    m_body->callIndirect(m_slowPathType);
+    m_body->op(Op::I32WrapI64);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(exceptionInstructions()));
+    m_body->op(Op::I32Eq);
     m_body->localSet(result);
-    m_body->block();
-    m_body->loop();
-    m_body->localGet(result);
-    m_body->i32Const(reenterStatus);
-    m_body->op(Op::I32LtS);
-    m_body->brIf(1);
+    m_body->end();
+    m_body->br(1);
+    m_body->end();
     m_body->localGet(frame);
-    m_body->localGet(result);
-    m_body->i32Const(reenterStatus);
-    m_body->op(Op::I32Sub);
-    m_body->localGet(function);
-    m_body->callIndirect(0);
+    m_body->i32Const(0);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(tailCallFromCompiledCode));
+    m_body->callIndirect(m_slowPathType);
+    m_body->op(Op::I32WrapI64);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(exceptionInstructions()));
+    m_body->op(Op::I32Eq);
     m_body->localSet(result);
-    m_body->br(0);
     m_body->end();
     m_body->end();
-    loadAddress(&depth);
-    m_body->i32Const(1);
-    m_body->op(Op::I32Sub);
-    m_body->localSet(temporary);
-    storeAddress(&depth, temporary);
+    // The result of the last call where the caller reads it: the `this` slot of the first frame
+    m_body->localGet(frame);
+    m_body->localGet(first);
+    m_body->op(Op::I32Ne);
+    m_body->ifThen();
+    m_body->localGet(first);
+    m_body->localGet(frame);
+    m_body->i32Load(header(CallFrameSlot::thisArgument, TagOffset));
+    m_body->i32Store(header(CallFrameSlot::thisArgument, TagOffset));
+    m_body->localGet(first);
+    m_body->localGet(frame);
+    m_body->i32Load(header(CallFrameSlot::thisArgument, PayloadOffset));
+    m_body->i32Store(header(CallFrameSlot::thisArgument, PayloadOffset));
+    m_body->end();
     storeAddress(cloopStackPointerAddress(vm), saved);
     storeAddress(&vm.topCallFrame, cfr);
     m_body->localGet(result);
@@ -4592,6 +4926,9 @@ const JSInstruction* wasmJITEnter(CallFrame* callFrame, CodeBlock* codeBlock)
     if (!function || !roomForCompiledCode())
         return nullptr;
     auto status = runCompiled(function, callFrame, 0);
+    // A tail call: the interpreter makes it, its callee's frame replaces this one
+    if (status == tailCallStatus)
+        return callFrame->currentVPC();
     return status ? exceptionInstructions() : returnInstruction();
 }
 
@@ -4653,8 +4990,8 @@ void wasmJITLoop(CallFrame* callFrame, CodeBlock* codeBlock, const JSInstruction
         return;
     auto status = runCompiled(it->value.function, callFrame, loop->value);
     // The C loop reloads its PC (an offset from the first instruction) from the frame and steps
-    // over the op_loop_hint
-    auto* next = status ? exceptionInstructions() : returnInstruction();
+    // over the op_loop_hint; at a tail call it makes the call
+    auto* next = status == tailCallStatus ? callFrame->currentVPC() : status ? exceptionInstructions() : returnInstruction();
     uintptr_t offset = reinterpret_cast<uintptr_t>(next) - reinterpret_cast<uintptr_t>(codeBlock->instructions().at(0).ptr()) - pc->size();
     reinterpret_cast<Register*>(callFrame)[static_cast<int>(CallFrameSlot::argumentCountIncludingThis)].tag() = static_cast<int32_t>(offset);
 }

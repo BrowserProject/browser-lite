@@ -87,13 +87,31 @@ never baked into the code (the GC resets inline caches).
   like the interpreter calls them, in the callee's realm (`Math.max`, `charCodeAt`, DataView
   getters), and the general path, which fills the table, moves the frame down for missing arguments
   (like the interpreter's arity fixup) and leaves the rest to JSC's generic call or construct.
-  Varargs (`apply`, spread) get a frame like the interpreter's and then the same call, tail calls
-  are ordinary calls. `Function.prototype.call` (a builtin in JS, which obfuscated code reaches as
+  Varargs (`apply`, spread) get a frame like the interpreter's and then the same call.
+  `Function.prototype.call` (a builtin in JS, which obfuscated code reaches as
   `f["call"](a, b)` and the bytecode's own shortcut for `f.call` does not catch) and bound
   functions without arguments of their own give way to the call they make: `this` and the arguments
   move in the frame and the target is called like any callee, where each of them had made a VM
   entry of the generic call (2 to 3 times faster); they stay out of the table. The interpreter's
   calls of compiled functions (`slow_path_enter`) find them in the same table.
+- **Tail calls** (`return f()` in strict code, `op_tail_call` and `op_tail_call_varargs`): the
+  callee's frame replaces the caller's, like in the interpreter, so no stack walk sees the frame
+  that made the call. JSC's `Function.prototype.call` and `apply` and `Reflect.apply` end in such
+  a call (`this.@apply(...)`): WebCore takes the incumbent realm (the `source` of `postMessage`,
+  #626) from the first frame below the called function, which must not be theirs, and
+  `Error.stack` does not list them either. A bound function's frame does not count for the
+  incumbent realm either (patch 0164, like Chrome and Firefox), where compiled code calls its
+  target directly anyway. The compiled function returns at the tail call with the
+  call's bytecode offset in its frame (status -1, the call itself for the module's call function).
+  The interpreter, when it ran the function, goes on at that instruction and makes the tail call
+  itself; the call function of a compiled caller moves the callee's `this` and arguments to where
+  the frame ended (`prepareForTailCall`) and calls a compiled callee there again, also the next
+  tail calls, so a chain of them neither nests nor grows the JS stack, and a host function there
+  too; everything else (varargs, other callees) goes through `finishTailCall`, which does the same
+  in C++ through the general path. Speed against the ordinary call before: about the same for
+  compiled and host callees from compiled code, a strict recursion of 100 levels 7 to 9 times
+  faster (it nested before), a compiled function with a tail call called from interpreted code
+  about 120 ns slower per call (the interpreter's tail call and entry instead of a call in WASM).
 - **Exceptions**: an instruction within a `try` goes to its handler (known by its bytecode offset),
   whose `op_catch` takes the exception like the interpreter's; otherwise the compiled function
   returns a status and the interpreter unwinds.

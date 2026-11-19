@@ -1,0 +1,177 @@
+<!doctype html>
+<title>Tail calls</title>
+<!-- A strict function's `return f()` replaces its frame (JSC's tail calls), also in compiled code
+     (engine/jit, finishTailCall): JSC's Function.prototype.call and apply and Reflect.apply end in
+     such a call, so no stack walk sees them. postMessage takes its source from the incumbent realm,
+     the realm of the code below it: through the builtins of another frame, also of a removed one,
+     and through bound functions it is still this page's, like in Chrome and Firefox (Cloudflare's
+     Turnstile ignored messages of the wrong source). Every case runs often enough to compile the
+     builtins and the functions (about 2000 calls), the results like in the interpreter. -->
+<body>
+<script>
+const ROUNDS = 6000;
+const failures = [];
+const check = (name, ok) => {
+  if (!ok) failures.push(name);
+};
+
+// Other realms: a frame that stays and one that is removed before the calls
+const nested = document.createElement('iframe');
+document.body.append(nested);
+const nw = nested.contentWindow;
+const removed = document.createElement('iframe');
+document.body.append(removed);
+const rw = removed.contentWindow;
+const realms = {
+  nested: { call: nw.Function.prototype.call, apply: nw.Function.prototype.apply, Reflect: nw.Reflect, bind: nw.Function.prototype.bind },
+  removed: { call: rw.Function.prototype.call, apply: rw.Function.prototype.apply, Reflect: rw.Reflect, bind: rw.Function.prototype.bind },
+};
+removed.remove();
+
+const post = window.postMessage;
+const senders = {};
+for (const [realm, r] of Object.entries(realms)) {
+  const bound = r.bind.call(post, window);
+  senders[`${realm}-call`] = (m) => r.call.call(post, window, m, '*');
+  senders[`${realm}-apply`] = (m) => r.apply.call(post, window, [m, '*']);
+  senders[`${realm}-reflect`] = (m) => r.Reflect.apply(post, window, [m, '*']);
+  senders[`${realm}-bound`] = (m) => bound(m, '*');
+}
+
+// Error.stack: the frames a stack walk sees
+function probe() {
+  return new Error().stack.split('\n').map((line) => line.split('@')[0]);
+}
+function strictTail(f) {
+  'use strict';
+  return f();
+}
+function stackChecks() {
+  for (let i = 0; i < ROUNDS; i++) {
+    const viaCall = realms.nested.call.call(probe);
+    const viaApply = realms.nested.apply.call(probe, null, []);
+    const viaReflect = realms.nested.Reflect.apply(probe, null, []);
+    const viaTail = strictTail(probe);
+    if (i % 1000 !== 0 && i !== ROUNDS - 1) continue;
+    check(`stack call ${i}`, !viaCall.includes('call') && viaCall[1] === 'stackChecks');
+    check(`stack apply ${i}`, !viaApply.includes('apply') && viaApply[1] === 'stackChecks');
+    check(`stack reflect ${i}`, !viaReflect.includes('apply') && viaReflect[1] === 'stackChecks');
+    check(`stack strict tail ${i}`, !viaTail.includes('strictTail') && viaTail[1] === 'stackChecks');
+  }
+}
+
+// What tail calls give: more and fewer arguments than the caller had, missing parameters, spread,
+// exceptions, a callee that is no function, a host function, tail recursion deeper than the
+// machine stack holds
+function sum() {
+  let total = 0;
+  for (let i = 0; i < arguments.length; i++) total += arguments[i];
+  return total;
+}
+function three(a, b, c) {
+  return `${a}-${b}-${c}`;
+}
+function more(a) {
+  'use strict';
+  return sum(a, a, a, a, a, a, a, a);
+}
+function fewer(a, b, c, d, e, f) {
+  'use strict';
+  return sum(a + b + c + d + e + f);
+}
+function missing(a) {
+  'use strict';
+  return three(a);
+}
+function spread(list) {
+  'use strict';
+  return sum(...list);
+}
+function thrower() {
+  throw new RangeError('thrown');
+}
+function throws() {
+  'use strict';
+  return thrower();
+}
+function notCallable(value) {
+  'use strict';
+  return value();
+}
+function host(a, b) {
+  'use strict';
+  return Math.max(a, b);
+}
+// Chains: a tail call to a function that makes another one (spread, a host function, more
+// arguments), each frame in the place of the one before
+function hopSpread(list) {
+  'use strict';
+  return spread(list);
+}
+function hopHost(a, b) {
+  'use strict';
+  return host(a, b);
+}
+function hopMore(a) {
+  'use strict';
+  return more(a);
+}
+function countDown(n) {
+  'use strict';
+  return n === 0 ? 'done' : countDown(n - 1);
+}
+function resultChecks() {
+  for (let i = 0; i < ROUNDS; i++) {
+    if (more(i) !== 8 * i) return check(`more ${i}`, false);
+    if (fewer(i, 1, 1, 1, 1, 1) !== i + 5) return check(`fewer ${i}`, false);
+    if (missing(i) !== `${i}-undefined-undefined`) return check(`missing ${i}`, false);
+    if (spread([i, 1, 2]) !== i + 3) return check(`spread ${i}`, false);
+    if (host(i, 3) !== Math.max(i, 3)) return check(`host ${i}`, false);
+    if (hopSpread([i, 2]) !== i + 2) return check(`chain spread ${i}`, false);
+    if (hopHost(i, 5) !== Math.max(i, 5)) return check(`chain host ${i}`, false);
+    if (hopMore(i) !== 8 * i) return check(`chain more ${i}`, false);
+    let caught = null;
+    try {
+      throws();
+    } catch (error) {
+      caught = error;
+    }
+    if (!(caught instanceof RangeError)) return check(`exception ${i}`, false);
+    caught = null;
+    try {
+      notCallable(i);
+    } catch (error) {
+      caught = error;
+    }
+    if (!(caught instanceof TypeError)) return check(`not callable ${i}`, false);
+  }
+  check('tail recursion', countDown(200000) === 'done');
+}
+
+const counts = {};
+addEventListener('message', (event) => {
+  const { sender, end } = event.data;
+  if (end) {
+    for (const [name, count] of Object.entries(counts))
+      check(`${name} ${count.window}/${count.other}/${count.none}`, count.window === ROUNDS);
+    check('senders', Object.keys(counts).length === Object.keys(senders).length);
+    console.log(`TAILCALLS done=${failures.length ? failures.join(',').replace(/\s/g, '_') : 'ok'}`);
+    return;
+  }
+  const count = (counts[sender] ||= { window: 0, other: 0, none: 0 });
+  if (event.source === window) count.window++;
+  else if (event.source === null) count.none++;
+  else count.other++;
+});
+
+try {
+  stackChecks();
+  resultChecks();
+  for (const [sender, send] of Object.entries(senders)) {
+    for (let i = 0; i < ROUNDS; i++) send({ sender });
+  }
+} catch (error) {
+  check(`error ${error}`, false);
+}
+postMessage({ end: true }, '*');
+</script>

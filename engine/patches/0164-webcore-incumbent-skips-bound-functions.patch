@@ -1,0 +1,25 @@
+diff --git a/Source/WebCore/bindings/js/JSDOMGlobalObject.cpp b/Source/WebCore/bindings/js/JSDOMGlobalObject.cpp
+index a78864c750..bef7f79039 100644
+--- a/Source/WebCore/bindings/js/JSDOMGlobalObject.cpp
++++ b/Source/WebCore/bindings/js/JSDOMGlobalObject.cpp
+@@ -72,6 +72,7 @@
+ #include <JavaScriptCore/ExceptionHelpers.h>
+ #include <JavaScriptCore/GetterSetter.h>
+ #include <JavaScriptCore/GlobalObjectMethodTable.h>
++#include <JavaScriptCore/JSBoundFunction.h>
+ #include <JavaScriptCore/JSCustomGetterFunction.h>
+ #include <JavaScriptCore/JSCustomSetterFunction.h>
+ #include <JavaScriptCore/JSGlobalProxyInlines.h>
+@@ -881,6 +882,12 @@ static JSDOMGlobalObject& callerGlobalObject(JSC::JSGlobalObject& lexicalGlobalO
+                     }
+                 }
+ 
++                // browser-lite: a bound function has no execution context of its own (ECMA-262
++                // [[Call]] of bound function exotic objects), so the frame that called it decides,
++                // like in Chrome and Firefox
++                if (!visitor->codeBlock() && visitor->callee().isCell() && visitor->callee().asCell()->inherits<JSC::JSBoundFunction>())
++                    return IterationStatus::Continue;
++
+                 if (auto* codeBlock = visitor->codeBlock())
+                     m_globalObject = codeBlock->globalObject();
+                 else {

@@ -14,7 +14,11 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   React Router's `<Meta>` keeps the tab title after an in-site navigation (nzz.ch: the title
   stayed empty, the interpreter cached a missing `meta` export for all modules, #431). Compiled
   JS stays compiled through full GCs and in every frame (#455: before, a page's hot code ran
-  interpreted for good after the first full GC, about 6x slower).
+  interpreted for good after the first full GC, about 6x slower). Tail calls of compiled code
+  replace the caller's frame like in the interpreter (#626: before, the frames of
+  `Function.prototype.call`, `apply` and `Reflect.apply` stayed, so `postMessage` through them
+  from another frame's realm came with that frame as `source`, and Cloudflare's Turnstile dropped
+  its `complete` message).
   Above 2 GB of engine memory the JS glue gets unsigned pointers (#465: before, uploads sent other
   memory of the page, the HTTP cache stored wrong bodies, compiled JS failed to install and
   `decodeAudioData` threw).
@@ -784,7 +788,19 @@ browser (Safari keeps Cmd+L, T and W for itself).
    entry passed the limit of 30 s and its termination left the widget at "Verifying...
    Stuck?"; the watchdog now stops a script only once input or a call waited its limit for it
    (#501), and the demo's "Wait" gives it the limit again. (brunhild.challenges.cloudflare.com has only IPv6 addresses, which this
-   machine lacks; plain Chromium fails it too and still shows the checkbox.) LinkedIn Learning
+   machine lacks; plain Chromium fails it too and still shows the checkbox.) Turnstile's token
+   (2026-11-19, #626): compiled `Function.prototype.call` and `apply` kept their frame at their
+   tail call, so the challenge frame's `complete` message came with the wrong `source` and the
+   widget ignored it (0 tokens in 13 runs with the JIT). Now peet.ws's managed, non-interactive
+   and invisible widgets give their token and the interstitials of scrapingcourse.com and
+   nopecha.com go on after a click (local, Chromium host, load 7 to 10: the managed widget's
+   checkbox after 58 s against 85 s without the JIT, the token 4.6 s after the click; the token
+   of the non-interactive one after 84 s, of the invisible one after 166 s; scrapingcourse 8.6 s
+   and nopecha 6.6 s after the click; on a Pixel 9 with the build served through the tunnel the
+   token 4 s and scrapingcourse 7 s after the tap). The time until the checkbox is the speed of
+   JS above. Open: on the Pixel, scrapingcourse's widget logged one "Ignored message from
+   unexpected source" for `interactiveEnd`, after the token, when it had already removed the
+   widget; not seen locally. LinkedIn Learning
    (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain
    Chromium also loads, its main thread 10 % busy then): after the load the engine thread answered
    no eval for up to 10 s, about 35 s in all, then recovered. Its hashing loops now run inline

@@ -62,6 +62,10 @@
 //                  font, text field, button and select as tall as in Chrome with the same font,
 //                  13 px checkbox and radio; check-form-controls.mjs: their borders reach 3:1
 //                  contrast on white
+//   tail-calls.html  a strict function's `return f()` replaces its frame, also in compiled code:
+//                  postMessage's source through Function.prototype.call and apply, Reflect.apply
+//                  and bound functions of another (also a removed) frame is still the page,
+//                  Error.stack without them, results of tail calls; with the JIT and without
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -118,6 +122,13 @@ const CASES = [
     label: 'cookies (below a public suffix)',
     wait: 'COOKIES done',
     env: { RENDER_URL: 'https://user.github.io/test/' },
+  },
+  { name: 'tail-calls', wait: 'TAILCALLS done' },
+  {
+    name: 'tail-calls',
+    label: 'tail-calls (interpreter)',
+    wait: 'TAILCALLS done',
+    env: { BL_JIT: '0' },
   },
   {
     name: 'absent-properties',
