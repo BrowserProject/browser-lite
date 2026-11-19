@@ -129,6 +129,22 @@ function hostWide4(a) {
   return Math.max(x, 1, 2, 3, 4, 5);
 }
 const boundWide = hostWide2.bind(null, 1);
+// The same with a function that then calls a host function: its frame covers the caller's header,
+// which the stack check before that call must not read (the first argument where the caller's code
+// block was)
+function wideBody(o, b, c, d, e, f) {
+  return Math.max(o.v, b, c, d, e, f);
+}
+function jsWide2(a) {
+  'use strict';
+  const x = Math.abs(a);
+  return wideBody({ v: x }, 1, 2, 3, 4, 5);
+}
+function jsWide4(a, b, c) {
+  'use strict';
+  const x = Math.abs(a + b + c);
+  return wideBody({ v: x }, 1, 2, 3, 4, 5);
+}
 function countDown(n) {
   'use strict';
   return n === 0 ? 'done' : countDown(n - 1);
@@ -147,6 +163,9 @@ function resultChecks() {
     if (hostWide4(i) !== Math.max(i, 5)) return check(`wider host ${i}`, false);
     if (boundWide() !== 3) return check(`bound host ${i}`, false);
     if ([i].map(hostWide2)[0] !== Math.max(i, 3)) return check(`callback host ${i}`, false);
+    if (jsWide2(i) !== Math.max(i, 5)) return check(`wide js host ${i}`, false);
+    if (jsWide4(i, 0, 0) !== Math.max(i, 5)) return check(`wider js host ${i}`, false);
+    if ([i].map(jsWide2)[0] !== Math.max(i, 5)) return check(`callback js host ${i}`, false);
     let caught = null;
     try {
       throws();

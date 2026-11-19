@@ -637,6 +637,9 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
         auto* cache = cachedCallTarget(vm, function->executable(), isConstruct);
         auto* top = cache ? reinterpret_cast<Register*>(calleeFrame) - cache->numCalleeLocals : nullptr;
         bool cached = cache && argumentCount >= cache->numParameters && top >= vm.cloopStackLimit();
+        // The stack check reads the top frame: the one a call or slow path left there may be a
+        // frame a tail call replaced, whose header the new frame covers
+        vm.topCallFrame = callFrame;
         if (cached && !cache->function && vm.isSafeToRecurseSoft()) {
             // A host function, like the interpreter calls it
             callFrame->setCurrentVPC(pc);
