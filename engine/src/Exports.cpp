@@ -403,7 +403,7 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
 {
     // With the compositor thread: through it to the scrolling thread (ScrollingWasm.h),
     // so the page scrolls even when its JS blocks the engine thread
-    if (Compositor::isRunning()) {
+    if (Compositor::composites()) {
         // Pinch zoom the engine thread does not show yet: the wheel moves the
         // scaled view, the page only gets the event to observe (like a passive
         // wheel listener)
@@ -426,7 +426,7 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
 EMSCRIPTEN_KEEPALIVE void bl_touch_scroll(int id, double x, double y, double deltaX, double deltaY, int phase)
 {
     auto event = WebView::makeTouchScrollEvent(x, y, deltaX, deltaY, phase);
-    if (Compositor::isRunning()) {
+    if (Compositor::composites()) {
         // Pinch zoom the engine thread does not show yet: the finger moves the scaled view
         RefPtr scene = CompositorScene::forView(id);
         if ((phase == 1 || phase == 2) && scene && scene->scrollPinch({ static_cast<float>(deltaX), static_cast<float>(deltaY) }))
@@ -544,7 +544,7 @@ EMSCRIPTEN_KEEPALIVE void bl_pinch(int id, int phase, double factor, double x, d
 {
     auto pinchPhase = static_cast<PinchPhase>(std::clamp(phase, 0, 3));
     WebCore::FloatPoint focus(x, y);
-    if (RefPtr scene = Compositor::isRunning() ? CompositorScene::forView(id) : nullptr) {
+    if (RefPtr scene = Compositor::composites() ? CompositorScene::forView(id) : nullptr) {
         scene->pinch(pinchPhase, factor, focus);
         return;
     }

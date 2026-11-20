@@ -157,7 +157,10 @@ export type ServiceWorkerOption =
 export interface EngineOptions {
   /** Paint with WebGL 2 (default true). */
   gpu?: boolean;
-  /** Composited layers (default true with gpu). */
+  /**
+   * The compositor thread (default true): it shows the frames, with gpu also composited layers.
+   * false leaves the frames to the engine thread.
+   */
   compositing?: boolean;
   /** Garbage collection at safe points; 'debug' logs it. */
   safepointGC?: boolean | 'debug';

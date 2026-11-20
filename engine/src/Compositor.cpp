@@ -26,19 +26,20 @@ namespace BrowserLite::Compositor {
 static pthread_t s_thread;
 static std::atomic<bool> s_running { false };
 static std::atomic<bool> s_lost { false };
-// 0 = still starting, 1 = running, 2 = no WebGL 2
+// Has its WebGL 2 context (without it the thread only shows the frames painted on the CPU)
+static std::atomic<bool> s_gpu { false };
+// 0 = still starting, 1 = running, 2 = no thread
 static std::atomic<int> s_startState { 0 };
 
 static void* compositorMain(void*)
 {
     s_thread = pthread_self();
-    // Own WebGL 2 context in this worker (GpuRaster.cpp, per thread)
+    // Own WebGL 2 context in this worker (GpuRaster.cpp, per thread); none with gpu: false
     auto* context = Gpu::context();
     if (context)
         WebCore::setSkiaGrContextForWasm(context);
-    s_startState.store(context ? 1 : 2, std::memory_order_release);
-    if (!context)
-        return nullptr;
+    s_gpu.store(!!context, std::memory_order_release);
+    s_startState.store(1, std::memory_order_release);
     // Back to the JS event loop, the thread lives on; work arrives through the
     // proxy queue (like the engine thread in main.cpp)
     emscripten_exit_with_live_runtime();
@@ -51,7 +52,7 @@ static bool s_begun;
 void begin()
 {
     auto& config = engineConfig();
-    if (s_begun || !config.compositing || !config.gpu)
+    if (s_begun || !config.compositing)
         return;
     s_begun = true;
     if (pthread_create(&s_starting, nullptr, compositorMain, nullptr)) {
@@ -63,25 +64,33 @@ void begin()
 bool start()
 {
     auto& config = engineConfig();
-    if (!config.compositing || !config.gpu)
+    if (!config.compositing)
         return false;
     begin();
     // The worker starts on the main thread of the browser, that can take a while
     for (int i = 0; i < 5000 && !s_startState.load(std::memory_order_acquire); ++i)
         usleep(1000);
     if (s_startState.load(std::memory_order_acquire) != 1) {
-        debugLog("Compositor: no WebGL 2, frames come from the engine worker");
+        debugLog("Compositor: no thread, frames come from the engine worker");
         return false;
     }
     pthread_detach(s_starting);
     s_running.store(true, std::memory_order_release);
-    debugLog("Compositor: own thread with WebGL 2");
+    if (s_gpu.load(std::memory_order_acquire))
+        debugLog("Compositor: own thread with WebGL 2");
+    else
+        debugLog("Compositor: own thread without WebGL 2, shows the frames painted on the CPU");
     return true;
 }
 
 bool isRunning()
 {
     return s_running.load(std::memory_order_acquire);
+}
+
+bool composites()
+{
+    return isRunning() && s_gpu.load(std::memory_order_acquire) && !isLost();
 }
 
 // Also while it starts (its WebGL context is made then, GpuRaster.cpp)
@@ -119,7 +128,7 @@ void dispatch(Function<void()>&& function)
 
 void printMemoryReport()
 {
-    if (!isRunning())
+    if (!isRunning() || !s_gpu.load(std::memory_order_acquire))
         return;
     dispatch([] {
         int resources = 0;

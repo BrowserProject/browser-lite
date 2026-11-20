@@ -126,7 +126,7 @@ static bool compositeTiles(CompositorScene& scene, SkiaCompositingLayer& rootLay
 // The next rendering update waits for this answer: not behind the page's work (Engine.h)
 static void answerEngine(CompositorScene& scene)
 {
-    runUrgentOnEngineThread([scene = Ref { scene }] {
+    runFrameAnswerOnEngineThread([scene = Ref { scene }] {
         --scene->answersOnTheWay;
         if (auto* view = WebView::fromID(scene->viewId))
             view->didComposite();
@@ -546,7 +546,7 @@ static bool ensureSharedDisplay()
 
 bool LayerTreeHostWasm::isAvailable()
 {
-    return Compositor::isRunning() && !Compositor::isLost() && ensureSharedDisplay();
+    return Compositor::composites() && ensureSharedDisplay();
 }
 
 void LayerTreeHostWasm::ensureDisplay()

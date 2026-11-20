@@ -227,10 +227,17 @@ static Deque<Function<void()>*>& priorityTasks()
 // thread sees them while they still sit in its mailbox: it takes them in between two of its tasks
 // and returns from long work (RunLoop functions, patch 0072) for them.
 static std::atomic<int> s_urgentWaiting;
+// Of those the compositor's answers (runFrameAnswerOnEngineThread)
+static std::atomic<int> s_frameAnswersWaiting;
 
 bool urgentWorkWaiting()
 {
     return s_urgentWaiting.load(std::memory_order_relaxed) > 0 && isEngineThread();
+}
+
+bool userWorkWaiting()
+{
+    return s_urgentWaiting.load(std::memory_order_relaxed) > s_frameAnswersWaiting.load(std::memory_order_relaxed) && isEngineThread();
 }
 
 // From Emscripten (system/lib/pthread/thread_mailbox.c): runs the work other
@@ -348,6 +355,19 @@ void runUrgentOnEngineThread(Function<void()>&& function)
         s_urgentWaiting.fetch_sub(1, std::memory_order_relaxed);
         function();
     });
+    requestSafepoint();
+}
+
+void runFrameAnswerOnEngineThread(Function<void()>&& function)
+{
+    s_frameAnswersWaiting.fetch_add(1, std::memory_order_relaxed);
+    s_urgentWaiting.fetch_add(1, std::memory_order_relaxed);
+    proxyToEngineThread(runPriorityFunction, [function = WTF::move(function)] {
+        s_urgentWaiting.fetch_sub(1, std::memory_order_relaxed);
+        s_frameAnswersWaiting.fetch_sub(1, std::memory_order_relaxed);
+        function();
+    });
+    // A hidden view's script pauses for it, not a frame's (atSafepoint)
     requestSafepoint();
 }
 
@@ -663,7 +683,7 @@ static void atSafepoint(JSC::VM& vm)
 {
     if (!urgentWorkWaiting() || s_nestedEventLoops || &vm != WebCore::commonVMOrNull())
         return;
-    if (!pauseHiddenScriptForUser())
+    if (!pauseHiddenScriptForUser() && userWorkWaiting())
         pauseFrameScriptForUser();
 }
 

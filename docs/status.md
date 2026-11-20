@@ -884,7 +884,24 @@ browser (Safari keeps Cmd+L, T and W for itself).
    already pauses for input of the user (#589, #628), and the debug `eval` of the measurement is
    no input. Open: compiled code itself (values in WASM locals, the slow paths of arithmetic
    and conditions out of line, phase 4 of [jit.md](jit.md)); the criterion of 30 s on this
-   machine and of 5 s for the longest step is not reached. Open: on the Pixel, scrapingcourse's widget logged one "Ignored message from
+   machine and of 5 s for the longest step is not reached. Hosts without WebGL 2 (headless
+   Firefox, a blocklisted GPU; 2026-11-20, #635): the engine worker owned the view canvases there,
+   and every read of one by the browser while page script ran (a screenshot, the measurement's
+   `drawImage`) held Firefox's main thread 10 s and came back white; meanwhile no web worker of a
+   new engine thread could start, so the engine thread waited too. Now the compositor thread shows
+   those frames. Its answers for them first paused the challenge at every animation frame (#589),
+   and the challenge never sent its `pat` request; they no longer pause frame scripts. peet.ws's
+   managed widget, headless Firefox without WebGL 2, 3 runs interleaved with headed Firefox with
+   WebGL 2 (load 2 to 10): checkbox after 37.8 to 50.5 s (WebGL 2: 51.1 to 55.0 s), the token 2.6
+   to 3.6 s after one click in 3 of 3 runs (before: the first click never gave one, the token came
+   after 4 to 5 clicks at 160 to 212 s), the longest RunLoop step 7.5 to 12.4 s (WebGL 2: 12.0
+   to 23.3 s, before: 39.4 to 43.5 s), from `rch` to `fo` 0.8 to 1.0 s; screenshots every 5 s
+   show the page in all taken after it loaded (before 5 to 6 of 7 to 9 white). scrapingcourse.com's
+   interstitial passes in 4 of 4 runs, after one click in 2 (before: not in 6 clicks); in the
+   other 2 the first click is followed by a reload with 403 and a new challenge, as on the
+   WebGL 2 host in 1 of 2 runs, not followed further. Open: frequent pauses (#589) broke
+   that challenge for good (30 pauses in 70 s); input that keeps coming as often might do the same.
+   Open: on the Pixel, scrapingcourse's widget logged one "Ignored message from
    unexpected source" for `interactiveEnd`, after the token, when it had already removed the
    widget; not seen locally. LinkedIn Learning
    (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain

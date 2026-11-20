@@ -745,7 +745,7 @@ void MediaPlayerPrivateWasm::framesWanted()
 // Overlay only where the compositor punches the holes (#232); once refused, frames stay copied
 void MediaPlayerPrivateWasm::startOverlay()
 {
-    if (m_overlay || m_overlayRefused || !engineConfig().videoOverlay || !Compositor::isRunning())
+    if (m_overlay || m_overlayRefused || !engineConfig().videoOverlay || !Compositor::composites())
         return;
     m_overlay = CoordinatedPlatformLayerBufferProxy::create();
     m_hostCopiesFrames = false;

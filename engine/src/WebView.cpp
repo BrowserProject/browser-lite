@@ -497,6 +497,8 @@ void WebView::createSurface()
 {
     m_pendingScrolls.clear();
     m_pixelSize = IntSize { static_cast<int>(std::ceil(m_size.width() * m_deviceScaleFactor)), static_cast<int>(std::ceil(m_size.height() * m_deviceScaleFactor)) };
+    if (m_frameInFlight)
+        m_pixelsInFlight = std::exchange(m_pixels, { });
     m_pixels.fill(0, static_cast<size_t>(m_pixelSize.width()) * m_pixelSize.height() * 4);
     auto info = SkImageInfo::Make(m_pixelSize.width(), m_pixelSize.height(), kRGBA_8888_SkColorType, kPremul_SkAlphaType);
     m_surface = SkSurfaces::WrapPixels(info, m_pixels.mutableSpan().data(), m_pixelSize.width() * 4);
@@ -1071,8 +1073,9 @@ void WebView::presentIfNeeded()
         return;
     }
     // With the compositor thread its worker also shows the frames without
-    // layers; until it is done the pixel buffer must not change
-    if (Compositor::isRunning()) {
+    // layers; until it is done the pixel buffer must not change. Without a
+    // canvas there (the engine tests in node) the host gets the pixels.
+    if (Compositor::isRunning() && m_canvasAttached) {
         m_frameInFlight = true;
         presentFrameOnCompositor(m_id, pixels(), m_pixelSize.width(), m_pixelSize.height(), dirty.x(), dirty.y(), dirty.width(), dirty.height());
         return;

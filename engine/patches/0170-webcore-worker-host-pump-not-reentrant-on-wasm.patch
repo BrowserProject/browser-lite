@@ -1,0 +1,54 @@
+diff --git a/Source/WebCore/workers/WorkerRunLoop.cpp b/Source/WebCore/workers/WorkerRunLoop.cpp
+index c386866925..148bb2ebc7 100644
+--- a/Source/WebCore/workers/WorkerRunLoop.cpp
++++ b/Source/WebCore/workers/WorkerRunLoop.cpp
+@@ -60,6 +60,7 @@
+ #include <emscripten/eventloop.h>
+ #include <emscripten/proxying.h>
+ #include <wtf/RunLoop.h>
++#include <wtf/SetForScope.h>
+ #endif
+ 
+ #if PLATFORM(COCOA)
+@@ -332,11 +333,22 @@ void WorkerDedicatedRunLoop::hostTimerFired(void*)
+     }
+ }
+ 
++// A thread that waits for a lock (WTF::Thread::yield, a futex) runs the calls queued for it in
++// Emscripten, a pump among them: inside a pump that one only asks for another pump afterwards
++static thread_local bool inHostPump;
++static thread_local bool hostPumpAgain;
++
+ void WorkerDedicatedRunLoop::pumpFromHost()
+ {
++    if (inHostPump) {
++        hostPumpAgain = true;
++        return;
++    }
+     m_hostPumpScheduled = false;
++    hostPumpAgain = false;
+     bool terminated = false;
+     {
++        SetForScope pumping { inHostPump, true };
+         RefPtr context = m_hostLoop->context;
+         CheckedPtr script = context->script();
+         if (script)
+@@ -365,10 +377,15 @@ void WorkerDedicatedRunLoop::pumpFromHost()
+         if (script && !terminated)
+             script->releaseHeapAccess();
+     }
+-    if (terminated)
++    if (terminated) {
+         stopFromHost();
+-    else
+-        armHostTimer();
++        return;
++    }
++    if (std::exchange(hostPumpAgain, false)) {
++        m_hostPumpScheduled = false;
++        scheduleHostPump();
++    }
++    armHostTimer();
+ }
+ 
+ void WorkerDedicatedRunLoop::armHostTimer()

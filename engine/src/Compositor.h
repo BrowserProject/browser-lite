@@ -17,11 +17,17 @@ namespace BrowserLite::Compositor {
 // Early in the engine start (engine thread): creates the thread, which makes its WebGL 2 context
 // (190 ms with SwiftShader) while the start goes on.
 void begin();
-// Later in the start: waits for that context. false = no compositor thread (then the engine
-// worker shows the frames).
+// Later in the start: waits for that context. false = no compositor thread (only with
+// compositing: false; then the engine worker shows the frames).
 bool start();
 
+// The thread runs and its worker shows the frames of the views. Also without WebGL 2 (gpu: false,
+// none in the browser): then it shows only the frames the engine thread painted on the CPU, so a
+// read of a view canvas by the browser (screenshot, drawImage on the main thread) never waits for
+// page script on the engine thread.
 bool isRunning();
+// It also composites layers: running with its WebGL 2 context, not lost
+bool composites();
 bool isCompositorThread();
 pthread_t thread();
 

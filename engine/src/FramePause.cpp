@@ -239,7 +239,7 @@ bool pauseFrameScriptForUser()
     runNestedEventLoop([&] {
         if (!document->frame())
             return true;
-        if (urgentWorkWaiting())
+        if (userWorkWaiting())
             return false;
         if (hasHeldInput(agent.viewIds) || !userJustWorked())
             return true;

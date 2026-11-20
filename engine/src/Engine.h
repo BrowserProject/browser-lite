@@ -28,8 +28,15 @@ void runOnEngineThread(Function<void()>&&);
 // work like a call from the host, and the engine thread also takes it in between two of its
 // tasks and returns from a long RunLoop pass for it.
 void runUrgentOnEngineThread(Function<void()>&&);
+// The compositor's answer that the next rendering update waits for (a frame composited or
+// presented): urgent like input, but no work of the user, so the script of a cross-site frame
+// does not pause for it (FramePause.h). Without layers every animation frame of a page brings
+// one, and the script of Cloudflare's challenge paused for each of them.
+void runFrameAnswerOnEngineThread(Function<void()>&&);
 // On the engine thread: urgent work waits, also while still in the mailbox
 bool urgentWorkWaiting();
+// On the engine thread: urgent work other than the compositor's answers waits
+bool userWorkWaiting();
 // On the engine thread: runs `function` before the other waiting tasks of the engine thread,
 // right after the current one.
 void runNextOnEngineThread(Function<void()>&&);

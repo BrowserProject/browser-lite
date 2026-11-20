@@ -247,13 +247,21 @@ script, in order with later input of its view. A frame removed or left meanwhile
 when it goes on. The pause lasts until no input came for 1 s, but while input keeps coming at most
 500 ms: then the script runs a slice of 100 ms (a safepoint request ends it) before it may pause
 again, so the frame's script, its loads and with them the page's load event go on while the user
-taps or types through a load (#628).
+taps or types through a load (#628). The compositor's answer for a frame is urgent too, but no
+work of the user: no frame's script pauses for it (#635; without layers every animation frame
+brings one, and Cloudflare's challenge paused at each and never finished).
 
 ## Frames
 
 Each view canvas is transferred to the presenter worker (`transferControlToOffscreen`, #83).
 Skia rasterizes with Ganesh on WebGL 2 in the engine worker (#86); without WebGL 2 or with
 `engine.gpu: false` on the CPU, where patch 0020 lets Skia use SSE4.1 mapped to WASM SIMD.
+The presenter is the compositor thread, also without WebGL 2: it then has no GL context and
+puts the frames the engine thread painted on the CPU into the view canvas (#635). So the browser
+reads a view canvas (a screenshot, a tab preview, `drawImage` on the main thread) without waiting
+for page script on the engine thread; Firefox held its main thread up to 10 s on such a read of
+a canvas whose worker was busy and then got an empty canvas. Only `engine.compositing: false`
+leaves the canvases to the engine worker.
 Compositing follows WPE's Coordinated Graphics (`LayerTreeHostWasm.cpp`): the engine thread
 updates and flushes, tile threads paint, the compositor thread composites, so `transform` and
 `opacity` animations and scrolling continue while JS blocks (#94, #98). Blur and shadow run on
@@ -883,7 +891,9 @@ access), `engine/src/wasm/WasmBridge.cpp` passes values, and `engine/js/wasm-hos
 modules in the engine worker. `engine/js/wasm-rewrite.js` rewrites every module so each memory is
 a bounds-checked region of engine memory and `memory.buffer` is a normal ArrayBuffer (#57, #58,
 #152); this costs about 10 to 15 % speed. Limits: 2 GB per memory, 64 nested JS/Wasm calls, no
-shared memory or JSPI (#153). Page workers run from the host event loop so finalizers fire (#183).
+shared memory or JSPI (#153). Page workers run from the host event loop so finalizers fire (#183); a worker thread that waits
+for a lock runs the calls queued for it, so a pump of its run loop that arrives then only asks
+for another one after the running pump (patch 0170, #635).
 Like the engine's polyfills (`callEngineFunction`), the API is evaluated with the source URL
 `browser-lite`, whose functions print as `[native code]` like JSC's builtins (patch 0169, #634).
 

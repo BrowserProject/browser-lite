@@ -113,7 +113,11 @@ public:
     // Rendering update (rAF, style, layout) and repaint what is damaged.
     // Returns true if pixels changed.
     bool renderFrame(WebCore::IntRect* dirtyOut = nullptr);
-    void framePresented() { m_frameInFlight = false; }
+    void framePresented()
+    {
+        m_frameInFlight = false;
+        m_pixelsInFlight = { };
+    }
     bool frameInFlight() const { return m_frameInFlight; }
     void presentIfNeeded();
     // The host gave the canvas to the engine worker: show everything again
@@ -340,6 +344,9 @@ private:
     RefPtr<WebCore::Page> m_page;
 
     Vector<uint8_t> m_pixels;
+    // The buffer of the frame being shown when a new size replaced m_pixels: the presenting
+    // thread still reads it
+    Vector<uint8_t> m_pixelsInFlight;
     sk_sp<SkSurface> m_surface;
     // GPU rasterization (GpuRaster.h): target surface as texture, otherwise m_surface on the CPU
     sk_sp<SkSurface> m_gpuSurface;

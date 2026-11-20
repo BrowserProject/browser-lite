@@ -138,7 +138,7 @@ void presentFrameOnCompositor(int viewId, const uint8_t* pixels, int width, int 
     Compositor::dispatch([=] {
         bl_js_present_in_worker(viewId, pixels, width, height, dirtyX, dirtyY, dirtyWidth, dirtyHeight);
         // The next frame waits for this answer
-        runUrgentOnEngineThread([viewId] {
+        runFrameAnswerOnEngineThread([viewId] {
             if (auto* view = WebView::fromID(viewId)) {
                 view->framePresented();
                 view->presentIfNeeded();

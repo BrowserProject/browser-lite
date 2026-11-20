@@ -125,7 +125,8 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
     frame waits for the script, patch 0152 keeps its rendering steps for later; while input keeps coming it runs a
     slice of 100 ms after every 500 ms paused)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
-    (layers on the compositor thread, the stall log's state; a closing view's host waits for its
+    (layers on the compositor thread, which also shows the frames painted on the CPU without
+    WebGL 2, the stall log's state; a closing view's host waits for its
     tile jobs and detaches every layer that names it; a view hidden for 10 s releases its tiles), `DamageTiles.cpp` (a frame with a
     small change goes only into the host canvases of the tiles it touches, none on a video hole
     of `VideoOverlay.cpp`, or of a region fitted to damage that keeps coming there; emptied with a
@@ -196,8 +197,9 @@ The full list is `abi.json`; the rules behind it:
   engine thread runs the other views meanwhile (#258). For `resubmit` (a form sent again) only
   the navigation waits; `dialog-cancel` withdraws it (#369).
 - Frames: the host transfers each view canvas with `transferControlToOffscreen` to
-  `Module.blPresenterWorker()` (`{ blCanvas, viewId }`); the engine paints into it, on the
-  compositor thread when compositing with WebGL 2. Without that canvas, `onEngineFrame` hands
+  `Module.blPresenterWorker()` (`{ blCanvas, viewId }`); the engine shows its frames there on the
+  compositor thread, also without WebGL 2 (only `compositing: false` leaves them to the engine
+  thread, #635). Without that canvas, `onEngineFrame` hands
   RGBA pixels in shared memory and `bl_frame_presented` returns the buffer. `onEngineNeedsFrame`
   asks for `bl_frame` at the next animation frame.
 - Audio: `onEngineAudio('start', id, ring, capacityFrames, channels, sampleRate)` hands a ring
