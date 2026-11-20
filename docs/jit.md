@@ -49,7 +49,11 @@ never baked into the code (the GC resets inline caches).
   `CodeBlock` thrown away), so it keeps firing after a compile instead of stopping for good, which
   had kept all of them interpreted. The JIT counts the firings by `UnlinkedCodeBlock` too: a full
   GC throws away a `CodeBlock` that is not compiled and older than 5 s, and counted by
-  `CodeBlock` a large function started its warm-up again at every GC (#630).
+  `CodeBlock` a large function started its warm-up again at every GC (#630). The entries age in
+  fires of the thread instead of a clock read at every fire (the host's `performance.now()`, about
+  0.7 us in a worker of Chromium), and once the map has 4096 entries those not fired among the
+  last 65536 fires go; the next pruning waits until the map doubled. Before, while more than 4096
+  functions had fired within a minute, every fire went through the whole map (#632).
 - **Code size**: the fast paths of property access by id, element and keyed access, scope
   access (`resolve_scope`, `get_from_scope`, `put_to_scope`) and `Math.imul` are functions of the
   module that every site of the instruction calls with its operands' values, the metadata and
@@ -240,6 +244,24 @@ peet.ws's managed widget: the checkbox 31.5 to 44.2 s after the widget's start (
 instead of 40.8 to 72.5 s (median 54.0), the longest step 9.7 to 17.3 s instead of 12.9 to
 26.3 s (5 interleaved runs each). 20min.ch compiles 241 functions into 1.4 MB in its first
 50 s instead of 181 into 1.1 MB.
+
+Route changes of news sites (#632, 2026-11-20, local, phone emulation, the renderer at a fourth of
+the CPU by cgroup; a build that counted the interpreter's calls and the counter's fires by
+function): on Back on 20min.ch nine of ten interpreted calls went to functions whose warm-up was
+not done. React's largest functions (3.7 KB of bytecode, 512 fires or about 17000 calls) had fired
+507 times after 4 minutes on the page, others of 0.5 to 2.6 KB stood at 40 to 95 % of theirs. The
+235 compiles during the 45 s of Back took 0.5 s, and 134 compiled `CodeBlock`s went away. A warm-up
+4 times shorter for large functions (a fourth of the size term, at most 128 fires) scored 0.71 in
+Speedometer 3.1 (NewsSite-Next and TodoMVC-React-Redux, 5 iterations) against 1.00 with the
+current one and 0.97 without the JIT, and did not make the article tap faster; without the JIT
+the article was in the DOM 24 to 26 s after the tap, with it 30 to 34 s (2 runs each). Such code
+runs once per route: compiled sooner it does not pay back yet, the speed of compiled code itself
+is the open part (phase 4). The warm-up's own bookkeeping read the host's clock at every fire:
+during blick.ch's tap (2 profiles each) the tier-up took 3.3 to 3.6 % of the engine thread and
+the clock 2.5 to 2.8 %, now 2.1 to 2.2 % (the compiles) and 1.5 to 1.7 % (`CodeBlock` creation,
+the GC's age checks of `CodeBlock`s, regexps, events). `tests/jsc/jit-warmup-map.js` runs the
+same calls with 8000 warm functions 5.7 to 6.8 times as long as with 500 before, 1.0 to 1.1 times
+now (without the JIT 1.0).
 
 Hashing code (#424, `tests/jsc/jit-hash.js`, jsc shell): bit operations on uint32 values 5x and
 typed array elements 3x the time of their int32 twins before, now 1.8x and 1.3x; `Math.imul` 6.5x

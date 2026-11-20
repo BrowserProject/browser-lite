@@ -701,6 +701,29 @@ browser (Safari keeps Cmd+L, T and W for itself).
    the engine's clock counted whole milliseconds; now below 1 % (#631, the host's RegExp 2.5 to
    3.5 %). The tap is not measurably faster for it, locally or at a fourth of the CPU (runs vary
    by 25 %); what is left of it is the page's JS, style and layout as above.
+   Route changes at a fourth of the CPU (2026-11-20, local, phone emulation, the renderer slowed
+   by cgroup; the report: 20min.ch's Back on a Moto G71 in a step of 12.7 s): when 20min.ch has the
+   list in its cache, React renders the whole route in the `popstate` listener (its eager
+   transitions for `popstate`, one task in Chrome too, nothing to yield between), 21.5 to 22.2 s
+   in 3 of 9 runs; the other runs suspend and render in slices, the list after 30 to 37 s without
+   a step over 2 s. That task is 80 % JS without the JIT (the interpreter's dispatch 51 %, the
+   runtime 17.5 % with `JSON.parse` 5.7 %, slow paths 10 %), style, layout and computed style
+   reads 12 %. blick.ch: the article in the DOM 13 to 41 s after the tap with steps of 5 to 8 s,
+   the home page 32 to 66 s after Back with steps of 12 to 16 s (5 runs), JS parse and bytecode
+   12 % of the tap; nzz.ch: the article after 42 to 59 s (the URL after 25 to 31 s), Back 18 to
+   19 s with a step of 12 s (2 runs); the WASM memory peaked at 443 to 542 MB on blick and nzz, 765
+   to 904 MB on 20min. Most of this code runs interpreted because it runs once per route: nine of
+   ten interpreted calls on 20min.ch's Back went to functions still warming up, and a shorter
+   warm-up made React code slower ([jit.md](jit.md#measured)); the warm-up's bookkeeping itself
+   read the host's clock at every fire and went through its whole map at every fire with more than
+   4096 warm functions (#632). Keeping unused bytecode (`JSC_useUnlinkedCodeBlockJettisoning=false`)
+   changed blick.ch within the noise (3 runs each). The criterion (blick.ch's article within 6 s of
+   the tap and its home page within 6 s of Back, 20min.ch's Back under 8 s with no step over 3 s,
+   nzz.ch's article within 7 s on the Moto, the longest step halved at a fourth of the CPU) is not
+   reached: it needs faster compiled code (phase 4 of [jit.md](jit.md)). A touch's move does not
+   update `:hover` (its hit test is read-only); its press and release do, each an invalidation of
+   the `:hover` and `:active` rules below the top of the chain (`Document::updateHoverActiveState`,
+   edition.cnn.com: 2.3 s over 170 touches), open.
    blick.ch (Next.js, 2026-11-09, local, 412x860; the report: 25 to 30 s on a Moto G71): after a
    tap the new route is in the DOM after 7 to 8 s (plain Chromium 3.5 to 6.6 s with the data
    fetch), Back shows the home page after 5 to 7.5 s (Chromium under 1 s). The page got few frames

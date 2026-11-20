@@ -48,6 +48,8 @@ run jit "$here/jit.js"
 [ "$jit" = 0 ] || run jit-calls "$here/jit-calls.js"
 # Keyed reads and writes: many keys and shapes at one site through the megamorphic cache
 [ "$jit" = 0 ] || run jit-keyed "$here/jit-keyed.js"
+# The warm-up's bookkeeping with thousands of warm functions costs no more than with a few hundred
+[ "$jit" = 0 ] || run jit-warmup-map "$here/jit-warmup-map.js"
 done
 
 # The module of a large VM-like function: wasm bytes per byte of bytecode (fast paths of scope

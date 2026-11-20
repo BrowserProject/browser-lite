@@ -62,7 +62,6 @@
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
-#include <wtf/MonotonicTime.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace JSC::LLInt {
@@ -242,31 +241,44 @@ unsigned warmUpFires(CodeBlock* codeBlock)
 // frame's, a builtin's in another realm) compiles at its first fire.
 struct WarmUp {
     unsigned fires { 0 };
-    MonotonicTime lastFire;
+    // The thread's fire count at this entry's last fire
+    uint64_t lastFire { 0 };
 };
-HashMap<UnlinkedCodeBlock*, WarmUp>& warmUp()
+
+// The entries of this thread's VM. Their age counts in fires of the whole thread, not in time: a
+// clock read at every fire (the host's performance.now(), about 0.7 us in a worker of Chromium)
+// took over 1 % of the engine thread while a news site rendered a route (#632).
+struct WarmUps {
+    HashMap<UnlinkedCodeBlock*, WarmUp> map;
+    uint64_t fires { 0 };
+    size_t pruneAt { 0 };
+};
+WarmUps& warmUps()
 {
-    static thread_local HashMap<UnlinkedCodeBlock*, WarmUp> map;
-    return map;
+    static thread_local WarmUps state;
+    return state;
 }
 
-// The code of entries not fired for this long went away or cooled down: dropped once the map is
-// large, so a page that runs for hours does not keep one for every function it ever warmed up (an
-// UnlinkedCodeBlock that went away may leave its entry to another one at its address, which then
-// compiles sooner)
-constexpr unsigned warmUpEntriesBeforePruning = 4096;
-constexpr Seconds warmUpEntryLifetime = 60_s;
+// The code of entries not fired among the thread's last fires went away or cooled down: dropped
+// once the map is large, so a page that runs for hours does not keep one for every function it
+// ever warmed up (an UnlinkedCodeBlock that went away may leave its entry to another one at its
+// address, which then compiles sooner). A busy page fires a few thousand times per second, a
+// React render's largest functions about twice per second. The next pruning waits until the map
+// doubled, so a map of live entries is not scanned at every fire.
+constexpr size_t warmUpEntriesBeforePruning = 4096;
+constexpr uint64_t warmUpEntryLifetime = 65536;
 
 WarmUp& warmUpOf(CodeBlock* codeBlock)
 {
-    auto& map = warmUp();
-    auto now = MonotonicTime::now();
-    if (map.size() >= warmUpEntriesBeforePruning) {
-        map.removeIf([&](auto& entry) {
+    auto& state = warmUps();
+    uint64_t now = ++state.fires;
+    if (state.map.size() >= std::max(state.pruneAt, warmUpEntriesBeforePruning)) {
+        state.map.removeIf([&](auto& entry) {
             return now - entry.value.lastFire > warmUpEntryLifetime;
         });
+        state.pruneAt = state.map.size() * 2;
     }
-    auto& entry = map.add(codeBlock->unlinkedCodeBlock(), WarmUp { }).iterator->value;
+    auto& entry = state.map.add(codeBlock->unlinkedCodeBlock(), WarmUp { }).iterator->value;
     entry.lastFire = now;
     return entry;
 }
