@@ -9,6 +9,7 @@
 
 #include <cstdio>
 #include <wtf/MainThread.h>
+#include <wtf/MonotonicTime.h>
 #include <wtf/RedBlackTree.h>
 #include <wtf/RunLoop.h>
 #include <wtf/StdLibExtras.h>
@@ -88,6 +89,26 @@ void timerRestartsAfterChildDestroyed()
     report("runloop-timer-restarts-after-child-destroyed", active, "z is not active after starting it again");
 }
 
+// The engine's MonotonicTime: Emscripten's CLOCK_MONOTONIC (performance.now()) instead of the
+// wall clock in whole milliseconds, which made every interval below 1 ms read 0 or 1 ms (the
+// regular expressions of patch 0073 measure their calls with it)
+void monotonicTimeIsFine()
+{
+    auto start = WTF::MonotonicTime::now();
+    auto previous = start;
+    auto smallestStep = WTF::Seconds::infinity();
+    bool monotonic = true;
+    while (previous - start < 20_ms) {
+        auto now = WTF::MonotonicTime::now();
+        monotonic = monotonic && now >= previous;
+        if (now > previous)
+            smallestStep = std::min(smallestStep, now - previous);
+        previous = now;
+    }
+    report("monotonic-time-below-a-millisecond", smallestStep < 100_us, "the smallest step of MonotonicTime::now() is 100 us or more");
+    report("monotonic-time-never-goes-back", monotonic, "MonotonicTime::now() went back");
+}
+
 } // namespace
 
 int main()
@@ -95,6 +116,7 @@ int main()
     WTF::initializeMainThread();
     removedNodeKeepsNoLinks();
     timerRestartsAfterChildDestroyed();
+    monotonicTimeIsFine();
     std::printf("%s\n", failures ? "WTF tests failed" : "WTF tests ok");
     return failures ? 1 : 0;
 }

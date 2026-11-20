@@ -696,6 +696,11 @@ browser (Safari keeps Cmd+L, T and W for itself).
    of layer positions, and 1.4 s went to the media queries of images with `sizes` or `<picture>`,
    which WebKit evaluates again at every layout (`Document::updateElementsAffectedByMediaQueries`),
    also for removed images that are still alive.
+   Regexps on 20min.ch (2026-11-20): the Yarr interpreter took 7 to 12 % of the engine thread
+   while an article opened and 4 to 5 % on Back, mostly cookie regexps that stayed in it because
+   the engine's clock counted whole milliseconds; now below 1 % (#631, the host's RegExp 2.5 to
+   3.5 %). The tap is not measurably faster for it, locally or at a fourth of the CPU (runs vary
+   by 25 %); what is left of it is the page's JS, style and layout as above.
    blick.ch (Next.js, 2026-11-09, local, 412x860; the report: 25 to 30 s on a Moto G71): after a
    tap the new route is in the DOM after 7 to 8 s (plain Chromium 3.5 to 6.6 s with the data
    fetch), Back shows the home page after 5 to 7.5 s (Chromium under 1 s). The page got few frames

@@ -1,0 +1,15 @@
+diff --git a/Source/WTF/wtf/CurrentTime.cpp b/Source/WTF/wtf/CurrentTime.cpp
+index f4b97e5614..a4482ea930 100644
+--- a/Source/WTF/wtf/CurrentTime.cpp
++++ b/Source/WTF/wtf/CurrentTime.cpp
+@@ -303,7 +303,9 @@ MonotonicTime MonotonicTime::now()
+     return fromMachAbsoluteTime(mach_absolute_time());
+ #elif OS(FUCHSIA)
+     return fromRawSeconds(zx_clock_get_monotonic() / static_cast<double>(ZX_SEC(1)));
+-#elif OS(LINUX) || OS(FREEBSD) || OS(OPENBSD) || OS(NETBSD)
++#elif OS(LINUX) || OS(FREEBSD) || OS(OPENBSD) || OS(NETBSD) || OS(EMSCRIPTEN)
++    // browser-lite: Emscripten's CLOCK_MONOTONIC is the host's performance.now(), microseconds;
++    // the fallback below is the wall clock, Date.now(), in whole milliseconds and not monotonic
+     struct timespec ts { };
+     clock_gettime(CLOCK_MONOTONIC, &ts);
+     return fromRawSeconds(static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1.0e9);

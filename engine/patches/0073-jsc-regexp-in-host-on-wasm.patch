@@ -81,7 +81,7 @@ index 343724f3cb..0813515f8d 100644
  
  #if ENABLE(YARR_JIT_DEBUG)
 diff --git a/Source/JavaScriptCore/yarr/YarrInterpreter.cpp b/Source/JavaScriptCore/yarr/YarrInterpreter.cpp
-index 7ff667c607..3f720ba31e 100644
+index 7ff667c607..db37288f81 100644
 --- a/Source/JavaScriptCore/yarr/YarrInterpreter.cpp
 +++ b/Source/JavaScriptCore/yarr/YarrInterpreter.cpp
 @@ -29,6 +29,7 @@
@@ -109,7 +109,7 @@ index 7ff667c607..3f720ba31e 100644
  {
      SuperSamplerScope superSamplerScope(false);
      if (input.is8Bit())
-@@ -3241,6 +3243,170 @@ unsigned interpret(BytecodePattern* bytecode, StringView input, unsigned start,
+@@ -3241,6 +3243,199 @@ unsigned interpret(BytecodePattern* bytecode, StringView input, unsigned start,
      return Interpreter<char16_t>(bytecode, output, input.span16(), start).interpret();
  }
  
@@ -134,8 +134,13 @@ index 7ff667c607..3f720ba31e 100644
 +    }
 +    unsigned id;
 +    double nanosPerCharacter { 0 };
++    // The last measured call: a later one counts at most this much, so that a single call the
++    // system held up (another thread, a coarse clock) does not move the pattern
++    double lastNanosPerCharacter { 0 };
 +    unsigned calls { 0 };
 +    bool interpretOnly { false };
++    // Its last call in the host took at least hostMinimumNanos beyond the cost of the call itself
++    bool heavyInHost { false };
 +};
 +
 +WTF_MAKE_TZONE_ALLOCATED_IMPL(HostPatternCost);
@@ -209,15 +214,32 @@ index 7ff667c607..3f720ba31e 100644
 +    hostPatterns().remove(bytecode);
 +}
 +
-+// Measured calls before the first decision (their cheapest counts: the first call can wait for
-+// code), then every 32nd call measures again, also of a pattern that runs in the host
-+static constexpr unsigned hostSampleCalls = 4;
++// The first call of a pattern is measured here and decides. After that a call that stays here
++// measures again every 32nd call, which costs only the clock. A call that would go to the host
++// is measured here only as call 32, 64, 128 and so on, because that costs the whole
++// interpretation (10 to 50 ms for a cookie regexp of 20min.ch), and not at all while the
++// pattern's calls in the host are heavy: the interpreter is many times slower than the host's
++// RegExp. A first call that was held up (another thread, code still loading) sends a cheap
++// pattern to the host until call 32.
 +static constexpr unsigned hostSampleInterval = 32;
-+// The host costs a call into JS and a copy of the input: only patterns that cost far more per
-+// character, and only inputs where it adds up
-+static constexpr double hostNanosPerCharacter = 40;
++// A call into the host costs about 1.5 us plus 2.5 ns per character of the input, which is
++// copied into a JS string each time (Chromium): a pattern goes there when it costs 4 times that
++// per character here, and only for calls of at least 30 us, well above the resolution of the
++// host's clock (5 us in Chromium, 20 us in Firefox)
++static constexpr double hostCallNanos = 1500;
++static constexpr double hostCopyNanosPerCharacter = 2.5;
++static constexpr double hostNanosPerCharacter = 4 * hostCopyNanosPerCharacter;
 +static constexpr double hostMinimumNanos = 30000;
 +static constexpr unsigned hostMaximumLength = 256 * 1024;
++
++static bool remeasure(unsigned call, bool expensive, bool heavyInHost)
++{
++    if (!call)
++        return true;
++    if (expensive)
++        return !heavyInHost && call >= hostSampleInterval && !(call & (call - 1));
++    return !(call % hostSampleInterval);
++}
 +
 +unsigned interpret(BytecodePattern* bytecode, StringView input, unsigned start, unsigned* output)
 +{
@@ -235,8 +257,8 @@ index 7ff667c607..3f720ba31e 100644
 +        auto& pattern = it->value;
 +        auto& cost = *pattern.cost;
 +        call = cost.calls++;
-+        bool measure = call < hostSampleCalls || !(call % hostSampleInterval);
-+        bool expensive = call >= hostSampleCalls && cost.nanosPerCharacter >= hostNanosPerCharacter && cost.nanosPerCharacter * input.length() >= hostMinimumNanos;
++        bool expensive = call && cost.nanosPerCharacter >= hostNanosPerCharacter && cost.nanosPerCharacter * input.length() >= hostMinimumNanos;
++        bool measure = remeasure(call, expensive, cost.heavyInHost);
 +        if (s_hostMatchAlways || (expensive && !measure)) {
 +            id = cost.id;
 +            source = pattern.source;
@@ -245,13 +267,21 @@ index 7ff667c607..3f720ba31e 100644
 +            call = std::numeric_limits<unsigned>::max();
 +    }
 +    if (id) {
++        auto begin = MonotonicTime::now();
 +        auto result = s_hostMatch(id, source, static_cast<unsigned>(flags.toRaw()), input, start, output, bytecode->m_offsetsSize);
-+        if (result != HostMatchDeclined)
-+            return result;
-+        Locker locker { s_hostPatternsLock };
-+        if (auto it = hostPatterns().find(bytecode); it != hostPatterns().end())
-+            it->value.cost->interpretOnly = true;
-+        return interpretBytecode(bytecode, input, start, output);
++        double nanos = (MonotonicTime::now() - begin).nanoseconds();
++        bool declined = result == HostMatchDeclined;
++        {
++            Locker locker { s_hostPatternsLock };
++            if (auto it = hostPatterns().find(bytecode); it != hostPatterns().end()) {
++                auto& cost = *it->value.cost;
++                if (declined)
++                    cost.interpretOnly = true;
++                else
++                    cost.heavyInHost = nanos >= hostCallNanos + hostCopyNanosPerCharacter * input.length() + hostMinimumNanos;
++            }
++        }
++        return declined ? interpretBytecode(bytecode, input, start, output) : result;
 +    }
 +    if (call == std::numeric_limits<unsigned>::max())
 +        return interpretBytecode(bytecode, input, start, output);
@@ -263,10 +293,9 @@ index 7ff667c607..3f720ba31e 100644
 +        auto& cost = *it->value.cost;
 +        if (!call)
 +            cost.nanosPerCharacter = nanosPerCharacter;
-+        else if (call < hostSampleCalls)
-+            cost.nanosPerCharacter = std::min(cost.nanosPerCharacter, nanosPerCharacter);
 +        else
-+            cost.nanosPerCharacter = (cost.nanosPerCharacter * 3 + nanosPerCharacter) / 4;
++            cost.nanosPerCharacter = (cost.nanosPerCharacter * 3 + std::min(nanosPerCharacter, cost.lastNanosPerCharacter)) / 4;
++        cost.lastNanosPerCharacter = nanosPerCharacter;
 +    }
 +    return result;
 +}

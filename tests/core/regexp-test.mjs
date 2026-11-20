@@ -4,7 +4,8 @@
 // indices, the flags g, y, m, s, u, v and i, lookbehind, Latin-1 and UTF-16 input, replace,
 // split and a cookie regexp that backtracks a lot (20min.ch). A pattern measured expensive keeps
 // running in the host after a memory release deleted its bytecode (its cost belongs to its source
-// and flags), instead of being measured in the interpreter again.
+// and flags), instead of being measured in the interpreter again, and a pattern first called on
+// short input goes to the host for long input.
 //
 //   node tests/core/regexp-test.mjs [engine-dir]
 import {
@@ -112,19 +113,26 @@ for (const mode of ['all', 'auto']) {
   await page.close();
 }
 
-// Times of 4 calls of the cookie regexp: the first (measured in the interpreter), after 8 more
-// (in the host) and right after a memory release that deleted all compiled code
+// Times of 2 calls of the cookie regexp: the first two (the first one measured in the
+// interpreter), after 8 more (in the host) and right after a memory release that deleted all
+// compiled code. A second cookie regexp is measured on a short cookie first, like 20min.ch early
+// in its load, and then called on the long one: it has to be in the host too (with a clock in
+// whole milliseconds its short calls measured 0 ms and it stayed in the interpreter for good)
 const RELEASE_PAGE = `<!doctype html><meta charset="utf-8"><title>Release</title><script>
-const cookie = Array.from({ length: 100 }, (_, i) => 'c' + i + '=' + 'x'.repeat(40)).join('; ') + '; dataLayerLogger=on';
-const calls = (n) => {
+const cookie = Array.from({ length: 100 }, (_, i) => 'c' + i + '=' + 'x'.repeat(40)).join('; ') + '; dataLayerLogger=on; sessionToken=t';
+const calls = (n, source, text = cookie) => {
   const start = performance.now();
-  for (let i = 0; i < n; i++) cookie.match(/(^|[^;]+)\\s*dataLayerLogger\\s*=\\s*([^;]+)/);
+  for (let i = 0; i < n; i++) text.match(new RegExp(source));
   return Math.round(performance.now() - start);
 };
-const measured = calls(4);
-calls(8);
-console.log('RESULT before=' + measured + ',' + calls(4));
-window.after = () => console.log('RESULT after=' + calls(4));
+const logger = '(^|[^;]+)\\s*dataLayerLogger\\s*=\\s*([^;]+)';
+const session = '(^|[^;]+)\\s*sessionToken\\s*=\\s*([^;]+)';
+const measured = calls(2, logger);
+calls(8, logger);
+const hosted = calls(2, logger);
+calls(4, session, cookie.slice(0, 200));
+console.log('RESULT before=' + [measured, hosted, calls(2, session)].join(','));
+window.after = () => console.log('RESULT after=' + calls(2, logger));
 </script>`;
 const { url: releaseURL } = await serve((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(RELEASE_PAGE);
@@ -133,11 +141,16 @@ const { url: releaseURL } = await serve((req, res) => {
   const page = await browser.newPage();
   const results = collect(page);
   await openHost(page, stack.app({ url: releaseURL }));
-  const [measured, hosted] = ((await results.wait('before')) ?? '').split(',').map(Number);
+  const [measured, hosted, grown] = ((await results.wait('before')) ?? '').split(',').map(Number);
   check(
     'measured calls cost more than calls in the host',
     measured > hosted * 3,
     `${measured} ${hosted}`,
+  );
+  check(
+    'a regexp measured on short input goes to the host for long input',
+    grown * 3 < measured,
+    `${measured} ${grown}`,
   );
   // Like under memory pressure: WebCore::releaseMemory, which deletes the code of every RegExp
   await page.evaluate(() => window.blTest.memory(3));

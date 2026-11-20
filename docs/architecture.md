@@ -935,7 +935,11 @@ brought no measurable gain and was removed (#215). A JIT to WebAssembly compiles
 Regular expressions have no JIT here: the Yarr interpreter measures each pattern and hands those
 that cost much per character of their input to a RegExp of the host's worker (patch 0073,
 `HostRegExp.cpp`, `BL_HOST_REGEXP`, #348). The measured cost belongs to the pattern's source and
-flags, so a RegExp compiled again after a GC or a memory release keeps the decision (#362).
+flags, so a RegExp compiled again after a GC or a memory release keeps the decision (#362). The
+first call decides; a pattern in the host is measured in the interpreter again only at call 32,
+64, 128 and so on, and not while its calls in the host are heavy (#631). The measurements read
+WTF's `MonotonicTime`, which here is the host's `performance.now()` (patch 0166; before it was
+`Date.now()` in whole milliseconds).
 WASM frames nest on two stacks: the shadow stack in linear memory, which JSC's limits measure,
 and the browser's machine stack (about 500 KB left in a Chromium worker when a script runs), which
 the browser stops in the middle of the engine's C++ when it is full. Deep recursion through C++ (getters calling getters,
