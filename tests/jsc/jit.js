@@ -92,6 +92,17 @@ function sumAll(list) { let s = 0; for (let i = 0; i < list.length; i++) s += li
 function setAt(list, i, v) { list[i] = v; return list; }
 function literalFirst() { const list = [1, 2, 3]; list[0] = 9; return list[0] + [1, 2, 3][0]; }
 function lengthOf(x) { return x.length; }
+// Arithmetic, comparisons and equality beyond int32 run out of line (doubles, cells, slow paths),
+// also with a constant operand and with exceptions caught in the same function
+function equalsConstant(a) { return (a === 0 ? "zero" : "") + (a == undefined ? "nullish" : "") + (a === "op" ? "op" : "") + (true === a ? "true" : ""); }
+function jumpEqualsConstant(a) { if (0 === a) return 1; if (a !== null) return 2; return 3; }
+function compareCaught(a, b) { try { return a < b ? 1 : 0; } catch (e) { return "caught " + e; } }
+function xorCaught(a, b) { try { return a ^ b; } catch (e) { return "caught " + e; } }
+function equalCaught(a, b) { try { if (a == b) return "eq"; return "ne"; } catch (e) { return "caught " + e; } }
+function lessConstant(a) { return (a < 10 ? 1 : 0) + (2.5 <= a ? 2 : 0); }
+function switchNumber(x) { switch (x) { case 0: return "a"; case 1: return "b"; case 2: return "c"; case 3: return "d"; default: return "e"; } }
+function half(x) { return x * 0.5; }
+function mixedBits(a) { return (a | 0) + (a >>> 3) + (a << 2) + (a & 0xffff); }
 class Animal { constructor(name) { this.name = name; } speak() { return "I am " + this.name; } }
 function speak(a) { return a.speak(); }
 function maybe(o) { return o.later; }
@@ -458,6 +469,7 @@ for (let round = 0; round < 300; round++) {
     check("div min", quotient(-2147483648, -1), 2147483648);
     check("div string", quotient("9", 3), 3);
     check("< doubles", lessThan(1.5, 2), true);
+
     check("< NaN", lessThan(NaN, 1), false);
     check("< mixed", lessThan(2, 2.5), true);
     check("< strings", lessThan("a", "b"), true);
@@ -784,5 +796,55 @@ for (let round = 0; round < 300; round++) {
         caught = e;
     }
     check("exception", caught instanceof TypeError, true);
+}
+// The out-of-line paths of compiled code: each function runs often enough to compile first
+for (let round = 0; round < 3000; round++) {
+    const built = ["o", "p"].join("");
+    check("=== atom and built string", strictEqual("op", built), true);
+    check("=== built strings", strictEqual(built, ["o", "p"].join("")), true);
+    check("=== rope", strictEqual("op", "o" + o.constructor.name.slice(0, 0) + "p"), true);
+    check("=== other atoms", strictEqual("op", "po"), false);
+    check("=== string object", strictEqual("x", o), false);
+    check("=== symbols", strictEqual(Symbol.iterator, Symbol.iterator), true);
+    check("=== other symbols", strictEqual(Symbol(), Symbol()), false);
+    check("=== BigInts", strictEqual(10n ** 20n, 10n ** 20n), true);
+    check("== object string", looseEqual({ toString() { return "s"; } }, "s"), true);
+    check("== objects other", looseEqual(o, {}), false);
+    check("== string atoms", looseEqual("op", built), true);
+    check("== bool number", looseEqual(true, 1), true);
+    check("== constant", equalsConstant(0), "zero");
+    check("== constant null", equalsConstant(null), "nullish");
+    check("== constant string", equalsConstant(built), "op");
+    check("== constant true", equalsConstant(true), "true");
+    check("== constant double", equalsConstant(-0), "zero");
+    check("jeq constant", jumpEqualsConstant(0), 1);
+    check("jneq constant", jumpEqualsConstant(0.5), 2);
+    check("jneq constant null", jumpEqualsConstant(null), 3);
+    const throwing = { valueOf() { throw "valueOf"; } };
+    check("< caught", compareCaught(1, throwing), "caught valueOf");
+    check("< caught double", compareCaught(1.5, 2), 1);
+    check("^ caught", xorCaught(throwing, 1), "caught valueOf");
+    check("^ double", xorCaught(2 ** 32 + 5, 3), 6);
+    check("^ NaN", xorCaught(NaN, 3), 3);
+    check("^ large", xorCaught(2 ** 70, 3), 3);
+    check("== caught", equalCaught(throwing, 1), "caught valueOf");
+    check("== caught strings", equalCaught("a" + round, "a" + round), "eq");
+    check("< constant", lessConstant(9.5), 3);
+    check("< constant NaN", lessConstant(NaN), 0);
+    check("< constant string", lessConstant("3"), 3);
+    check("bits double", mixedBits(4294967295), -1 + 536870911 + -4 + 65535);
+    check("switch int", switchNumber(round & 3), "abcd"[round & 3]);
+    check("switch double", switchNumber(half(4)), "c");
+    check("switch -0", switchNumber(-0), "a");
+    check("switch fraction", switchNumber(half(3)), "e");
+    check("switch NaN", switchNumber(NaN), "e");
+    check("switch string", switchNumber("1"), "e");
+    check("bits int", mixedBits(round), round + (round >>> 3) + (round << 2) + (round & 0xffff));
+    if (typeof makeMasquerader === "function") {
+        const masquerader = makeMasquerader();
+        check("truthy masquerader", truthy(masquerader), 0);
+        check("not masquerader", not(masquerader), true);
+        check("== masquerader", looseEqual(masquerader, undefined), true);
+    }
 }
 print("OK jit");

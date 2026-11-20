@@ -62,6 +62,20 @@ else
     fail=1
 fi
 
+# Bytes of WASM per statement (the dispatch with 5 copies of a statement against 1 in its 200
+# cases): at most half of what they were with everything inline (about 260 and 230)
+for kind in ifmov:130 xor:115; do
+    name="${kind%%:*}"
+    limit="${kind#*:}"
+    per="$(BL_JIT=2 node "$jsc" "$here/jit-size.js" 2>&1 | sed -n "s/^\[jit\] stmt_${name}_\([15]\)#.*: \([0-9]*\) bytes.*/\1 \2/p" | sort | awk '{ size[$1] = $2 } END { if (size[1] && size[5]) printf "%.0f", (size[5] - size[1]) / 800 }')"
+    if [ -n "$per" ] && [ "$per" -le "$limit" ]; then
+        echo "ok    jit-size $name (jit): $per bytes per statement"
+    else
+        echo "FAIL  jit-size $name (jit): '$per' bytes per statement (at most $limit)"
+        fail=1
+    fi
+done
+
 # Compiled code stays through a full GC of old code, code thrown away compiles again
 kept="$(compiles)"
 again="$(compiles --forceCodeBlockToJettisonDueToOldAge=true)"

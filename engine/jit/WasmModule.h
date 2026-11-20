@@ -47,6 +47,8 @@ public:
     void block();
     void loop();
     void ifThen();
+    // An if whose arms leave a value of the type
+    void ifThen(ValueType result);
     void elseThen();
     void end();
     void br(uint32_t depth);

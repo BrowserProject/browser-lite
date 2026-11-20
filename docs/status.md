@@ -882,9 +882,17 @@ browser (Safari keeps Cmd+L, T and W for itself).
    A single entry of the challenge cannot be cut into slices: the script of the frame's agent
    runs to completion, its network events wait like in Chrome's process of the frame; the frame
    already pauses for input of the user (#589, #628), and the debug `eval` of the measurement is
-   no input. Open: compiled code itself (values in WASM locals, the slow paths of arithmetic
-   and conditions out of line, phase 4 of [jit.md](jit.md)); the criterion of 30 s on this
-   machine and of 5 s for the longest step is not reached. Hosts without WebGL 2 (headless
+   no input. Arithmetic, comparisons and conditions now keep only their int32 path inline (#636,
+   2026-11-20): the compiled code of such statements is a third of its size, the engine thread
+   runs 1.1 to 1.4 instead of 1.0 to 1.2 instructions per cycle, but the checkbox comes after the
+   same time (medians 36.3 and 36.8 s against 33.0 and 34.4 s, 2 rounds of 5 interleaved runs at
+   1280x900, load 2 to 17; `BL_JIT=0` 43.6 s); the invisible widget gave its token in 5 of 5 runs
+   after 34.7 to 41.1 s without 110600 or a 400, scrapingcourse.com's checkbox came after 53 and
+   67 s (before 44 and 68 s) and passed after one click. Open: compiled code itself (values in
+   WASM locals, array literals without C++, the warm-up of the VM's large functions, which run
+   interpreted for 5 to 15 s; phase 4 of [jit.md](jit.md)); the criteria of 25 s to the checkbox
+   and 6 s for the longest step are not reached, nor 90 s on a Moto G71 (not measured with
+   #636). Hosts without WebGL 2 (headless
    Firefox, a blocklisted GPU; 2026-11-20, #635): the engine worker owned the view canvases there,
    and every read of one by the browser while page script ran (a screenshot, the measurement's
    `drawImage`) held Firefox's main thread 10 s and came back white; meanwhile no web worker of a

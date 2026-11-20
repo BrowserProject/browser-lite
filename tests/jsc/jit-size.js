@@ -26,6 +26,31 @@ for (var k = 0; k < 8; k++) {
     globalThis["done" + k] = 0;
 }
 var vmDispatch = new Function(source)();
+// Bytes per statement: the same dispatch with 1 and with 5 copies of a statement in each of its 200
+// cases (run.sh reads both modules' sizes). Arithmetic, comparisons and conditions beyond int32 run
+// out of line: inline, `if (s) t = u` was about 260 bytes and `s = s ^ c` about 230.
+var statements = { ifmov: "if (s) t = u;", xor: "s = s ^ c;" };
+var statementRuns = [];
+for (var kind in statements) {
+    for (var copies of [1, 5]) {
+        var body = [];
+        for (var i = 0; i < 200; i++)
+            body.push("case " + i + ": " + Array(copies).fill(statements[kind]).join(" ") + " t = t + " + i + "; break;");
+        statementRuns.push(new Function("return function stmt_" + kind + "_" + copies + "(steps) {\n"
+            + "  var s = 1, t = 0, u = 2, c = 5, pc = 0;\n"
+            + "  for (var q = 0; q < steps; q++) {\n"
+            + "    pc = (pc * 31 + 7) % 200;\n"
+            + "    switch (pc) {\n" + body.join("\n") + "\n    }\n"
+            + "    s = s & 1023; t = t & 1023;\n"
+            + "  }\n"
+            + "  return s + t;\n"
+            + "};")());
+    }
+}
+for (var r = 0; r < 300; r++) {
+    for (var f of statementRuns)
+        f(2000);
+}
 var result = 0;
 for (var r = 0; r < 300; r++)
     result = vmDispatch(5000);

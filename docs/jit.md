@@ -18,8 +18,8 @@ never baked into the code (the GC resets inline caches).
 - **Control flow**: the basic blocks of the bytecode are WASM blocks nested in one loop with a
   `br_table` at its head. The code of block i sits after the end of the i-th of them, so a jump
   forward is a branch out to the end of its target's block and only a jump back goes through
-  the `br_table`. A dense `switch` on an int32 (an obfuscated VM's dispatch) takes a `br_table`
-  of its own, other values and sparse tables ask C++ for the target.
+  the `br_table`. A dense `switch` on an int32 or a double of an int32's value (an obfuscated VM's
+  dispatch) takes a `br_table` of its own, other values and sparse tables ask C++ for the target.
 - **Install**: the compiler writes a module that imports the engine's memory and function table,
   compiles it synchronously in its thread (`new WebAssembly.Module`, about 0.1 ms for a small
   one) and adds its export to that thread's table (tables are per thread); a map of the thread
@@ -64,7 +64,13 @@ never baked into the code (the GC resets inline caches).
   (`perf stat` on the engine thread: 0.58 instructions per cycle against the interpreter's 1.22,
   24 % of instruction fetches missed the L1 cache, 23 % of the cycles waited for them). A
   variable the bytecode generator resolved in a closure (`ResolvedClosureVar`) is read inline
-  without a slow path, as linking makes it a `ClosureVar` for good.
+  without a slow path, as linking makes it a `ClosureVar` for good. Arithmetic, bit operations,
+  comparisons, equality and conditional jumps keep only their int32 path inline (and `if`, `!` and
+  `&&` that of booleans and int32); doubles, ToInt32, cells and the slow path are one function of
+  the module per opcode, called with the frame, the instruction and the operands' values, which
+  returns whether the instruction threw or jumped. A constant operand's tag check is left out.
+  Inline, `if (s) t = u` was about 260 bytes of WASM, `s = s ^ c` about 230, now about 75 and 90
+  (`tests/jsc/jit-size.js` checks both).
 - **Fast paths**: the interpreter's, reading its caches at run time: int32 and double arithmetic
   and comparisons, equality, property access (own, prototype, array length, unset, transitions;
   reads of own properties also from the last 4 structures of the site, until the next GC, looked
@@ -263,6 +269,24 @@ the GC's age checks of `CodeBlock`s, regexps, events). `tests/jsc/jit-warmup-map
 same calls with 8000 warm functions 5.7 to 6.8 times as long as with 500 before, 1.0 to 1.1 times
 now (without the JIT 1.0).
 
+Arithmetic, comparisons and conditions out of line (#636, 2026-11-20): per statement of the
+dispatch in `tests/jsc/jit-size.js` (200 cases, 5 copies against 1) `if (s) t = u` takes 76 bytes
+instead of 262, `s = s ^ c` 88 instead of 234, `s = s + j` 108 instead of 203, `if (s < j) t = u`
+121 instead of 199; the module of the VM-like function is 0.39 MB instead of 0.61 MB (5.3 times
+its bytecode instead of 8.3). peet.ws's managed widget (local, Chromium host at 1280x900, two
+rounds of 5 runs interleaved with the engine before, load 2 to 17): on the engine thread 1.09 to
+1.37 instructions per cycle instead of 0.98 to 1.16 and 14 to 16 % of the instruction fetches
+missing the L1 cache instead of 18.5 % (`perf stat`, windows of 10 s), but the checkbox after
+29.1 to 42.1 s (medians 36.3 and 36.8) against 30.3 to 44.5 s (medians 33.0 and 34.4), the longest
+step 8.5 to 20.9 s against 7.5 to 15.6 s: within the spread of the runs. `BL_JIT=0` took 43.6 s.
+Of that engine thread (CPU profile, 63 s) compiled code is 40 %, the interpreter 15 % (25 to 30 %
+from 10 to 30 s, while the VM's functions of 24 to 51 KB of bytecode warm up: they compile 5 to
+15 s after the widget's start, a fire every 30 to 50 ms), array literals (`new_array`) 5 %, the
+interpreter's `get_by_val` with DOM getters 5 %, calls between compiled and interpreted code 4 %.
+A 4 times shorter warm-up for all code (`JSC_thresholdForJITAfterWarmUp=125`) gave 35 and 41 s.
+So the size of arithmetic was not what limits the challenge; with the JIT it takes about four
+fifths of the time it takes without.
+
 Hashing code (#424, `tests/jsc/jit-hash.js`, jsc shell): bit operations on uint32 values 5x and
 typed array elements 3x the time of their int32 twins before, now 1.8x and 1.3x; `Math.imul` 6.5x
 an addition before, 2x now; a host call about 20 % cheaper. In the engine, the loops of
@@ -280,6 +304,9 @@ to 2.7 s, Chromium 24 to 44 ms).
    callee table (#459). Obfuscated VMs (Cloudflare's Turnstile) bring functions of
    40 to 90 KB of bytecode; the fast paths of property, element, keyed and scope access in
    functions of the module made them 8 to 10 times that in WASM instead of 25 to 31 (#630).
-   Next: the double and slow paths of arithmetic, comparisons and conditions out of line (a
-   statement `if (s) t = u` is still about 270 bytes, `s = s ^ c` and `s = s + j` about 200),
-   values in locals.
+   The double and slow paths of arithmetic, comparisons and conditions are out of line too
+   (#636): about 75 to 120 bytes per such statement instead of 200 to 260, no faster on
+   Turnstile's challenge. Next: values in WASM locals between safepoints (a register written and
+   read again in a block is loaded from the frame each time), array literals without a call into
+   C++, and the warm-up of an obfuscated VM's large functions, which fire rarely for the time they
+   run.
