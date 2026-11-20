@@ -889,7 +889,9 @@ once more and drops them (patch 0077, #388, `tests/core/page-left-test.mjs`).
 
 WASM memory never shrinks and grows up to 4 GB, in a 32 bit browser only to about 1 GB. One build
 serves both: `engine/src/MemoryWatch.cpp` runs after every engine task and acts when malloc's
-footprint grew by 32 MB. Above 192 MB it calls `WebCore::releaseMemory` (#61, #64), which keeps
+footprint grew by 32 MB. Above 192 MB (`BL_MEMORY_RELEASE_MB`; the core sets 512 MB on hosts with
+8 GB of memory or more, where each release blocked a heavy page's load 130 to 470 ms and freed
+little of what it still needed, #633) it calls `WebCore::releaseMemory` (#61, #64), which keeps
 the compiled JS of the pages (bytecode and JIT code, patch 0088, #441) and the page left last in
 the back/forward cache (of up to 3) unless memory is short (`critical` below): building the code again blocked the pages for seconds, the GC ages out code that no
 longer runs, and back to a page loaded again showed its top until its load was complete (#451,

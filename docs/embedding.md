@@ -385,7 +385,8 @@ folder. Stored data in OPFS and the HTTP cache stay.
 ## Resource use
 
 - Memory: one WebAssembly memory of 256 MB that grows up to 4 GB (about 1 GB in a 32 bit browser)
-  and never shrinks; the engine releases caches above 192 MB, from 384 MB keeps 128 MB free ahead
+  and never shrinks; the engine releases caches above 192 MB (512 MB on hosts with 8 GB of memory
+  or more), from 384 MB keeps 128 MB free ahead
   and reports `memory-pressure` when less is left below the limit it found at runtime, or above
   3 GB (512 MB on iPhone and iPad: iOS ends the whole page instead of failing a growth, at about
   1 GB of engine memory with three heavy tabs); `critical` only when memory is short.

@@ -4,7 +4,8 @@
 // when memory is short (here the malloc area full above BL_MEMORY_PRESSURE_MB: the page holds what
 // malloc grew by) does the release take the code too, and the first calls after it cost as much as the very first ones. The code of pages
 // and frames that are gone goes: a view that leaves its page and every release drop JSC's code
-// cache, which held the bytecode and the sources of every script evaluated (patch 0102).
+// cache, which held the bytecode and the sources of every script evaluated (patch 0102). The
+// threshold comes from the host: 512 MB with 8 GB of memory or more, else 192 MB.
 //
 //   node tests/core/memory-release-test.mjs [engine-dir]
 import {
@@ -222,6 +223,50 @@ check(
   );
   await page.close();
 }
+
+// The threshold of the host (packages/core/src/config.ts, #633): from 192 MB of malloc area on
+// phones (the engine default), from 512 MB on hosts with 8 GB or more, where each release was
+// a pause of the engine thread that freed little of what a heavy page still needed. Chromium on
+// a desktop reports 8 GB or more, Firefox no device memory; the init script makes it a 4 GB host.
+async function releasesWhileGrowing(label, deviceMemory) {
+  const page = await browser.newPage();
+  if (deviceMemory)
+    await page.addInitScript((value) => {
+      Object.defineProperty(Navigator.prototype, 'deviceMemory', {
+        get: () => value,
+        configurable: true,
+      });
+    }, deviceMemory);
+  const results = collect(page);
+  check(`${label}: host page starts`, await openHost(page, stack.app({ url: siteURL, log: '1' })));
+  await results.wait('cold');
+  const reported = await page.evaluate(() => navigator.deviceMemory);
+  // 5 x 48 MB above the page: about 300 MB of malloc area, between the two thresholds
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate((key) => window.blTest.eval(`allocate('${key}', 48)`), `${label}${i}`);
+    await results.wait(`${label}${i}`);
+    await page.waitForTimeout(200);
+  }
+  const memory = await page.evaluate(() => window.blTest.browser.debug.memory(0));
+  await page.close();
+  return {
+    reported,
+    memoryMB: Math.round(memory / 1048576),
+    lines: results.logs.filter((line) => line.includes('Memory released')),
+  };
+}
+const desktop = await releasesWhileGrowing('desktop', 0);
+check(
+  'a host with plenty of memory does not release below 512 MB',
+  desktop.memoryMB > 280 && desktop.lines.length === 0,
+  `device memory ${desktop.reported}, engine memory ${desktop.memoryMB} MB, ${desktop.lines.join(' | ')}`,
+);
+const phone = await releasesWhileGrowing('phone', 4);
+check(
+  'a host with 4 GB releases from 192 MB like before',
+  phone.reported === 4 && phone.lines.length > 0,
+  `engine memory ${phone.memoryMB} MB, ${phone.lines.length} releases`,
+);
 
 await browser.close();
 finish();

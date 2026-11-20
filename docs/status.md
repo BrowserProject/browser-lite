@@ -377,6 +377,15 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   after 60 s, 169 instead of 810 MB after the release, JS heap 0 instead of 48 MB). Still open
   there: about 100 MB above the start, 14 small documents of SVG images outside the memory cache
   and a CNN document that 24 of its nodes keep; the WASM memory keeps its peak (it cannot shrink).
+  The automatic releases are for phones (#61): on hosts with 8 GB of memory or more they start
+  at 512 instead of 192 MB of malloc area (#633). Each is a full GC with the caches dropped, and
+  while a heavy page loads it frees little of what the page still needs (2026-11-20 local,
+  Chromium host at 1280x800; tiktok, spotify, duolingo, webflow, cnn, netflix and coursera, 2
+  interleaved runs each, 45 s from the start of the load: 2 to 7 releases of 72 to 438 ms,
+  together 248 to 1203 ms per load, each freeing 0 to 57 MB; now none, 2 to 30 MB more in use at
+  the end and in 7 of 14 loads 15 to 88 MB more WASM memory). The Moto G71 reports 4 GB and
+  keeps 192 MB. Still open: above 512 MB a desktop releases at every growth by 32 MB again, and a
+  phone that reports 8 GB takes the desktop threshold.
   Closing tabs whose tiles still paint no longer crashes the
   engine (#514, patch 0113): their painting jobs ran after the view's layer tree host was freed
   and called into it ("table index is out of bounds", "function signature mismatch" or "null

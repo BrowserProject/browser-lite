@@ -17,7 +17,7 @@ import type {
   StorageOptions,
   Transport,
 } from './types.js';
-import { appleMobileHost, hostLanguages, hostTimeZone } from './util.js';
+import { appleMobileHost, hostLanguages, hostTimeZone, plentyOfMemoryHost } from './util.js';
 
 const NAMESPACE = /^[a-z0-9_]{1,32}$/;
 const EXPERT_ENV = /^(BL|JSC|FC)_[A-Za-z0-9_]+$/;
@@ -29,6 +29,14 @@ const EXPERT_ENV = /^(BL|JSC|FC)_[A-Za-z0-9_]+$/;
  * 1.1 GB of engine memory), so the engine cannot find its limit at runtime.
  */
 const APPLE_MOBILE_MEMORY_PRESSURE_MB = 512;
+
+/**
+ * Malloc footprint in MB from which the engine releases caches with a full GC at every growth by
+ * 32 MB, on hosts with 8 GB of memory or more (#633). The engine default of 192 MB is meant for
+ * phones; on a desktop each release blocked the engine thread 70 to 440 ms while a heavy page
+ * loaded and freed little (0 to 57 MB), as the page still needed its memory.
+ */
+const PLENTY_MEMORY_RELEASE_MB = 512;
 
 /**
  * Engine switches the core sets from typed options; `engine.env` must not set them. Equal to the
@@ -75,6 +83,8 @@ export interface Config {
   keepSessionCookies: boolean;
   /** `BL_MEMORY_PRESSURE_MB` of the host, undefined for the engine default; `env` overrides it. */
   memoryPressureMB: number | undefined;
+  /** `BL_MEMORY_RELEASE_MB` of the host, undefined for the engine default; `env` overrides it. */
+  memoryReleaseMB: number | undefined;
   gpu: boolean | undefined;
   compositing: boolean | undefined;
   safepointGC: boolean | 'debug' | undefined;
@@ -348,6 +358,7 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
     preferences: preferences(options.preferences),
     keepSessionCookies: optionalBoolean(options.keepSessionCookies, 'keepSessionCookies') ?? false,
     memoryPressureMB: appleMobileHost() ? APPLE_MOBILE_MEMORY_PRESSURE_MB : undefined,
+    memoryReleaseMB: plentyOfMemoryHost() ? PLENTY_MEMORY_RELEASE_MB : undefined,
     gpu: optionalBoolean(engine.gpu, 'engine.gpu'),
     compositing: optionalBoolean(engine.compositing, 'engine.compositing'),
     safepointGC: safepointGC as Config['safepointGC'],
@@ -375,6 +386,9 @@ export function engineEnv(
   const result: Record<string, string> = {
     ...(config.memoryPressureMB !== undefined && {
       BL_MEMORY_PRESSURE_MB: String(config.memoryPressureMB),
+    }),
+    ...(config.memoryReleaseMB !== undefined && {
+      BL_MEMORY_RELEASE_MB: String(config.memoryReleaseMB),
     }),
     ...config.env,
     BL_FEATURES: features.join(','),

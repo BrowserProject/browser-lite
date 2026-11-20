@@ -92,7 +92,8 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
   - Start and loop: `main.cpp`, `EngineConfig.cpp` (every `BL_*` value), `EngineLoop.cpp`
     (event loop: the host's calls and the compositor's answers before the page's work, at most one RunLoop pump waiting, the watchdog that stops a script once the host waited its limit for it, urgent work that brings a running script to its next safepoint, the nested event loop of dialogs and paused scripts), `UserNavigation.cpp` (a typed address, Back or Forward of the user stops the running script of the page it leaves), `Exports.cpp` (`bl_*`; hovering mouse moves that wait join into one move that lists
     them all as its coalesced events), `Host.cpp` (events to the host),
-    `MemoryWatch.cpp` (releases caches, the pages' compiled JS and the page left last in the
+    `MemoryWatch.cpp` (releases caches above `BL_MEMORY_RELEASE_MB`, 192 MB or from the core 512 MB
+    on hosts with 8 GB or more, the pages' compiled JS and the page left last in the
     back/forward cache only when memory is short (patch 0088), JSC's code cache at every release
     and when a view leaves its page (patch 0102), a full GC soon after views closed, finds the
     memory limit, memory pressure

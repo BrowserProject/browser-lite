@@ -38,6 +38,17 @@ export function hostLanguages(): string[] {
 
 export const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+/**
+ * The host has 8 GB of memory or more: `navigator.deviceMemory` where the browser reports it
+ * (Chromium, rounded to a power of two), else every host that is not a phone or tablet (Firefox
+ * and Safari report no device memory).
+ */
+export function plentyOfMemoryHost(): boolean {
+  const deviceMemory = (navigator as { deviceMemory?: number }).deviceMemory;
+  if (typeof deviceMemory === 'number') return deviceMemory >= 8;
+  return !appleMobileHost() && !/Android/.test(navigator.userAgent);
+}
+
 /** The host runs on an iPhone, iPod or iPad (iPadOS reports a Mac, but with touch). */
 export function appleMobileHost(): boolean {
   return (

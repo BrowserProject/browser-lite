@@ -3,8 +3,10 @@
 // serves both, so the engine finds the limit at runtime instead of guessing it
 // from the user agent. After every engine task it
 // - releases what WebKit otherwise only releases under memory pressure
-//   (caches, decoded images, back/forward cache) above BL_MEMORY_RELEASE_MB at
-//   every growth of malloc by 32 MB, so free space is reused first. The
+//   (caches, decoded images, back/forward cache) above BL_MEMORY_RELEASE_MB
+//   (192 MB, from the core 512 MB on hosts with 8 GB of memory or more; above
+//   BL_MEMORY_PRESSURE_MB when that is lower) at every growth of malloc by
+//   32 MB, so free space is reused first. The
 //   compiled JS of the pages (bytecode and JIT code) and the page left last
 //   (kept in the back/forward cache) go too only once memory is short (see
 //   limitIsNear): rebuilding the code blocked the pages for seconds, the GC
@@ -127,10 +129,15 @@ static bool areaIsFull()
     return mallinfo().fordblks < memoryReserve;
 }
 
+// Above the budget memory is short only while the area stays full after a release, so a release
+// is due there also when the budget is below BL_MEMORY_RELEASE_MB
 static bool releaseIsDue(uint64_t footprint)
 {
-    uint64_t threshold = static_cast<uint64_t>(engineConfig().memoryReleaseMB) << 20;
-    return threshold && footprint >= threshold && footprint >= s_footprintAtRelease + checkStep;
+    auto& config = engineConfig();
+    if (!config.memoryReleaseMB)
+        return false;
+    uint64_t threshold = static_cast<uint64_t>(std::min(config.memoryReleaseMB, config.memoryPressureMB)) << 20;
+    return footprint >= threshold && footprint >= s_footprintAtRelease + checkStep;
 }
 
 static void releaseCaches(uint64_t footprint, bool memoryShort)

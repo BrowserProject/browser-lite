@@ -156,6 +156,8 @@ test('engine environment', () => {
   assert.deepEqual(env, {
     JSC_useJIT: '0',
     BL_MEMORY_PRESSURE_MB: '512',
+    // Node has no device memory and is no phone
+    BL_MEMORY_RELEASE_MB: '512',
     BL_FEATURES: 'audio,media',
     BL_STORAGE_NAMESPACE: 'site_1',
     TZ: 'Europe/Zurich',
@@ -171,6 +173,7 @@ test('engine environment', () => {
   });
   const plain = engineEnv(resolveConfig(base, PAGE), [], true);
   assert.deepEqual(plain, {
+    BL_MEMORY_RELEASE_MB: '512',
     BL_FEATURES: '',
     BL_STORAGE_NAMESPACE: 'browserlite',
     TZ: plain.TZ,
@@ -207,6 +210,38 @@ test('memory budget on iPhone and iPad', () => {
     envOn({ userAgent: iphone, platform: 'iPhone' }, expert).BL_MEMORY_PRESSURE_MB,
     '700',
   );
+});
+
+// The releases from 192 MB are for phones; hosts with 8 GB or more release from 512 MB (#633)
+test('memory release threshold of the host', () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const releaseOn = (host, options = base) => {
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { languages: ['en'], language: 'en', maxTouchPoints: 0, ...host },
+      configurable: true,
+    });
+    try {
+      return engineEnv(resolveConfig(options, PAGE), [], true).BL_MEMORY_RELEASE_MB;
+    } finally {
+      Object.defineProperty(globalThis, 'navigator', real);
+    }
+  };
+  const linux = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/142.0 Safari/537.36';
+  const android = 'Mozilla/5.0 (Linux; Android 14; moto g71 5G) Chrome/142.0 Mobile Safari/537.36';
+  const firefoxAndroid = 'Mozilla/5.0 (Android 14; Mobile; rv:145.0) Gecko/145.0 Firefox/145.0';
+  const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) Mobile/15E148';
+  const mac = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/18.6 Safari/605.1.15';
+  assert.equal(releaseOn({ userAgent: linux, deviceMemory: 8 }), '512');
+  assert.equal(releaseOn({ userAgent: linux, deviceMemory: 4 }), undefined);
+  assert.equal(releaseOn({ userAgent: android, deviceMemory: 4 }), undefined);
+  assert.equal(releaseOn({ userAgent: android, deviceMemory: 8 }), '512');
+  // Firefox and Safari report no device memory
+  assert.equal(releaseOn({ userAgent: mac, platform: 'MacIntel' }), '512');
+  assert.equal(releaseOn({ userAgent: firefoxAndroid }), undefined);
+  assert.equal(releaseOn({ userAgent: iphone, platform: 'iPhone' }), undefined);
+  assert.equal(releaseOn({ userAgent: mac, platform: 'MacIntel', maxTouchPoints: 5 }), undefined);
+  const expert = { ...base, engine: { env: { BL_MEMORY_RELEASE_MB: '0' } } };
+  assert.equal(releaseOn({ userAgent: linux, deviceMemory: 8 }, expert), '0');
 });
 
 test('storage and HTTP cache switches', () => {
