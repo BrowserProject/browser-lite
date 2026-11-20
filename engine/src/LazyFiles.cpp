@@ -132,9 +132,11 @@ struct ReadPolicy {
     std::vector<std::string> limitedFolders; // URL prefixes
     double budget { -1 }; // ms, negative: no limit
     void (*arrived)() { nullptr };
+    bool (*waitsFully)() { nullptr }; // reads that wait like the others meanwhile
     double deadline { 0 };
     unsigned pending { 0 }; // files on the way that a limited read started
     bool gaveUp { false }; // a read failed since the last arrived()
+    unsigned givenUp { 0 }; // reads that failed, ever
 };
 
 class LazyFile final : public DataFile {
@@ -183,6 +185,7 @@ private:
                 m_data.clear();
                 if (limited) {
                     m_policy->gaveUp = true;
+                    ++m_policy->givenUp;
                     debugLog("[lazy] %s still on the way, the text goes on without it", m_url.c_str());
                 } else
                     log("[lazy] %s could not be loaded", m_url.c_str());
@@ -203,7 +206,7 @@ private:
     {
         constexpr double maximum = 8000;
         auto& policy = *m_policy;
-        if (m_arrived || policy.budget < 0 || !isEngineThread() || !inLimitedFolder())
+        if (m_arrived || policy.budget < 0 || !isEngineThread() || !inLimitedFolder() || (policy.waitsFully && policy.waitsFully()))
             return maximum;
         limited = true;
         double now = emscripten_get_now();
@@ -360,7 +363,7 @@ void setLazyMissHandler(const char* mountPoint, void (*handler)(const char* path
         found->second->m_policy.miss = handler;
 }
 
-void setLazyWaitLimit(const char* mountPoint, const std::vector<std::string>& folders, double budget, void (*arrived)())
+void setLazyWaitLimit(const char* mountPoint, const std::vector<std::string>& folders, double budget, void (*arrived)(), bool (*waitsFully)())
 {
     auto found = backends().find(mountPoint);
     if (found == backends().end())
@@ -370,6 +373,13 @@ void setLazyWaitLimit(const char* mountPoint, const std::vector<std::string>& fo
         policy.limitedFolders.push_back(found->second->m_urlFolder + '/' + folder + '/');
     policy.budget = budget;
     policy.arrived = arrived;
+    policy.waitsFully = waitsFully;
+}
+
+unsigned lazyReadsGivenUp(const char* mountPoint)
+{
+    auto found = backends().find(mountPoint);
+    return found == backends().end() ? 0 : found->second->m_policy.givenUp;
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE void bl__lazy_arrived(void* file)

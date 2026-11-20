@@ -769,7 +769,10 @@ for scans the rendered text outside Latin-1 and fetches the fonts and dictionari
 by side (#252, #485);
 fonts only reached as a fallback for characters (scripts, CJK, emoji) hold up the engine thread at
 most 300 ms, the text is laid out again once they are there (#255), only the elements with text
-outside the fonts of `engine.data` (#401). The fonts of a cascade keep every fallback font their
+outside the fonts of `engine.data` (#401). Text drawn or measured into a 2D canvas has no second
+layout, the page reads its widths and pixels back at once: it waits for these fonts like for
+local ones (patch 0171, `engine/src/CanvasTextFonts.cpp`, #637) and looks up again the
+fallbacks a layout remembered as missing. The fonts of a cascade keep every fallback font their
 cached shaped text points to, also the one for an emoji cluster, so a purge of WebKit's font
 cache never deletes a font that text still paints with (patch 0087, #434).
 
@@ -891,7 +894,10 @@ access), `engine/src/wasm/WasmBridge.cpp` passes values, and `engine/js/wasm-hos
 modules in the engine worker. `engine/js/wasm-rewrite.js` rewrites every module so each memory is
 a bounds-checked region of engine memory and `memory.buffer` is a normal ArrayBuffer (#57, #58,
 #152); this costs about 10 to 15 % speed. Limits: 2 GB per memory, 64 nested JS/Wasm calls, no
-shared memory or JSPI (#153). Page workers run from the host event loop so finalizers fire (#183); a worker thread that waits
+shared memory or JSPI (#153). A command reaches the host side through an import of its own
+(`bl_wasm_dispatch`), which reads and writes the slots with the memory's views taken once:
+with threads and a growing memory every `HEAP` access of Emscripten's glue looks at the
+memory's buffer, 4 % of the engine thread while hCaptcha's `hsw.js` ran (#637). Page workers run from the host event loop so finalizers fire (#183); a worker thread that waits
 for a lock runs the calls queued for it, so a pump of its run loop that arrives then only asks
 for another one after the running pump (patch 0170, #635).
 Like the engine's polyfills (`callEngineFunction`), the API is evaluated with the source URL

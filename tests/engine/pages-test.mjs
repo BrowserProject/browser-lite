@@ -73,6 +73,10 @@
 //   native-functions.html  the engine's polyfills and WebAssembly bridge print as [native code]
 //                  like JSC's builtins (patch 0169), page functions their source;
 //                  navigator.hardwareConcurrency 8 for a host with 10 processors (patch 0168)
+//   canvas-text-fonts.html  text drawn or measured into a 2D canvas waits for its lazy fonts of
+//                  emoji, symbols, CJK and other scripts (patch 0171), also late in a long task
+//                  whose layout already went on without them: the same widths and pixels as once
+//                  the fonts arrived
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -111,6 +115,7 @@ const CASES = [
   { name: 'transform-presence', size: [800, 600], wait: 'TRANSFORM done' },
   { name: 'replaced-percent-heights', size: [1280, 800], wait: 'REPLACED done' },
   { name: 'image-load-events', wait: 'IMGLOAD done' },
+  { name: 'canvas-text-fonts', wait: 'CANVASFONTS done' },
   { name: 'select-styles', size: [400, 220], check: 'check-select-styles.mjs' },
   {
     name: 'form-controls',

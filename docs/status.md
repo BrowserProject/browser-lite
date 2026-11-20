@@ -911,7 +911,33 @@ browser (Safari keeps Cmd+L, T and W for itself).
    that challenge for good (30 pauses in 70 s); input that keeps coming as often might do the same.
    Open: on the Pixel, scrapingcourse's widget logged one "Ignored message from
    unexpected source" for `interactiveEnd`, after the token, when it had already removed the
-   widget; not seen locally. LinkedIn Learning
+   widget; not seen locally. hCaptcha (accounts.hcaptcha.com/demo, 2026-11-20, local, Chromium
+   host, phone emulation at a fourth of the CPU, 390x780, touch, load 6 to 27): a tap 5 s after
+   the checkbox is drawn opens the challenge in every run, 5.6 to 13.2 s after the tap (with #637
+   6.7 to 13.0 s, median 9.0, against 7.5 to 13.1 s, median 11.7, before, 5 interleaved runs
+   each; plain Chromium 2.5 to 3.5 s), the longest RunLoop step 4.3 to 8.3 s (before 5.3 to
+   8.2 s). hCaptcha changes its
+   `hsw.js` every few hours: the version of the survey (morning) ran a step of 17.9 s, those of
+   the afternoon 4 to 9 s. Its WebAssembly does little itself (about 0.8 s in a run) and calls
+   into the JS of `hsw.js` for nearly everything (10.5 of 11.3 s below the guest calls): the
+   interpreter, compiled code, `slow_path_enter`, `get_by_val`, array growth, so what is left is
+   the speed of JS ([jit.md](jit.md)); fonts about 2 % (family probes through fontconfig), the
+   canvas and WebGL probes below 1 % each. Emscripten's glue of the bridge cost 4.6 % of the
+   engine thread and its canvas text 18 to 60 lazy fonts per run that it went on without, now
+   0.3 % and none (#637); the canvas now waits 0.4 to 0.9 s per run for its 22 font files from the
+   HTTP cache, on a first visit at 5 Mbit/s and 150 ms an estimated 7 s (2.4 MB with Brotli, 22
+   round trips one after the other; not measured). Desktop, invisible widget with the demo's key
+   on a local page (1280x900): the challenge 4.6 to 7.7 s after the click, with and without #637.
+   The first tap that did nothing in 1 of 5 runs of the survey did not come back in 27 runs: a tap
+   during `hsw.js` waits for its step and then opens the challenge (the checkbox frame is the
+   input's target and same-site, no frame pause, #589). Under a load of 22 with the profiler, a
+   tap 5 s after the checkbox frame got its size came before the frame asked for its site config,
+   and hCaptcha ignored it; the measurement now waits for the drawn checkbox. Open: the criteria
+   (challenge under 8 s after the tap, steps under 6 s, the invisible widget under 5 s, Moto G71
+   under 7 s, not measured with #637) are not reached; the layout of a long task still goes on
+   without a lazy font 300 ms after its first one even when the file is there a few ms later,
+   because the arrivals are reported to the engine thread as tasks; fetching a canvas text's fonts
+   side by side would need the fallback's choice ahead of its reads. LinkedIn Learning
    (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain
    Chromium also loads, its main thread 10 % busy then): after the load the engine thread answered
    no eval for up to 10 s, about 35 s in all, then recovered. Its hashing loops now run inline

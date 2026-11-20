@@ -25,8 +25,12 @@ void setLazyMissHandler(const char* mountPoint, void (*handler)(const char* path
 // fallback for characters) wait at most `budget` ms from the first such read that waits: the
 // reads after that deadline do not wait at all, they fail. A file that could not wait goes on
 // loading; once every such file arrived, `arrived` runs on the engine thread (to look up the fonts
-// again). A negative budget waits for every file.
-void setLazyWaitLimit(const char* mountPoint, const std::vector<std::string>& folders, double budget, void (*arrived)());
+// again). A negative budget waits for every file. While `waitsFully` returns true the reads wait
+// like the ones outside these folders (text whose result the page reads back at once).
+void setLazyWaitLimit(const char* mountPoint, const std::vector<std::string>& folders, double budget, void (*arrived)(), bool (*waitsFully)() = nullptr);
+
+// How many limited reads of `mountPoint` failed so far (the text went on without their file)
+unsigned lazyReadsGivenUp(const char* mountPoint);
 
 // Starts fetching files of the engine folder (paths, one per line) without waiting, so their
 // first reads find them in the HTTP cache. Low: behind the other requests of the host (the

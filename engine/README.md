@@ -153,7 +153,8 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
     (files of `lazy/` mounted read only at `/lazy`, fetched on first read), `FontPrefetch.cpp`
     (the fonts and dictionaries the rendered text outside Latin-1 needs, fetched side by side), `FontArrival.cpp`
     (fallback fonts the text went on without arrived: only the text that may take them is laid
-    out again)
+    out again), `CanvasTextFonts.cpp` (the text of a 2D canvas waits for its lazy fallback fonts
+    like for local ones, patch 0171)
   - Platform: `ServiceWorkerWasm.cpp` (WebCore's service worker server, page and worker sides
     connected through the RunLoop in IPC order, also the replies; the unsandboxed pages the
     service and shared workers run in; a service worker that does not stop is given up, not

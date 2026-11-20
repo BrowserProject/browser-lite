@@ -80,7 +80,7 @@ unsigned layOutTextAgain(Document& document)
 
 } // namespace
 
-void lazyFontsArrived()
+void forgetFallbackFonts()
 {
     // The fallbacks per character (also the ones that found no font), their glyphs and the
     // widths and shapes measured with them
@@ -88,6 +88,11 @@ void lazyFontsArrived()
         fallbacks->clear();
     FontCache::forCurrentThread().purgeInactiveFontData();
     FontCascadeCache::forCurrentThread().clearMeasurementCaches();
+}
+
+void lazyFontsArrived()
+{
+    forgetFallbackFonts();
 
     unsigned elements = 0;
     for (auto& entry : Document::allDocuments()) {

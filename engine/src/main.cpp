@@ -5,6 +5,7 @@
 
 #include "config.h"
 
+#include "CanvasTextFonts.h"
 #include "Compositor.h"
 #include "Engine.h"
 #include "EngineConfig.h"
@@ -160,8 +161,10 @@ int main(int, char**)
     setLazyMissHandler("/lazy/fonts", prefetchFontsOfRenderedText);
     setLazyMissHandler("/lazy/icu", prefetchFontsOfRenderedText);
     // Fonts only reached as a fallback for characters: the text goes on without them after a
-    // while and is laid out again once they are there (like font-display: swap)
-    setLazyWaitLimit("/lazy/fonts", { "scripts", "cjk", "emoji" }, config.fallbackFontWaitMs, lazyFontsArrived);
+    // while and is laid out again once they are there (like font-display: swap), the text of a
+    // canvas waits for them
+    setLazyWaitLimit("/lazy/fonts", { "scripts", "cjk", "emoji" }, config.fallbackFontWaitMs, lazyFontsArrived, canvasTextRuns);
+    installCanvasTextFonts();
 
     // All views share curl. WebKit allows 6 connections per host (like Chrome) but
     // only 17 in total: a few long polls in background views kept the active view

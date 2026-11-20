@@ -1,0 +1,93 @@
+diff --git a/Source/WebCore/html/canvas/CanvasRenderingContext2DBase.cpp b/Source/WebCore/html/canvas/CanvasRenderingContext2DBase.cpp
+index 321eaa464c..a4f2c6b883 100644
+--- a/Source/WebCore/html/canvas/CanvasRenderingContext2DBase.cpp
++++ b/Source/WebCore/html/canvas/CanvasRenderingContext2DBase.cpp
+@@ -90,6 +90,9 @@
+ #include "TextShapingResultAndDisplayList.h"
+ #include "TextUtil.h"
+ #include "WebCodecsVideoFrame.h"
++#if PLATFORM(WASM)
++#include "WasmPlatform.h"
++#endif
+ #include <JavaScriptCore/ConsoleTypes.h>
+ #include <wtf/CheckedArithmetic.h>
+ #include <wtf/NeverDestroyed.h>
+@@ -2890,6 +2893,10 @@ static bool canUseCachedShapedText(const TextRun& textRun)
+ 
+ void CanvasRenderingContext2DBase::drawTextUnchecked(const TextRun& textRun, double x, double y, bool fill, std::optional<double> maxWidth)
+ {
++#if PLATFORM(WASM)
++    // browser-lite: fonts that load on demand wait like local ones (WasmPlatform.h)
++    WasmPlatform::CanvasTextScope canvasTextScope;
++#endif
+     auto* cachedShapedText = [&]() -> TextShapingResultAndDisplayList* {
+         if (!canUseCachedShapedText(textRun))
+             return nullptr;
+@@ -3076,6 +3083,10 @@ Ref<TextMetrics> CanvasRenderingContext2DBase::measureTextInternal(const TextRun
+     auto* fontProxy = this->fontProxy();
+     if (!fontProxy->realized())
+         return metrics;
++#if PLATFORM(WASM)
++    // browser-lite: fonts that load on demand wait like local ones (WasmPlatform.h)
++    WasmPlatform::CanvasTextScope canvasTextScope;
++#endif
+ 
+     auto& font = *fontProxy;
+     auto& fontMetrics = font.metricsOfPrimaryFont();
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.cpp b/Source/WebCore/platform/wasm/WasmPlatform.cpp
+index d6bcd03625..34b7b3aefd 100644
+--- a/Source/WebCore/platform/wasm/WasmPlatform.cpp
++++ b/Source/WebCore/platform/wasm/WasmPlatform.cpp
+@@ -101,6 +101,25 @@ unsigned hardwareConcurrency()
+     return hardwareConcurrencyStorage;
+ }
+ 
++static CanvasTextCallbacks canvasTextCallbacks;
++
++void setCanvasTextCallbacks(const CanvasTextCallbacks& callbacks)
++{
++    canvasTextCallbacks = callbacks;
++}
++
++CanvasTextScope::CanvasTextScope()
++{
++    if (canvasTextCallbacks.begin)
++        canvasTextCallbacks.begin();
++}
++
++CanvasTextScope::~CanvasTextScope()
++{
++    if (canvasTextCallbacks.end)
++        canvasTextCallbacks.end();
++}
++
+ static ClipboardItems& clipboardStorage()
+ {
+     static NeverDestroyed<ClipboardItems> items;
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
+index edb4cd0539..592adeb943 100644
+--- a/Source/WebCore/platform/wasm/WasmPlatform.h
++++ b/Source/WebCore/platform/wasm/WasmPlatform.h
+@@ -91,6 +91,22 @@ WEBCORE_EXPORT String platform();
+ WEBCORE_EXPORT void setHardwareConcurrency(unsigned);
+ WEBCORE_EXPORT unsigned hardwareConcurrency();
+ 
++// Text drawn or measured into a 2D canvas: the page reads the result back at once
++// (measureText, getImageData), so the embedder lets the fonts that load on demand wait like local
++// fonts while such text is shaped, unlike the text of the layout. begin runs before its fonts are
++// looked up, end after; both on the thread of the canvas. Set before the first page.
++struct CanvasTextCallbacks {
++    void (*begin)() { nullptr };
++    void (*end)() { nullptr };
++};
++WEBCORE_EXPORT void setCanvasTextCallbacks(const CanvasTextCallbacks&);
++class CanvasTextScope {
++    WTF_MAKE_NONCOPYABLE(CanvasTextScope);
++public:
++    WEBCORE_EXPORT CanvasTextScope();
++    WEBCORE_EXPORT ~CanvasTextScope();
++};
++
+ // Online state of the pages (navigator.onLine, online/offline): network of the
+ // host browser and connection to the relay. Online at the start.
+ WEBCORE_EXPORT void setOnLine(bool);

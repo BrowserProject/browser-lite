@@ -49,6 +49,13 @@
 
 using namespace JSC;
 
+// A command for the host side (blWasmHost.dispatch): an import of its own instead of EM_ASM, whose
+// arguments every call read back from memory
+EM_JS(int, bl_wasm_dispatch, (uint32_t realm, int op, void* args, int count, void* out, int capacity), {
+    args >>>= 0; out >>>= 0;
+    return blWasmHost.dispatch(realm, op, args, count, out, capacity);
+});
+
 namespace BrowserLite {
 
 namespace {
@@ -476,7 +483,7 @@ EncodedJSValue bridgeHost(JSGlobalObject* globalObject, CallFrame* callFrame, ui
             free(text);
         return { };
     }
-    int results = EM_ASM_INT({ return blWasmHost.dispatch($0, $1, $2, $3, $4, $5); }, realmId, op, s.args, count, s.out, slotCapacity);
+    int results = bl_wasm_dispatch(realmId, op, s.args, count, s.out, slotCapacity);
     for (auto* text : texts)
         free(text);
     RELEASE_AND_RETURN(scope, JSValue::encode(readPairs(globalObject, s.out, results)));

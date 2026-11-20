@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Canvas text fonts</title>
+<!-- Text drawn or measured into a 2D canvas waits for the lazy fonts of emoji, symbols, CJK and
+     other scripts like for local fonts (patch 0171, engine/src/CanvasTextFonts.cpp), unlike the
+     layout, which waits for them at most 300 ms from the first such read and then goes on without
+     them (#255). A fingerprint script measures its probe strings in one long task: the layout's
+     first lazy font starts the 300 ms, the script runs on, and every font read after that failed
+     at once, also in a canvas, even with the font in memory a few ms later. Here the probes come
+     500 ms after a first lazy font of the layout; the layout of Georgian and Ethiopic text then
+     goes on without its fonts, and the canvas measures the same characters next. Each probe must
+     have glyphs (pixels other than as many characters without a glyph), and its width and pixels
+     must be the same as once the fonts arrived (a second measurement 1.5 s later). -->
+<body style="margin:0">
+<script>
+const FONT = '24px sans-serif';
+const PROBES = {
+  emoji: '\u{1F600}\u{1F98A}\u{1F44D}\u{1F3FD}\u{1F680}',
+  symbols: '♔♘♞\u{1F700}\u{1F70D}',
+  cjk: '漢字かな한글',
+  georgian: 'ქართული',
+  ethiopic: 'ሰላም ዓለም',
+};
+const layout = (text) => {
+  const span = document.createElement('span');
+  span.style.font = FONT;
+  span.textContent = text;
+  document.body.append(span);
+  return span.getBoundingClientRect().width;
+};
+const canvas = document.createElement('canvas');
+canvas.width = 240;
+canvas.height = 40;
+const context = canvas.getContext('2d', { willReadFrequently: true });
+// FNV-1a of the pixels of the text drawn alone
+const pixels = (text) => {
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.font = FONT;
+  context.fillStyle = '#000';
+  context.textBaseline = 'middle';
+  context.fillText(text, 4, 20);
+  let hash = 0x811c9dc5;
+  for (const byte of context.getImageData(0, 0, canvas.width, canvas.height).data)
+    hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+  return hash.toString(16);
+};
+const width = (text) => {
+  context.font = FONT;
+  return Math.round(context.measureText(text).width * 100) / 100;
+};
+// Private use characters have no glyph in any font
+const missing = (text) => ''.repeat([...text].length);
+const measure = () =>
+  Object.fromEntries(Object.entries(PROBES).map(([name, text]) => [name, { width: width(text), pixels: pixels(text) }]));
+
+// The layout's first lazy font (Thai), then the script runs on
+layout('ภาษาไทย');
+const end = performance.now() + 500;
+while (performance.now() < end);
+layout(PROBES.georgian + ' ' + PROBES.ethiopic);
+const first = measure();
+const failed = Object.keys(PROBES).filter((name) => first[name].pixels === pixels(missing(PROBES[name])));
+console.log('CANVASFONTS first=' + JSON.stringify(first));
+setTimeout(() => {
+  const later = measure();
+  console.log('CANVASFONTS later=' + JSON.stringify(later));
+  for (const name of Object.keys(PROBES)) {
+    if (JSON.stringify(first[name]) !== JSON.stringify(later[name]))
+      failed.push(name + ' changed');
+  }
+  console.log('CANVASFONTS done=' + (failed.length ? failed.join('/') : 'ok'));
+}, 1500);
+</script>

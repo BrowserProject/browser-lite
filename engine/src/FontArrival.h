@@ -8,4 +8,9 @@ namespace BrowserLite {
 // again, in every document.
 void lazyFontsArrived();
 
+// On the engine thread: WebKit forgets the fallback fonts it found per character, also the
+// characters that found none, and the widths measured with them, so the next text looks them up
+// again (the layout keeps the fonts its styles have)
+void forgetFallbackFonts();
+
 } // namespace BrowserLite

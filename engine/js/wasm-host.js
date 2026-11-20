@@ -93,18 +93,22 @@ var blWasmHost = (function () {
 
   // ------------------------------------------------------------ Slots
 
+  // The views once per read and write: with threads and a growing memory Emscripten makes every
+  // HEAP access look whether the memory grew (growMemViews, the buffer getter of a shared memory)
   function read(ptr, count, state) {
     const values = [];
+    const u32 = HEAPU32;
+    const f64 = HEAPF64;
     for (let i = 0; i < count; i++) {
       const p = ptr + i * SLOT;
-      const tag = HEAPU32[p >> 2];
-      const a = HEAPU32[(p + 4) >> 2];
-      const lo = HEAPU32[(p + 8) >> 2];
-      const hi = HEAPU32[(p + 12) >> 2];
+      const tag = u32[p >> 2];
+      const a = u32[(p + 4) >> 2];
+      const lo = u32[(p + 8) >> 2];
+      const hi = u32[(p + 12) >> 2];
       switch (tag) {
       case 0: values.push(undefined); break;
       case 1: values.push(null); break;
-      case 2: values.push(HEAPF64[(p + 8) >> 3]); break;
+      case 2: values.push(f64[(p + 8) >> 3]); break;
       case 3: values.push(BigInt.asIntN(64, (BigInt(hi) << 32n) | BigInt(lo))); break;
       case 4: values.push(!!lo); break;
       case 5: case 7: values.push(guestToken(realmState(a), lo)); break;
@@ -120,48 +124,53 @@ var blWasmHost = (function () {
   function write(ptr, values, state) {
     if (values.length > CAP)
       throw new RangeError('too many values');
+    let u32 = HEAPU32;
+    let f64 = HEAPF64;
     for (let i = 0; i < values.length; i++) {
       const p = ptr + i * SLOT;
       const value = values[i];
       let tag, a = 0;
-      HEAPU32[(p + 8) >> 2] = 0;
-      HEAPU32[(p + 12) >> 2] = 0;
+      u32[(p + 8) >> 2] = 0;
+      u32[(p + 12) >> 2] = 0;
       if (value === undefined)
         tag = 0;
       else if (value === null)
         tag = 1;
       else if (typeof value === 'number') {
         tag = 2;
-        HEAPF64[(p + 8) >> 3] = value;
+        f64[(p + 8) >> 3] = value;
       } else if (typeof value === 'bigint') {
         tag = 3;
         const v = BigInt.asUintN(64, value);
-        HEAPU32[(p + 8) >> 2] = Number(v & 0xffffffffn);
-        HEAPU32[(p + 12) >> 2] = Number(v >> 32n);
+        u32[(p + 8) >> 2] = Number(v & 0xffffffffn);
+        u32[(p + 12) >> 2] = Number(v >> 32n);
       } else if (typeof value === 'boolean') {
         tag = 4;
-        HEAPU32[(p + 8) >> 2] = value ? 1 : 0;
+        u32[(p + 8) >> 2] = value ? 1 : 0;
       } else if (value instanceof GuestRef) {
         tag = 5;
         a = value.realm;
-        HEAPU32[(p + 8) >> 2] = value.id;
+        u32[(p + 8) >> 2] = value.id;
       } else if (value instanceof Text) {
         tag = 10;
         const length = lengthBytesUTF8(value.text);
         const buffer = Module._malloc(length + 1);
         stringToUTF8(value.text, buffer, length + 1);
-        HEAPU32[(p + 8) >> 2] = buffer;
+        // malloc may have grown the memory: views of the grown buffer
+        u32 = HEAPU32;
+        f64 = HEAPF64;
+        u32[(p + 8) >> 2] = buffer;
         a = length;
       } else if (value instanceof ReleaseGuest) {
         tag = 7;
         a = value.token.realm;
-        HEAPU32[(p + 8) >> 2] = value.token.id;
+        u32[(p + 8) >> 2] = value.token.id;
       } else {
         tag = typeof value === 'function' ? 8 : 6;
-        HEAPU32[(p + 8) >> 2] = hostId(state, value);
+        u32[(p + 8) >> 2] = hostId(state, value);
       }
-      HEAPU32[p >> 2] = tag;
-      HEAPU32[(p + 4) >> 2] = a;
+      u32[p >> 2] = tag;
+      u32[(p + 4) >> 2] = a;
     }
     return values.length;
   }
