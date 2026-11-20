@@ -30,7 +30,7 @@ const FRAME = { x: 200, y: 150 };
 // The UI of the host page around the view (the demo's tab strip and toolbar)
 const CHROME = { left: 40, top: 70 };
 
-// Each document reports screenX - clientX and screenY - clientY of its events
+// Each document reports screenX less clientX and screenY less clientY of its events
 const listeners = (name) => `
 for (const type of ['mousedown', 'pointerdown', 'touchstart']) {
   addEventListener(type, (e) => {
