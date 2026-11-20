@@ -17,6 +17,7 @@
 #include "HiddenViews.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
+#include "ScreenGeometry.h"
 #include "ServiceWorkerWasm.h"
 #include "Spelling.h"
 #include "UserContent.h"
@@ -107,14 +108,30 @@ ChromeClient::ChromeClient(WebView& view)
 {
 }
 
+// The host's window, at least as big as the view (window.screenX/Y, outerWidth/Height)
 FloatRect ChromeClient::windowRect() const
 {
-    return FloatRect { { }, m_view->size() };
+    return ScreenGeometry::window(m_view->size());
 }
 
 FloatRect ChromeClient::pageRect() const
 {
-    return windowRect();
+    return FloatRect { { }, m_view->size() };
+}
+
+IntPoint ChromeClient::screenToRootView(const IntPoint& point) const
+{
+    return flooredIntPoint(ScreenGeometry::fromScreen(m_view->id(), point));
+}
+
+IntPoint ChromeClient::rootViewToScreen(const IntPoint& point) const
+{
+    return flooredIntPoint(ScreenGeometry::toScreen(m_view->id(), point));
+}
+
+IntRect ChromeClient::rootViewToScreen(const IntRect& rect) const
+{
+    return { rootViewToScreen(rect.location()), rect.size() };
 }
 
 void ChromeClient::invalidateRootView(const IntRect& rect)

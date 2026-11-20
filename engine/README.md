@@ -102,7 +102,9 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
   - Views: `WebView.cpp` (also Copy image and Save as of the context menu, the menu of the menu key and Shift+F10, the word selection of a long press, paint holding: the page
     left stays in view until the new one paints), `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
     restore, Tab to links, the popup blocker: a gesture or 5 s of transient activation, the link
-    address and tooltip of the mouse, none after a tap), `EditorClient.cpp` (the focused field's
+    address and tooltip of the mouse, none after a tap), `ScreenGeometry.cpp` (the host window as
+    every page's window and each view's place on the screen, for `screenX` and `outerWidth` and the
+    screen coordinates of input events), `EditorClient.cpp` (the focused field's
     input mode and keyboard hints and the text before the caret for the host's IME field),
     `Spelling.cpp` (spell checking like Chrome: Hunspell with the dictionary of the first
     language from `lazy/dictionaries`, loaded on a thread of its own when a field first needs it;

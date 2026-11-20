@@ -155,6 +155,26 @@ and `userPreferredContrast` from that (patch 0163; it read them only from GTK's 
 change reevaluates the media queries of all pages, so their `change` events fire (#623).
 `forced-colors` stays `none`: WebKit has no forced colors mode, and Chrome has one only on Windows.
 
+Where the pages lie on the screen comes from the host too (#634). The host window is the window of
+every page, like the top window is for a frame in a browser: `window.screenX/Y` (`screenLeft/Top`)
+and `outerWidth/Height` are the host's (`bl_set_window`, at least the view's size), so the UI around
+a view counts as chrome: the difference of `outerWidth` and `innerWidth` is the host's chrome plus
+the embedder's UI. Input events carry screen coordinates: the core sends the screen position of a
+view's top left corner with the pointer input it belongs to (`bl_set_view_origin`, the host event's
+`screenX` less its `clientX`, plus the canvas's place), and the engine adds it to the view position
+of mouse, pointer, touch, wheel and drag events and to `ChromeClient::rootViewToScreen`
+(`engine/src/ScreenGeometry.h`); a frame's events add the frame's place like in a browser. Pointer
+events from touches take the touch point's screen position (patch 0167; WebKit's GLib code used the
+view position). The screen (`bl_set_screen`) has the host's `availLeft`, `availTop` (and `left`,
+`top` where the host has them). With an emulated device the phone's browser window fills its screen
+at 0, 0 and the view sits at its bottom, below the browser's bar. A window moved without input is
+noticed at the next pointer event, resize or focus. Before #634 the engine reported the view as the
+window at 0, 0 and every `screenX` equal to `clientX`, which DataDome's captcha takes for a
+synthetic event.
+`navigator.hardwareConcurrency` follows the host's processors with Safari's rounding, 4 below 8 and
+8 from 8 on (`BL_HARDWARE_CONCURRENCY` from the host's `navigator.hardwareConcurrency`, patch 0168);
+WTF's own processor count, which sizes the engine's threads, is not touched.
+
 ## Threads
 
 Emscripten pthreads need `SharedArrayBuffer`, hence cross-origin isolation
@@ -864,6 +884,8 @@ modules in the engine worker. `engine/js/wasm-rewrite.js` rewrites every module 
 a bounds-checked region of engine memory and `memory.buffer` is a normal ArrayBuffer (#57, #58,
 #152); this costs about 10 to 15 % speed. Limits: 2 GB per memory, 64 nested JS/Wasm calls, no
 shared memory or JSPI (#153). Page workers run from the host event loop so finalizers fire (#183).
+Like the engine's polyfills (`callEngineFunction`), the API is evaluated with the source URL
+`browser-lite`, whose functions print as `[native code]` like JSC's builtins (patch 0169, #634).
 
 ## Garbage collection
 

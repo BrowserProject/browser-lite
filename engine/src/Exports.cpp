@@ -24,6 +24,7 @@
 #include "MediaFetch.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "MemoryVFS.h"
+#include "ScreenGeometry.h"
 #include "ScrollingWasm.h"
 #include "Speech.h"
 #include "Spelling.h"
@@ -409,12 +410,12 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
         RefPtr scene = CompositorScene::forView(id);
         if (scene && scene->scrollPinch({ static_cast<float>(deltaX), static_cast<float>(deltaY) })) {
             withPointerInput(id, { { x, y } }, [=](WebView& view) {
-                view.dispatchWheelEvent(WebView::makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers), { WebCore::WheelEventProcessingSteps::NonBlockingDOMEventDispatch });
+                view.dispatchWheelEvent(WebView::makeWheelEvent(id, x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers), { WebCore::WheelEventProcessingSteps::NonBlockingDOMEventDispatch });
             });
             return;
         }
         Compositor::dispatch([=] {
-            Scrolling::wheelEvent(id, WebView::makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers));
+            Scrolling::wheelEvent(id, WebView::makeWheelEvent(id, x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers));
         });
         return;
     }
@@ -443,7 +444,7 @@ EMSCRIPTEN_KEEPALIVE void bl_touch_scroll(int id, double x, double y, double del
 // blocks the engine thread.
 EMSCRIPTEN_KEEPALIVE int bl_zoom_wheel(int id, double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers, int cancelable)
 {
-    auto event = WebView::makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers);
+    auto event = WebView::makeWheelEvent(id, x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers);
     bool blocking = cancelable && Scrolling::mayCancelWheelEvent(id, event);
     runOnEngineThread([id, event, blocking] {
         if (auto* view = WebView::fromID(id))
@@ -705,12 +706,12 @@ EMSCRIPTEN_KEEPALIVE void bl_set_visible(int id, int visible)
 // flags: 1 = dark color scheme (prefers-color-scheme), 2 = touch screen,
 // 4 = mobile device (primary pointer coarse without hover), 8 = reduced motion
 // (prefers-reduced-motion), 16 = more contrast, 32 = less contrast (prefers-contrast)
-EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidth, int availableHeight, int flags)
+EMSCRIPTEN_KEEPALIVE void bl_set_screen(int left, int top, int width, int height, int availableLeft, int availableTop, int availableWidth, int availableHeight, int flags)
 {
     runOnEngineThread([=] {
         WebCore::WasmPlatform::ScreenInfo info;
-        info.rect = WebCore::FloatRect(0, 0, width, height);
-        info.availableRect = WebCore::FloatRect(0, 0, availableWidth, availableHeight);
+        info.rect = WebCore::FloatRect(left, top, width, height);
+        info.availableRect = WebCore::FloatRect(availableLeft, availableTop, availableWidth, availableHeight);
         info.prefersDarkMode = flags & 1;
         info.hasTouch = flags & 2;
         info.mobile = flags & 4;
@@ -731,6 +732,18 @@ EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidt
             WebCore::Page::updateStyleForAllPagesAfterGlobalChangeInEnvironment();
         screenOrientationMayHaveChanged();
     });
+}
+
+// The host window on the screen (ScreenGeometry.h): synchronous, like the host's own values
+EMSCRIPTEN_KEEPALIVE void bl_set_window(int x, int y, int outerWidth, int outerHeight)
+{
+    ScreenGeometry::setWindow({ static_cast<float>(x), static_cast<float>(y), static_cast<float>(outerWidth), static_cast<float>(outerHeight) });
+}
+
+// The screen position of the view's top left corner, before the input it came with
+EMSCRIPTEN_KEEPALIVE void bl_set_view_origin(int id, double x, double y)
+{
+    ScreenGeometry::setViewOrigin(id, { static_cast<float>(x), static_cast<float>(y) });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers, int tap)

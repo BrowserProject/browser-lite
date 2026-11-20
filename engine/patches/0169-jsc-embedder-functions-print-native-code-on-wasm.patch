@@ -1,0 +1,35 @@
+diff --git a/Source/JavaScriptCore/runtime/FunctionExecutable.cpp b/Source/JavaScriptCore/runtime/FunctionExecutable.cpp
+index 89ff4c1762..d065b98b34 100644
+--- a/Source/JavaScriptCore/runtime/FunctionExecutable.cpp
++++ b/Source/JavaScriptCore/runtime/FunctionExecutable.cpp
+@@ -166,6 +166,16 @@ FunctionExecutable::RareData& FunctionExecutable::ensureRareDataSlow()
+     return *m_rareData;
+ }
+ 
++#if OS(EMSCRIPTEN)
++// The embedder's own JS implementations of web APIs (browser-lite's polyfills, evaluated with the
++// source URL "browser-lite", which no script of a page can have) print like JSC's builtins
++static bool isEmbedderSource(const SourceCode& source)
++{
++    auto* provider = source.provider();
++    return provider && provider->sourceURL() == "browser-lite"_s;
++}
++#endif
++
+ JSString* FunctionExecutable::toStringSlow(JSGlobalObject* globalObject)
+ {
+     VM& vm = getVM(globalObject);
+@@ -184,7 +194,12 @@ JSString* FunctionExecutable::toStringSlow(JSGlobalObject* globalObject)
+         return cache(::JSC::asString(value));
+     };
+ 
+-    if (isBuiltinFunction())
++    bool native = isBuiltinFunction();
++#if OS(EMSCRIPTEN)
++    // A class without a constructor has a generated one: its source is the class's
++    native = native || isEmbedderSource(isClass() ? classSource() : source());
++#endif
++    if (native)
+         return cacheIfNoException(jsMakeNontrivialString(globalObject, "function "_s, name().string(), "() {\n    [native code]\n}"_s));
+ 
+     if (isClass())

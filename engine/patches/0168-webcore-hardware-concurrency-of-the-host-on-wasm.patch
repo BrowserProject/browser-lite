@@ -1,0 +1,65 @@
+diff --git a/Source/WebCore/page/NavigatorBase.cpp b/Source/WebCore/page/NavigatorBase.cpp
+index 06577148bd..1c572bcfb9 100644
+--- a/Source/WebCore/page/NavigatorBase.cpp
++++ b/Source/WebCore/page/NavigatorBase.cpp
+@@ -200,8 +200,13 @@ int NavigatorBase::hardwareConcurrency(ScriptExecutionContext& context)
+     // If machines with more than 8 cores become commonplace, we should bump this number.
+     // see https://bugs.webkit.org/show_bug.cgi?id=132588 for the
+     // rationale behind this decision.
++#if PLATFORM(WASM)
++    // The engine's own thread count says nothing about the device: the host's does
++    return WasmPlatform::hardwareConcurrency() < 8 ? 4 : 8;
++#else
+     static int numberOfCores = WTF::numberOfProcessorCores() < 8 ? 4 : 8;
+     return numberOfCores;
++#endif
+ }
+ 
+ WebCoreOpaqueRoot root(NavigatorBase* navigator)
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.cpp b/Source/WebCore/platform/wasm/WasmPlatform.cpp
+index 1fbc1d82bf..d6bcd03625 100644
+--- a/Source/WebCore/platform/wasm/WasmPlatform.cpp
++++ b/Source/WebCore/platform/wasm/WasmPlatform.cpp
+@@ -26,6 +26,7 @@
+ #include "config.h"
+ #include "WasmPlatform.h"
+ 
++#include <atomic>
+ #include <wtf/Lock.h>
+ #include <wtf/NeverDestroyed.h>
+ 
+@@ -88,6 +89,18 @@ String platform()
+     return platformStorage().isolatedCopy();
+ }
+ 
++static std::atomic<unsigned> hardwareConcurrencyStorage;
++
++void setHardwareConcurrency(unsigned cores)
++{
++    hardwareConcurrencyStorage = cores;
++}
++
++unsigned hardwareConcurrency()
++{
++    return hardwareConcurrencyStorage;
++}
++
+ static ClipboardItems& clipboardStorage()
+ {
+     static NeverDestroyed<ClipboardItems> items;
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
+index 4c176f4a27..edb4cd0539 100644
+--- a/Source/WebCore/platform/wasm/WasmPlatform.h
++++ b/Source/WebCore/platform/wasm/WasmPlatform.h
+@@ -86,6 +86,11 @@ WEBCORE_EXPORT String userAgent();
+ WEBCORE_EXPORT void setPlatform(const String&);
+ WEBCORE_EXPORT String platform();
+ 
++// Logical processors of the host (its navigator.hardwareConcurrency), 0 = unknown. Set before
++// the first page; navigator.hardwareConcurrency reports 4 below 8 and 8 from 8 on like Safari
++WEBCORE_EXPORT void setHardwareConcurrency(unsigned);
++WEBCORE_EXPORT unsigned hardwareConcurrency();
++
+ // Online state of the pages (navigator.onLine, online/offline): network of the
+ // host browser and connection to the relay. Online at the start.
+ WEBCORE_EXPORT void setOnLine(bool);

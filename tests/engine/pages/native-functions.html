@@ -1,0 +1,24 @@
+<!doctype html>
+<title>Native functions</title>
+<!-- The engine's own JS implementations of web APIs (its polyfills, the WebAssembly bridge) print
+     as [native code] like JSC's builtins (patch 0169); functions of the page keep their source.
+     navigator.hardwareConcurrency follows the host's processors like Safari, 4 below 8 and 8 from
+     8 on (patch 0168, BL_HARDWARE_CONCURRENCY=10 in pages-test.mjs) -->
+<script>
+const text = (f) => Function.prototype.toString.call(f);
+const native = (f) => typeof f === 'function' && /^function [\w$]*\(\) \{\n    \[native code\]\n\}$/.test(text(f));
+function own(a) { return a + 1; }
+const checks = {
+  vibrate: native(navigator.vibrate),
+  postTask: native(scheduler.postTask),
+  TaskController: native(TaskController),
+  EyeDropper: typeof EyeDropper !== 'function' || native(EyeDropper),
+  showOpenFilePicker: typeof showOpenFilePicker !== 'function' || native(showOpenFilePicker),
+  webAssembly: native(WebAssembly.instantiate) && native(WebAssembly.Module),
+  builtin: native(Array.prototype.map) && native(Promise.prototype.then),
+  page: text(own) === 'function own(a) { return a + 1; }' && text(() => 2) === '() => 2',
+  cores: navigator.hardwareConcurrency === 8,
+};
+const failed = Object.keys(checks).filter((key) => !checks[key]);
+console.log('NATIVE done=' + (failed.length ? failed.join('/') + ':' + text(navigator.vibrate).slice(0, 40).replace(/\s+/g, ' ') + ':' + navigator.hardwareConcurrency : 'ok'));
+</script>

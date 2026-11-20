@@ -168,7 +168,7 @@ class BrowserImpl implements Browser, ViewHost {
   readonly imageCopies: ImageCopies;
   private readonly events = new Emitter<BrowserEvents>();
   private readonly lifetime = new AbortController();
-  private readonly screen: Screen;
+  readonly screen: Screen;
   private readonly handlers = new Map<string, EventHandler>();
   private readonly services: ServiceRegistry;
   private readonly downloads: Downloads;

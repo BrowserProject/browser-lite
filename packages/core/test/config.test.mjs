@@ -161,6 +161,7 @@ test('engine environment', () => {
     BL_FEATURES: 'audio,media',
     BL_STORAGE_NAMESPACE: 'site_1',
     TZ: 'Europe/Zurich',
+    BL_HARDWARE_CONCURRENCY: String(navigator.hardwareConcurrency || 0),
     BL_ERROR_PAGE: '<p>{{message}}</p>',
     BL_TEST_HOOKS: '1',
     BL_DEBUG: '1',
@@ -177,6 +178,7 @@ test('engine environment', () => {
     BL_FEATURES: '',
     BL_STORAGE_NAMESPACE: 'browserlite',
     TZ: plain.TZ,
+    BL_HARDWARE_CONCURRENCY: String(navigator.hardwareConcurrency || 0),
   });
   for (const key of Object.keys(env))
     if (key.startsWith('BL_') && !key.startsWith('BL_MEMORY'))

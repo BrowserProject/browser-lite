@@ -160,7 +160,7 @@ public:
     void startPageDrag(Ref<WebCore::WasmPlatform::DragContent>&&, OptionSet<WebCore::DragOperation> sourceOperations);
     void hostDrag(int phase, double x, double y, int modifiers, const String& data);
     void cancelDrag();
-    static WebCore::PlatformWheelEvent makeWheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers);
+    static WebCore::PlatformWheelEvent makeWheelEvent(int id, double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers);
     // A finger scrolls (bl_touch_scroll): phase 0 down, 1 first move, 2 move (DOM deltas), 3 lifted
     // (deltas: velocity in px/s, 0 without a fling)
     static WebCore::PlatformWheelEvent makeTouchScrollEvent(double x, double y, double deltaX, double deltaY, int phase);

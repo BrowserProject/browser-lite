@@ -49,6 +49,7 @@ export const CORE_ENV = [
   'BL_ERROR_PAGE',
   'BL_EXTRA_CA',
   'BL_KEEP_SESSION_COOKIES',
+  'BL_HARDWARE_CONCURRENCY',
   'TZ',
   'BL_DEBUG',
   'BL_GPU',
@@ -394,6 +395,8 @@ export function engineEnv(
     BL_FEATURES: features.join(','),
     BL_STORAGE_NAMESPACE: config.namespace,
     TZ: config.timeZone,
+    // The pages' navigator.hardwareConcurrency follows the host's processors
+    BL_HARDWARE_CONCURRENCY: String(navigator.hardwareConcurrency || 0),
   };
   if (!persistent) result.BL_OPFS = '0';
   if (!config.persistent || !config.httpCache) result.BL_HTTP_CACHE = '0';

@@ -16,6 +16,7 @@
 #include "HiddenViews.h"
 #include "LayerTreeHostWasm.h"
 #include "MemoryWatch.h"
+#include "ScreenGeometry.h"
 #include "ScrollingWasm.h"
 #include "ServiceWorkerWasm.h"
 #include "Spelling.h"
@@ -470,6 +471,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 WebView::~WebView()
 {
     viewsByID().remove(m_id);
+    ScreenGeometry::forgetView(m_id);
     forgetWorkerCanvas(m_id);
     if (m_page) {
         if (RefPtr frame = m_page->localMainFrame())
@@ -1110,8 +1112,8 @@ namespace {
 // (with pointer lock the only movement)
 class MouseEventWasm final : public PlatformMouseEvent {
 public:
-    MouseEventWasm(const DoublePoint& position, MouseButton button, unsigned short buttons, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement, std::optional<PointerID> tapPointer = std::nullopt, MonotonicTime time = MonotonicTime::now())
-        : PlatformMouseEvent(position, position, button, type, clickCount, modifiers, time, 0, tapPointer ? SyntheticClickType::OneFingerTap : SyntheticClickType::NoTap, MouseEventInputSource::UserDriven, tapPointer.value_or(mousePointerID))
+    MouseEventWasm(const DoublePoint& position, const DoublePoint& screenPosition, MouseButton button, unsigned short buttons, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement, std::optional<PointerID> tapPointer = std::nullopt, MonotonicTime time = MonotonicTime::now())
+        : PlatformMouseEvent(position, screenPosition, button, type, clickCount, modifiers, time, 0, tapPointer ? SyntheticClickType::OneFingerTap : SyntheticClickType::NoTap, MouseEventInputSource::UserDriven, tapPointer.value_or(mousePointerID))
     {
         m_buttons = buttons;
         m_movementDelta = movement;
@@ -1152,12 +1154,13 @@ void WebView::mouseEvent(int type, int button, int buttons, double x, double y, 
     }
 
     DoublePoint position { x, y };
-    MouseEventWasm event { position, mouseButton, static_cast<unsigned short>(buttons), eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY }, tapPointer };
+    MouseEventWasm event { position, ScreenGeometry::toScreen(m_id, position), mouseButton, static_cast<unsigned short>(buttons), eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY }, tapPointer };
     // A trusted pointermove has at least one coalesced event (Pointer Events 3): the moves it
     // stands for, like WebKit2's WebPageProxy and Blink, else itself
     if (eventType == PlatformEvent::Type::MouseMoved) {
         auto coalesced = WTF::map(moves, [&](auto& move) -> PlatformMouseEvent {
-            return MouseEventWasm { { move.x, move.y }, mouseButton, static_cast<unsigned short>(buttons), eventType, 0, modifiersFromBits(modifiers), { move.movementX, move.movementY }, tapPointer, move.time };
+            DoublePoint point { move.x, move.y };
+            return MouseEventWasm { point, ScreenGeometry::toScreen(m_id, point), mouseButton, static_cast<unsigned short>(buttons), eventType, 0, modifiersFromBits(modifiers), { move.movementX, move.movementY }, tapPointer, move.time };
         });
         if (coalesced.isEmpty())
             coalesced.append(event);
@@ -1231,7 +1234,7 @@ void WebView::updateDrag(IntPoint point, int modifiers)
         flags.add(DragApplicationFlags::IsCopyKeyDown);
     // Without "Load": files or links from the host do not open the file
     // instead of the page
-    DragData dragData { m_drag->content.ptr(), point, point, m_drag->sourceOperations, flags, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
+    DragData dragData { m_drag->content.ptr(), point, flooredIntPoint(ScreenGeometry::toScreen(m_id, point)), m_drag->sourceOperations, flags, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
     m_drag->lastPoint = point;
     auto result = m_page->dragController().dragEnteredOrUpdated(*frame, WTF::move(dragData));
     if (m_drag) {
@@ -1252,7 +1255,7 @@ void WebView::endDrag(IntPoint point, bool drop, int modifiers)
         flags.add(DragApplicationFlags::IsSource);
     if (modifiers & 2)
         flags.add(DragApplicationFlags::IsCopyKeyDown);
-    DragData dragData { session.content.ptr(), point, point, session.sourceOperations, flags, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
+    DragData dragData { session.content.ptr(), point, flooredIntPoint(ScreenGeometry::toScreen(m_id, point)), session.sourceOperations, flags, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
     bool dropped = drop && session.operation;
     if (dropped)
         m_page->dragController().performDragOperation(WTF::move(dragData), *frame);
@@ -1270,7 +1273,7 @@ void WebView::dropOutside(std::optional<DragOperation> operation)
         return;
     auto session = WTF::move(*m_drag);
     m_drag.reset();
-    DragData dragData { session.content.ptr(), session.lastPoint, session.lastPoint, session.sourceOperations, { DragApplicationFlags::IsSource }, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
+    DragData dragData { session.content.ptr(), session.lastPoint, flooredIntPoint(ScreenGeometry::toScreen(m_id, session.lastPoint)), session.sourceOperations, { DragApplicationFlags::IsSource }, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
     m_page->dragController().dragExited(*frame, WTF::move(dragData));
     finishDrag(session, session.lastPoint, 0, operation);
 }
@@ -1282,7 +1285,8 @@ void WebView::finishDrag(const DragSession& session, IntPoint point, int modifie
         return;
     // dragend to the source, with the result (dropEffect)
     if (RefPtr frame = mainFrame()) {
-        MouseEventWasm event { DoublePoint { static_cast<double>(point.x()), static_cast<double>(point.y()) }, MouseButton::Left, 0, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { } };
+        DoublePoint position { static_cast<double>(point.x()), static_cast<double>(point.y()) };
+        MouseEventWasm event { position, ScreenGeometry::toScreen(m_id, position), MouseButton::Left, 0, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { } };
         frame->eventHandler().dragSourceEndedAt(event, result ? OptionSet<DragOperation> { *result } : OptionSet<DragOperation> { });
     }
     notifyHost(m_id, "page-drag-end");
@@ -1339,14 +1343,15 @@ void WebView::hostDrag(int phase, double x, double y, int modifiers, const Strin
         endDrag(point, true, modifiers);
 }
 
-PlatformWheelEvent WebView::makeWheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers)
+PlatformWheelEvent WebView::makeWheelEvent(int id, double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers)
 {
     IntPoint position { static_cast<int>(x), static_cast<int>(y) };
+    auto screenPosition = flooredIntPoint(ScreenGeometry::toScreen(id, position));
     // DOM: deltaY > 0 means scroll down. WebCore: inverted sign. Pages read the ticks as
     // wheelDelta (120 per tick): take the host's own, its ratio to the delta differs by
     // platform (Chrome 1.2 on Windows and Linux, 3 on macOS); 40 pixels per tick without.
     auto ticks = [](double wheelDelta, double delta) { return static_cast<float>(wheelDelta ? wheelDelta / 120 : -delta / 40); };
-    return { position, position, static_cast<float>(-deltaX), static_cast<float>(-deltaY), ticks(wheelDeltaX, deltaX), ticks(wheelDeltaY, deltaY),
+    return { position, screenPosition, static_cast<float>(-deltaX), static_cast<float>(-deltaY), ticks(wheelDeltaX, deltaX), ticks(wheelDeltaY, deltaY),
         PlatformWheelEventGranularity::ScrollByPixelWheelEvent, !!(modifiers & 1), !!(modifiers & 2), !!(modifiers & 4), !!(modifiers & 8) };
 }
 
@@ -1396,7 +1401,7 @@ PlatformWheelEvent WebView::makeTouchScrollEvent(double x, double y, double delt
 
 void WebView::wheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers)
 {
-    dispatchWheelEvent(makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers), { WheelEventProcessingSteps::SynchronousScrolling, WheelEventProcessingSteps::BlockingDOMEventDispatch });
+    dispatchWheelEvent(makeWheelEvent(m_id, x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers), { WheelEventProcessingSteps::SynchronousScrolling, WheelEventProcessingSteps::BlockingDOMEventDispatch });
 }
 
 void WebView::dispatchWheelEvent(const PlatformWheelEvent& event, OptionSet<WheelEventProcessingSteps> steps)
@@ -1485,12 +1490,12 @@ namespace {
 // PlatformTouchEvent/-Point only have protected fields, the ports fill them themselves
 class TouchPointWasm final : public PlatformTouchPoint {
 public:
-    TouchPointWasm(unsigned id, State state, DoublePoint position, DoubleSize radius, float force)
+    TouchPointWasm(unsigned id, State state, DoublePoint position, DoublePoint screenPosition, DoubleSize radius, float force)
     {
         m_id = id;
         m_state = state;
         m_pos = position;
-        m_screenPos = position;
+        m_screenPos = screenPosition;
         m_radius = radius;
         m_rotationAngle = 0;
         m_twist = 0;
@@ -1583,7 +1588,7 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
             auto here = touchActionAt(*frame, position);
             allowed = { allowed.panX && here.panX, allowed.panY && here.panY, allowed.pinchZoom && here.pinchZoom };
         }
-        points.append(TouchPointWasm(point->getInteger("id"_s).value_or(0), state, position,
+        points.append(TouchPointWasm(point->getInteger("id"_s).value_or(0), state, position, ScreenGeometry::toScreen(m_id, position),
             { point->getDouble("rx"_s).value_or(1), point->getDouble("ry"_s).value_or(1) },
             static_cast<float>(point->getDouble("force"_s).value_or(0))));
         auto pointerId = PointerEvent::pointerIdForTouchPoint(points.last());

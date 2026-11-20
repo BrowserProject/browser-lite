@@ -952,6 +952,8 @@ static JSC::JSObject* createHostCaller(JSC::JSGlobalObject& globalObject, int vi
     });
 }
 
+// The source URL "browser-lite" makes the functions print as [native code] (patch 0169), like
+// the browser's own implementations of web APIs in Safari and Chrome; WasmBridge.cpp uses it too
 static JSC::SourceCode engineFunctionSource(const String& source)
 {
     return JSC::makeSource(source, { }, JSC::SourceTaintedOrigin::Untainted, "browser-lite"_s);

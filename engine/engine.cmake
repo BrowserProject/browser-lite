@@ -39,6 +39,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/CacheStorageWasm.cpp
     ${BL_ENGINE_SRC}/GpuRaster.cpp
     ${BL_ENGINE_SRC}/LayerTreeHostWasm.cpp
+    ${BL_ENGINE_SRC}/ScreenGeometry.cpp
     ${BL_ENGINE_SRC}/ScrollingWasm.cpp
     ${BL_ENGINE_SRC}/ServiceWorkerWasm.cpp
     ${BL_ENGINE_SRC}/WebPlatformExtras.cpp

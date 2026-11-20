@@ -44,6 +44,10 @@ and of a released handle carry `selectionBounds`, the selection with its handles
 keeps clear of (`showContextMenu` of `@browser-lite/ui` does).
 The canvas shows the page's frames pixel for pixel from its top left (its box is the pixel ratio
 times the container, scaled back with `transform`), so size the container, not the canvas.
+For the pages your window is their browser window (`screenX`, `outerWidth` and so on are its),
+so your UI around the container counts as the window's chrome, and their input events carry the
+screen position of the canvas, like a frame in a browser
+([architecture, WebKit port](../../docs/architecture.md#webkit-port)).
 Overlays of your own inside the container need a `z-index`; for the page the mouse leaves when it
 moves onto one or out of the canvas (mouseleave, no more `:hover`). The hidden text field takes the
 focus for the page and carries the input mode and enter key hint of the page's focused field (a

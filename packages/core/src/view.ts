@@ -22,6 +22,7 @@ import { menuMedia } from './menu-media.js';
 import { menuSpelling } from './menu-spelling.js';
 import { PendingNavigation } from './pending.js';
 import type { Requests } from './requests.js';
+import type { Screen, ScreenPoint } from './screen.js';
 import { SelectionHandles } from './selection-handles.js';
 import type {
   ClipboardWriteRequest,
@@ -56,6 +57,7 @@ export interface ViewHost {
   readonly requests: Requests;
   text(value: string | null | undefined): number;
   pixelRatio(): number;
+  readonly screen: Screen;
   presenter(): Worker | null;
   pageHidden(): boolean;
   defaultSize(): { width: number; height: number };
@@ -130,6 +132,7 @@ export class ViewImpl implements View {
   private size = { width: 0, height: 0 };
   private device: { width: number; height: number } | null = null;
   private canvasRatio = 0;
+  private screenOrigin: [number, number] = [0, 0];
   private frameRequested = false;
   private caret: Caret | null = null;
   private closing: Promise<boolean> | null = null;
@@ -206,9 +209,17 @@ export class ViewImpl implements View {
     return this.engineVisible;
   }
 
-  /** @internal Position of a pointer event in CSS pixels of the view. */
-  position(e: { clientX: number; clientY: number }): [number, number] {
+  /**
+   * @internal Position of a pointer event in CSS pixels of the view. The engine learns first
+   * where the view lies on the screen, for the screen coordinates of the input.
+   */
+  position(e: ScreenPoint): [number, number] {
     const rect = this.canvas.getBoundingClientRect();
+    const [x, y] = this.host.screen.viewOrigin(rect, this.size.height, e);
+    if (x !== this.screenOrigin[0] || y !== this.screenOrigin[1]) {
+      this.screenOrigin = [x, y];
+      this.host.module._bl_set_view_origin(this.id, x, y);
+    }
     return [e.clientX - rect.left, e.clientY - rect.top];
   }
 

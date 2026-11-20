@@ -59,9 +59,10 @@ private:
     void invalidateContentsForSlowScroll(const WebCore::IntRect&) final;
     void scroll(const WebCore::IntSize&, const WebCore::IntRect&, const WebCore::IntRect&) final;
 
-    WebCore::IntPoint screenToRootView(const WebCore::IntPoint& p) const final { return p; }
-    WebCore::IntPoint rootViewToScreen(const WebCore::IntPoint& p) const final { return p; }
-    WebCore::IntRect rootViewToScreen(const WebCore::IntRect& r) const final { return r; }
+    // The view's place on the screen (ScreenGeometry.h)
+    WebCore::IntPoint screenToRootView(const WebCore::IntPoint&) const final;
+    WebCore::IntPoint rootViewToScreen(const WebCore::IntPoint&) const final;
+    WebCore::IntRect rootViewToScreen(const WebCore::IntRect&) const final;
 
     void contentsSizeChanged(WebCore::LocalFrame&, const WebCore::IntSize&) const final;
     void setCursor(const WebCore::Cursor&) final;

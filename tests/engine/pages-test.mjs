@@ -70,6 +70,9 @@
 //                  Safari (patch 0056): counts of toString and getter calls of console.log,
 //                  console.error('%c', o) and console.log(error); `expect` checks the engine's log
 //                  line with every argument (primitives as text, errors, objects by class name)
+//   native-functions.html  the engine's polyfills and WebAssembly bridge print as [native code]
+//                  like JSC's builtins (patch 0169), page functions their source;
+//                  navigator.hardwareConcurrency 8 for a host with 10 processors (patch 0168)
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -136,6 +139,7 @@ const CASES = [
       '[page] objects Object Object Proxy',
     ],
   },
+  { name: 'native-functions', wait: 'NATIVE done', env: { BL_HARDWARE_CONCURRENCY: '10' } },
   { name: 'tail-calls', wait: 'TAILCALLS done' },
   {
     name: 'tail-calls',

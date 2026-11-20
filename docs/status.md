@@ -513,6 +513,17 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Costco, adidas, leboncoin, StockX, Indeed) load from the test machine; Home Depot (Akamai), Hermes
   and G2 (DataDome) block that IP also for Chromium, Walmart and Zillow (HUMAN) ask for press and
   hold after repeated automated visits, with the old and the new fingerprint alike.
+- **Device identity** (#634): `window.screenX/Y` and `outerWidth/Height` are the host window's and
+  input events (mouse, pointer, touch, wheel, drag, also in cross-site frames) carry real screen
+  coordinates, `screen.availLeft/availTop` are the host's, an emulated phone keeps everything
+  inside its screen (`tests/core/screen-geometry-test.mjs`: 14 of its checks failed before, also
+  headed with the window at 120,60). `navigator.hardwareConcurrency` is Safari's 4 or 8 for the
+  host's processors (it was always 4). The engine's polyfills and the WebAssembly API print as
+  `[native code]` like JSC's builtins. Checked and left as they are: `navigator.plugins` is empty
+  and `pdfViewerEnabled` false (Safari 26 lists 5 PDF plugins and true), which is honest, since
+  the engine shows no PDFs (#130); some polyfilled APIs have no Safari counterpart
+  (`navigator.vibrate`, `scheduler`), and errors thrown inside a polyfill show `browser-lite` as
+  the file of their frames in `Error.stack`.
 - **Browsers and devices** (2026-10-28, real devices through BrowserStack): macOS Safari 18.4
   (incl. profile sync), iPhone 16 and iPad Air 13 on iOS 18 (Wikipedia mobile, YouTube, MP4 with
   sound after a tap, the on-screen keyboard with the field's input mode, 20min.ch with its consent
@@ -1166,7 +1177,16 @@ browser (Safari keeps Cmd+L, T and W for itself).
   answers with a cookie), browser-lite is blocked in 6 of 6, before and after #629. The check
   request has the same 18 fields in the same order; its encoded payload is about 8.9 KB against
   10.0 KB and `plv3` 547 against 568 characters, so some signal the challenge collects differs.
-  Not yet found which.
+  One was found and fixed (#634): the engine reported every event's `screenX/Y` equal to its
+  `clientX/Y` and the window at 0, 0 with no chrome, and the captcha's slider handler checks
+  `pageY == screenY && pageX == screenX`. Now the same drag in headed Chromium at 1280x800 gives
+  the same `screenX/Y` in browser-lite as in plain Chromium (140,217 for a press at 130,120 with
+  the window at 10,10). Retried after #634 (2026-11-20, 3 runs, fresh profiles, headed Chromium
+  host, each run with plain Chromium beside it on the same IP and the same drag): browser-lite
+  blocked in 3 of 3 (once Retry, twice "You have been blocked"), plain Chromium passed in 3 of 3,
+  so the IP does not block and another signal still differs. Remaining differences seen in the
+  events of the same drag: `detail` of `pointerdown` and `pointerup` is 1 (Chrome 0), and `click`
+  has `isPrimary` true (Chrome false); both are WebKit's behaviour, which Safari shares.
 - Spell checking (#624): only the English dictionary (en_US of SCOWL) ships, so pages whose first
   language is not English are not checked; more dictionaries are a `dict-*` line pair in
   `deps/sources.txt` each, after a look at their licenses (most are GPL or LGPL). Chrome's Spell

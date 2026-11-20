@@ -633,7 +633,8 @@ JSC_DEFINE_HOST_FUNCTION(webAssemblyGetter, (JSGlobalObject* callerGlobalObject,
     if (source.isNull())
         return JSValue::encode(jsUndefined());
     NakedPtr<JSC::Exception> exception;
-    JSValue factory = JSC::evaluate(globalObject, makeSource(source, SourceOrigin(), SourceTaintedOrigin::Untainted, "browser-lite-wasm.js"_s), JSValue(), exception);
+    // "browser-lite": its functions print as [native code] like engineFunctionSource's
+    JSValue factory = JSC::evaluate(globalObject, makeSource(source, SourceOrigin(), SourceTaintedOrigin::Untainted, "browser-lite"_s), JSValue(), exception);
     if (exception) {
         throwException(globalObject, scope, exception.get());
         return { };

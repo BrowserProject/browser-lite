@@ -8,6 +8,7 @@
 #include <cstring>
 #include <emscripten/emscripten.h>
 #include <sys/stat.h>
+#include <WebCore/WasmPlatform.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace BrowserLite {
@@ -185,6 +186,8 @@ void loadEngineConfig()
     config.httpCacheMB = number("BL_HTTP_CACHE_MB", config.httpCacheMB);
     config.fontconfigEarly = flag("BL_FONTCONFIG_EARLY", true);
     config.spareWorkers = static_cast<int>(number("BL_SPARE_WORKERS", config.spareWorkers));
+    // navigator.hardwareConcurrency comes from the host's processors (patch 0168)
+    WebCore::WasmPlatform::setHardwareConcurrency(static_cast<unsigned>(number("BL_HARDWARE_CONCURRENCY", 0)));
     installExtraCertificates();
 }
 
