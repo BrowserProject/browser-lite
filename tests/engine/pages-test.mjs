@@ -77,6 +77,15 @@
 //                  emoji, symbols, CJK and other scripts (patch 0171), also late in a long task
 //                  whose layout already went on without them: the same widths and pixels as once
 //                  the fonts arrived
+//   route-styles.html  a route change of a single page app on a page styled like Tailwind (patch
+//                  0173): ::before and ::after without `content` get no style of their own, a
+//                  removed sheet restyles only the elements it may match, @font-face rules of
+//                  added and removed sheets apply as a font change, the styles keep their fonts
+//                  across a new style resolver and a measured SVG text: same computed style,
+//                  custom properties and geometry as a fresh style; restyling 3000 elements costs
+//                  about as much with the custom properties on their pseudo-elements as without,
+//                  a removed sheet and a class on the root or the body after the others a
+//                  fraction of it
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -116,6 +125,7 @@ const CASES = [
   { name: 'replaced-percent-heights', size: [1280, 800], wait: 'REPLACED done' },
   { name: 'image-load-events', wait: 'IMGLOAD done' },
   { name: 'canvas-text-fonts', wait: 'CANVASFONTS done' },
+  { name: 'route-styles', size: [800, 600], wait: 'ROUTESTYLES done' },
   { name: 'select-styles', size: [400, 220], check: 'check-select-styles.mjs' },
   {
     name: 'form-controls',

@@ -801,6 +801,28 @@ browser (Safari keeps Cmd+L, T and W for itself).
    update, a layout or a scroll (#554): 0.6 to 3.2 %. The time to the title moves within the noise;
    without the JIT it is 3.3 to 4.2 s. Back was not measured apart, it is the same kind of route
    change. What is left is the speed of JS (above, [jit.md](jit.md)).
+   nzz.ch at a fourth of the CPU (2026-11-21, local, phone emulation; the report: `clientWidth`
+   reads during a tap took 8.7 s over 11 calls, single forced style updates up to 2.3 s): nzz.ch
+   is styled with Tailwind, whose `*, ::before, ::after` declare 51 custom properties, and has 820
+   more on the root. Counted per forced update (an instrumented build), most restyled the whole
+   document (3800 elements) for four reasons: every element also resolved a style for its
+   `::before` and `::after` (7500 more styles with their custom properties, no box), the route
+   change removed sheets of a video player (each a restyle of all), the root's next change found
+   new fonts for its `rem` units (a new style resolver changed the font selector's version), and
+   every SVG `<text>` emptied the font cascade cache (all fonts new, every restyled element's
+   subtree restyled again and all text measured anew). Patch 0173 (#640) removes the four: the
+   time to the article on screen 29.1 to 33.8 s (median 29.3) instead of 48.0 to 58.0 s (median
+   48.4), the longest step 3.1 to 3.8 instead of 4.6 to 5.1 s, Back 16.8 to 19.8 s (median 18.0)
+   instead of 18.7 to 19.5 s (3 interleaved runs each); in the tap's CPU profile `clientWidth`
+   1.4 instead of 8.4 s, style resolution 5.1 instead of 23.5 s, the interpreter unchanged at 56
+   s. The computed styles of the article equal a fresh style (3384 values). Not reached of the
+   criterion (article within 25 s, Back under 18 s, no forced update over 0.5 s, Moto G71 not
+   checked without a deploy): what is left is JS, a custom property the page sets on the root
+   (`--safe-zone-block-end`, every element restyled, 0.73 s at a fourth of the CPU; skipping
+   styles that use no custom property would need a new style flag) and the 3300 new elements of
+   the home page on Back (1.1 s). The UTF-16 lexer in the profile (1.2 s) parses a bundle with
+   characters beyond Latin-1, every function once ahead and once at its first call, like JSC
+   does everywhere.
    Long single tasks of a page become many times longer here, so they block all views (the
    script watchdog stops only those that keep input or a call waiting, #146, #501). The script
    of a cross-site frame (an anti-bot challenge in a frame, Turnstile on srf.ch) pauses while the

@@ -1,0 +1,382 @@
+diff --git a/Source/WebCore/css/CSSFontSelector.cpp b/Source/WebCore/css/CSSFontSelector.cpp
+index 1a8562f921..efc8140078 100644
+--- a/Source/WebCore/css/CSSFontSelector.cpp
++++ b/Source/WebCore/css/CSSFontSelector.cpp
+@@ -137,8 +137,10 @@ void CSSFontSelector::buildStarted()
+     // buildCompleted. A face made anew for an unchanged rule loaded its font again (from the
+     // memory cache), and every font load restyles and lays out the whole document: so did every
+     // new style resolver of a page with web fonts (a rule inserted through the CSSOM, a memory
+-    // release), about 100 ms on blick.ch
+-    ++m_version;
++    // release), about 100 ms on blick.ch. The version changes only with what the build changes
++    // (buildCompleted()): a new version gives every style new fonts from the font cascade cache,
++    // and the root's new fonts restyled the whole document after every removed sheet.
++    m_hadPalettesBeforeBuild = !m_paletteMap.isEmpty();
+ 
+     ASSERT(m_cssConnectionsPossiblyToRemove.isEmpty());
+     ASSERT(m_cssConnectionsEncounteredDuringBuild.isEmpty());
+@@ -173,6 +175,10 @@ void CSSFontSelector::buildCompleted()
+     m_fontFaceRulesWithChangedDescriptors.clear();
+     m_stagingArea.clear();
+     m_cssConnectionsPossiblyToRemove.clear();
++
++    // browser-lite: removed and added faces changed the version already (they dispatch)
++    if (std::exchange(m_hadPalettesBeforeBuild, false))
++        ++m_version;
+ }
+ 
+ void CSSFontSelector::addFontFaceRule(StyleRuleFontFace& fontFaceRule, bool isInitiatingElementInUserAgentShadowTree)
+@@ -250,7 +256,10 @@ void CSSFontSelector::addFontFaceRule(StyleRuleFontFace& fontFaceRule, bool isIn
+     }
+ 
+     m_cssFontFaceSet->add(fontFace.get());
+-    ++m_version;
++    // browser-lite: the styles get the new face through the clients (Document::fontsNeedUpdate
++    // updates their fonts), so a sheet with @font-face rules restyles only the elements its style
++    // rules may match (Style::Invalidator)
++    dispatchInvalidationCallbacks();
+ }
+ 
+ void CSSFontSelector::fontFaceRuleDescriptorsChanged(StyleRuleFontFace& fontFaceRule)
+diff --git a/Source/WebCore/css/CSSFontSelector.h b/Source/WebCore/css/CSSFontSelector.h
+index a0ffc2dbb8..80f8369dc5 100644
+--- a/Source/WebCore/css/CSSFontSelector.h
++++ b/Source/WebCore/css/CSSFontSelector.h
+@@ -157,6 +157,8 @@ private:
+     unsigned m_computingRootStyleFontCount { 0 };
+     bool m_creatingFont { false };
+     bool m_buildIsUnderway { false };
++    // browser-lite: palettes are added anew by a build, see buildCompleted()
++    bool m_hadPalettesBeforeBuild { false };
+     bool m_isStopped { false };
+ 
+     WebKitFontFamilyNames::FamilyNamesList<AtomString> m_fontFamilyNames;
+diff --git a/Source/WebCore/dom/Document.cpp b/Source/WebCore/dom/Document.cpp
+index 23526decbf..efa1a0b972 100644
+--- a/Source/WebCore/dom/Document.cpp
++++ b/Source/WebCore/dom/Document.cpp
+@@ -2957,6 +2957,11 @@ void Document::resolveStyle(ResolveStyleType type)
+ 
+             m_inStyleRecalc = false;
+ 
++            // browser-lite: font faces that a resolver built meanwhile added or removed ask for
++            // a style update for the font change (CSSFontSelector::dispatchInvalidationCallbacks)
++            if (m_needsStyleUpdateForFontChange)
++                scheduleStyleRecalc();
++
+             if (RefPtr fontLoader = m_fontLoader.get())
+                 fontLoader->loadPendingFonts();
+ 
+diff --git a/Source/WebCore/rendering/svg/SVGTextMetricsBuilder.cpp b/Source/WebCore/rendering/svg/SVGTextMetricsBuilder.cpp
+index 80170f54fc..092a71df98 100644
+--- a/Source/WebCore/rendering/svg/SVGTextMetricsBuilder.cpp
++++ b/Source/WebCore/rendering/svg/SVGTextMetricsBuilder.cpp
+@@ -21,13 +21,14 @@
+ #include "SVGTextMetricsBuilder.h"
+ 
+ #include "ComplexTextController.h"
+-#include "FontCascadeCache.h"
++#include "FontCascadeFonts.h"
+ #include "FontCascadeInlines.h"
+ #include "RenderChildIterator.h"
+ #include "RenderSVGInline.h"
+ #include "RenderSVGInlineText.h"
+ #include "RenderSVGText.h"
+ #include "StyleComputedStyle+GettersInlines.h"
++#include "TextShapingResultAndDisplayList.h"
+ #include "WidthIterator.h"
+ #include <wtf/WeakPtr.h>
+ 
+@@ -125,8 +126,17 @@ void SVGTextMetricsBuilder::initializeMeasurementWithTextRenderer(RenderSVGInlin
+     m_run = SVGTextMetrics::constructTextRun(text);
+     m_isComplexText = shouldUseComplexTextController(scaledFont.codePath(m_run), scaledFont);
+ 
+-    if (m_isComplexText)
+-        FontCascadeCache::forCurrentThread().invalidate();
++    // browser-lite: the measurements of this text's fonts are dropped, not the whole font cascade
++    // cache (WebKit's 293113@main, for metrics of bidi SVG text). Text here takes the complex path
++    // whenever it kerns, so every SVG text emptied the cache: no style had the fonts the cache
++    // gives any more, all text was measured again and an element restyled with the new fonts
++    // restyled its whole subtree (a `rem` change of the root the whole document).
++    if (m_isComplexText) {
++        if (RefPtr fonts = scaledFont.fonts()) {
++            fonts->glyphGeometryCache().clear();
++            fonts->shapedTextCache().clear();
++        }
++    }
+ 
+     m_canUseSimplifiedTextMeasuring = false;
+     if (!m_isComplexText) {
+diff --git a/Source/WebCore/style/StyleInvalidator.cpp b/Source/WebCore/style/StyleInvalidator.cpp
+index 1324b49f33..87639cb8f8 100644
+--- a/Source/WebCore/style/StyleInvalidator.cpp
++++ b/Source/WebCore/style/StyleInvalidator.cpp
+@@ -60,7 +60,10 @@ static bool NODELETE shouldDirtyAllStyle(const Vector<Ref<StyleRuleBase>>& rules
+                 return true;
+             continue;
+         }
+-        // FIXME: At least font faces don't need full recalc in all cases.
++        // browser-lite: added and removed font faces reach the styles through the font selector
++        // (CSSFontSelector::dispatchInvalidationCallbacks, Document::fontsNeedUpdate).
++        if (is<StyleRuleFontFace>(rule))
++            continue;
+         if (!is<StyleRule>(rule))
+             return true;
+     }
+diff --git a/Source/WebCore/style/StyleResolver.cpp b/Source/WebCore/style/StyleResolver.cpp
+index aeeffad777..fe1746db83 100644
+--- a/Source/WebCore/style/StyleResolver.cpp
++++ b/Source/WebCore/style/StyleResolver.cpp
+@@ -82,6 +82,7 @@
+ #include "StyleKeyword+Mappings.h"
+ #include "StylePrimitiveNumericTypes+DeprecatedConversions.h"
+ #include "StyleProperties.h"
++#include "StylePropertiesInlines.h"
+ #include "StylePropertyShorthand.h"
+ #include "StyleResolveForDocument.h"
+ #include "StyleRule.h"
+@@ -560,7 +561,19 @@ bool Resolver::keyframeStylesForAnimation(Element& element, const Style::Compute
+     return true;
+ }
+ 
+-std::optional<ResolvedStyle> Resolver::styleForPseudoElement(Element& element, const PseudoElementRequest& pseudoElementRequest, const ResolutionContext& context)
++// browser-lite: `content` is not inherited and its initial value `normal` computes to `none` for
++// ::before and ::after, so without a matched declaration of it they generate no box.
++static bool declaresContent(const MatchResult& matchResult)
++{
++    auto declares = [](const Vector<MatchedProperties>& declarations) {
++        return std::ranges::any_of(declarations, [](auto& matchedProperties) {
++            return matchedProperties.properties->findPropertyIndex(CSSPropertyContent) != -1;
++        });
++    };
++    return declares(matchResult.authorDeclarations) || declares(matchResult.userAgentDeclarations) || declares(matchResult.userDeclarations);
++}
++
++std::optional<ResolvedStyle> Resolver::styleForPseudoElement(Element& element, const PseudoElementRequest& pseudoElementRequest, const ResolutionContext& context, PseudoElementStyleFor styleFor)
+ {
+     auto state = State(element, context.parentStyle, context.documentElementStyle, context.treeResolutionState.get());
+ 
+@@ -587,6 +600,12 @@ std::optional<ResolvedStyle> Resolver::styleForPseudoElement(Element& element, c
+     if (collector.matchResult().isEmpty())
+         return { };
+ 
++    // browser-lite: a stylesheet like Tailwind's `*, ::before, ::after { --tw-...: ... }` matches
++    // both of every element, which then cost two more styles with all their custom properties.
++    // getComputedStyle() resolves such a style when asked (Element::resolvePseudoElementStyle).
++    if (styleFor == PseudoElementStyleFor::IfGeneratingBox && !declaresContent(collector.matchResult()))
++        return { };
++
+     state.style()->setPseudoElementIdentifier(pseudoElementRequest.identifier());
+ 
+     applyMatchedProperties(state, collector.matchResult(), PropertyCascade::normalProperties());
+diff --git a/Source/WebCore/style/StyleResolver.h b/Source/WebCore/style/StyleResolver.h
+index 8b99425e42..d6c0bf7031 100644
+--- a/Source/WebCore/style/StyleResolver.h
++++ b/Source/WebCore/style/StyleResolver.h
+@@ -103,7 +103,10 @@ public:
+ 
+     bool keyframeStylesForAnimation(Element&, const Style::ComputedStyle& elementStyle, const ResolutionContext&, BlendingKeyframes&, const TimingFunction*) const;
+ 
+-    WEBCORE_EXPORT std::optional<ResolvedStyle> styleForPseudoElement(Element&, const PseudoElementRequest&, const ResolutionContext&);
++    // browser-lite: IfGeneratingBox gives no style for a ::before or ::after that generates no box
++    // because no matched rule declares `content` (see styleForPseudoElement).
++    enum class PseudoElementStyleFor : bool { AnyUse, IfGeneratingBox };
++    WEBCORE_EXPORT std::optional<ResolvedStyle> styleForPseudoElement(Element&, const PseudoElementRequest&, const ResolutionContext&, PseudoElementStyleFor = PseudoElementStyleFor::AnyUse);
+ 
+     std::unique_ptr<Style::ComputedStyle> styleForPage(int pageIndex);
+     std::unique_ptr<Style::ComputedStyle> defaultStyleForElement(const Element*);
+diff --git a/Source/WebCore/style/StyleScope.cpp b/Source/WebCore/style/StyleScope.cpp
+index ca616a79b1..995ef94b99 100644
+--- a/Source/WebCore/style/StyleScope.cpp
++++ b/Source/WebCore/style/StyleScope.cpp
+@@ -516,19 +516,19 @@ Scope::StyleSheetChange Scope::analyzeStyleSheetChange(const Vector<Ref<CSSStyle
+     // Find out which stylesheets are new.
+     unsigned oldStylesheetCount = m_activeStyleSheets.size();
+     if (newStylesheetCount < oldStylesheetCount)
+-        return { ResolverUpdateType::Reconstruct };
++        return analyzeStyleSheetRemoval(newStylesheets);
+ 
+     Vector<Ref<StyleSheetContents>> addedSheets;
+     unsigned newIndex = 0;
+     for (unsigned oldIndex = 0; oldIndex < oldStylesheetCount; ++oldIndex) {
+         if (newIndex >= newStylesheetCount)
+-            return { ResolverUpdateType::Reconstruct };
++            return analyzeStyleSheetRemoval(newStylesheets);
+ 
+         while (m_activeStyleSheets[oldIndex] != newStylesheets[newIndex]) {
+             addedSheets.append(protect(newStylesheets[newIndex]->contents()));
+             ++newIndex;
+             if (newIndex == newStylesheetCount)
+-                return { ResolverUpdateType::Reconstruct };
++                return analyzeStyleSheetRemoval(newStylesheets);
+         }
+         ++newIndex;
+     }
+@@ -543,6 +543,42 @@ Scope::StyleSheetChange Scope::analyzeStyleSheetChange(const Vector<Ref<CSSStyle
+     return { hasInsertions ? ResolverUpdateType::Reset : ResolverUpdateType::Additive, WTF::move(addedSheets) };
+ }
+ 
++// browser-lite: when sheets were removed (and others added) and the remaining ones kept their
++// order, the rules of the removed and added sheets are all that changed for an element; the
++// resolver is built anew but only the elements they may match restyle, like in Blink. Before, a
++// removed sheet restyled the whole document (a route change of a single page app removing the
++// <style> of a video player: 1.3 s with 3800 elements on a phone).
++Scope::StyleSheetChange Scope::analyzeStyleSheetRemoval(const Vector<Ref<CSSStyleSheet>>& newStylesheets)
++{
++    HashSet<const CSSStyleSheet*> oldSheets;
++    for (auto& sheet : m_activeStyleSheets)
++        oldSheets.add(sheet.ptr());
++    HashSet<const CSSStyleSheet*> newSheets;
++    for (auto& sheet : newStylesheets)
++        newSheets.add(sheet.ptr());
++
++    Vector<const CSSStyleSheet*> keptInOldOrder;
++    Vector<Ref<StyleSheetContents>> removedSheets;
++    for (auto& sheet : m_activeStyleSheets) {
++        if (newSheets.contains(sheet.ptr()))
++            keptInOldOrder.append(sheet.ptr());
++        else
++            removedSheets.append(protect(sheet->contents()));
++    }
++    Vector<const CSSStyleSheet*> keptInNewOrder;
++    Vector<Ref<StyleSheetContents>> addedSheets;
++    for (auto& sheet : newStylesheets) {
++        if (oldSheets.contains(sheet.ptr()))
++            keptInNewOrder.append(sheet.ptr());
++        else
++            addedSheets.append(protect(sheet->contents()));
++    }
++
++    if (keptInOldOrder != keptInNewOrder)
++        return { ResolverUpdateType::Reconstruct };
++    return { ResolverUpdateType::Reconstruct, WTF::move(addedSheets), WTF::move(removedSheets), true };
++}
++
+ static void filterEnabledNonemptyCSSStyleSheets(Vector<Ref<CSSStyleSheet>>& result, const Vector<Ref<StyleSheet>>& sheets)
+ {
+     for (auto& sheet : sheets) {
+@@ -634,6 +670,17 @@ void Scope::invalidateStyleAfterStyleSheetChange(const StyleSheetChange& styleSh
+         return;
+     }
+ 
++    if (styleSheetChange.onlyAddedAndRemovedSheetsChanged && !invalidateAll) {
++        // Cached match results may hold rules of the removed sheets.
++        if (auto* documentScope = dynamicDowncast<DocumentScope>(*this))
++            documentScope->m_matchResultCache = { };
++        auto changedSheets = styleSheetChange.addedSheets;
++        changedSheets.appendVector(styleSheetChange.removedSheets);
++        Invalidator invalidator(changedSheets, resolver().mediaQueryEvaluator());
++        invalidator.invalidateStyle(*this);
++        return;
++    }
++
+     if (styleSheetChange.resolverUpdateType == ResolverUpdateType::Reconstruct || invalidateAll) {
+         Invalidator::invalidateAllStyle(*this);
+         return;
+diff --git a/Source/WebCore/style/StyleScope.h b/Source/WebCore/style/StyleScope.h
+index 7781df9f79..30b802a92d 100644
+--- a/Source/WebCore/style/StyleScope.h
++++ b/Source/WebCore/style/StyleScope.h
+@@ -199,8 +199,12 @@ private:
+     struct StyleSheetChange {
+         ResolverUpdateType resolverUpdateType;
+         Vector<Ref<StyleSheetContents>> addedSheets { };
++        // browser-lite: a Reconstruct after sheets were removed, the others in their order
++        Vector<Ref<StyleSheetContents>> removedSheets { };
++        bool onlyAddedAndRemovedSheetsChanged { false };
+     };
+     StyleSheetChange analyzeStyleSheetChange(const Vector<Ref<CSSStyleSheet>>& newStylesheets);
++    StyleSheetChange analyzeStyleSheetRemoval(const Vector<Ref<CSSStyleSheet>>& newStylesheets);
+     void invalidateStyleAfterStyleSheetChange(const StyleSheetChange&, const std::optional<Vector<ChangedRule>>& changedRules);
+ 
+     void updateResolver(std::span<const Ref<CSSStyleSheet>>, ResolverUpdateType);
+diff --git a/Source/WebCore/style/StyleTreeResolver.cpp b/Source/WebCore/style/StyleTreeResolver.cpp
+index b1fc9d24ac..0d3c44984e 100644
+--- a/Source/WebCore/style/StyleTreeResolver.cpp
++++ b/Source/WebCore/style/StyleTreeResolver.cpp
+@@ -57,6 +57,7 @@
+ #include "PlatformStrategies.h"
+ #include "PositionTryOrder.h"
+ #include "PositionedLayoutConstraints.h"
++#include "PseudoElementUtilitiesInlines.h"
+ #include "RenderBoxInlines.h"
+ #include "RenderElement.h"
+ #include "RenderView.h"
+@@ -334,15 +335,16 @@ auto TreeResolver::descendantsToResolveAfterFontChange(const ElementUpdate& upda
+     return computeDescendantsToResolve(determineChanges(*existingWithNewFonts, *update.style), *update.style, existingWithNewFonts.get(), validity);
+ }
+ 
+-static bool styleChangeAffectsRelativeUnits(const Style::ComputedStyle& style, const Style::ComputedStyle* existingStyle, bool isUpdatingFonts)
++// browser-lite: the font description and line height, not the fonts: new fonts for the same
++// description come with a font change (a web font loaded, a face added or removed), whose style
++// update gives every style its new fonts and resolves the styles that use font metrics (also those
++// of the root, `usesFontMetrics`) again by themselves; until then the root's fonts may be ones the
++// font selector replaced, and its next change restyled the whole document for its `rem` units.
++static bool styleChangeAffectsRelativeUnits(const Style::ComputedStyle& style, const Style::ComputedStyle* existingStyle)
+ {
+     if (!existingStyle)
+         return true;
+-    // browser-lite: after a font change the fonts differ anyway; styles using the root's font metrics are resolved again by themselves.
+-    if (isUpdatingFonts)
+-        return existingStyle->fontDescription() != style.fontDescription() || existingStyle->lineHeight() != style.lineHeight();
+-    return !existingStyle->fontCascadeEqual(style)
+-        || existingStyle->computedLineHeight() != style.computedLineHeight();
++    return existingStyle->fontDescription() != style.fontDescription() || existingStyle->lineHeight() != style.lineHeight();
+ }
+ 
+ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle* existingStyle, ResolutionType resolutionType) -> std::pair<ElementUpdate, DescendantsToResolve>
+@@ -379,7 +381,7 @@ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle*
+     auto descendantsToResolve = resolutionType == ResolutionType::FontUpdate ? DescendantsToResolve::None : descendantsToResolveAfterFontChange(update, existingStyle, element.styleValidity());
+     bool isDocumentElement = &element == m_document->documentElement();
+     if (isDocumentElement && resolutionType != ResolutionType::FontUpdate) {
+-        if (styleChangeAffectsRelativeUnits(*update.style, existingStyle, m_isUpdatingFonts)) {
++        if (styleChangeAffectsRelativeUnits(*update.style, existingStyle)) {
+             // "rem" units are relative to the document element's font size so we need to recompute everything.
+             protect(scope().resolver)->invalidateMatchedDeclarationsCache();
+             descendantsToResolve = DescendantsToResolve::All;
+@@ -402,6 +404,10 @@ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle*
+ 
+     auto resolveAndAddPseudoElementStyle = [&](const PseudoElementIdentifier& pseudoElementIdentifier) {
+         const Style::ComputedStyle* existingPseudoStyle = existingStyle ? existingStyle->pseudoElementStyle(pseudoElementIdentifier) : nullptr;
++        auto isBeforeOrAfter = pseudoElementIdentifier.type == PseudoElementType::Before || pseudoElementIdentifier.type == PseudoElementType::After;
++        // browser-lite: new fonts give no ::before or ::after a box it did not have.
++        if (resolutionType == ResolutionType::FontUpdate && isBeforeOrAfter && !existingPseudoStyle)
++            return OptionSet<Change> { };
+         auto pseudoElementUpdate = resolvePseudoElement(element, pseudoElementIdentifier, update, parent().isInDisplayNoneTree, existingPseudoStyle);
+ 
+         auto pseudoElementChanges = [&]() -> OptionSet<Change> {
+@@ -412,7 +418,11 @@ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle*
+                     return { };
+                 return { Change::NonInherited };
+             }
+-            if (!existingStyle || !existingStyle->pseudoElementStyle(pseudoElementIdentifier))
++            if (!existingPseudoStyle)
++                return { };
++            // browser-lite: a style getComputedStyle() resolved for a ::before or ::after without a box
++            // (Element::resolvePseudoElementStyle) leaving is no change.
++            if (isBeforeOrAfter && !pseudoElementRendererIsNeeded(*existingPseudoStyle) && !element.hasKeyframeEffects(pseudoElementIdentifier))
+                 return { };
+             // If ::first-letter goes aways rebuild the renderers.
+             if (pseudoElementIdentifier.type == PseudoElementType::FirstLetter)
+@@ -567,7 +577,11 @@ std::optional<ElementUpdate> TreeResolver::resolvePseudoElement(Element& element
+             resolvedStyle = tryChoosePositionOption(styleable, resolutionContext);
+ 
+         if (!resolvedStyle) {
+-            resolvedStyle = scope().resolver->styleForPseudoElement(element, pseudoElementIdentifier, resolutionContext);
++            // browser-lite: no style for a ::before or ::after that generates no box, unless an
++            // animation of the Web Animations API targets it (it may keep the pseudo-element).
++            auto isBeforeOrAfter = pseudoElementIdentifier.type == PseudoElementType::Before || pseudoElementIdentifier.type == PseudoElementType::After;
++            auto styleFor = isBeforeOrAfter && !element.hasKeyframeEffects(pseudoElementIdentifier) ? Resolver::PseudoElementStyleFor::IfGeneratingBox : Resolver::PseudoElementStyleFor::AnyUse;
++            resolvedStyle = scope().resolver->styleForPseudoElement(element, pseudoElementIdentifier, resolutionContext, styleFor);
+ 
+             if (resolvedStyle && pseudoSupportsPositionTry) {
+                 if (shouldInvalidateLastSuccessfulPositionOptionIndex(existingStyle, resolvedStyle->style.get()))
+@@ -1547,7 +1561,7 @@ auto TreeResolver::updateStateForQueryContainer(Element& element, const Style::C
+     if (style->containerType().hasSizeContainment() || (existingStyle && existingStyle->containerType().hasSizeContainment())) {
+         // If any of the queries use font-size relative units then a font size change
+         // may affect their evaluation, so force re-evaluating all descendants.
+-        if (styleChangeAffectsRelativeUnits(*style, existingStyle, m_isUpdatingFonts))
++        if (styleChangeAffectsRelativeUnits(*style, existingStyle))
+             descendantsToResolve = DescendantsToResolve::All;
+ 
+         m_queryContainerStates.add(element, QueryContainerState { });

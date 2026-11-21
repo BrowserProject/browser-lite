@@ -1,0 +1,204 @@
+<!doctype html>
+<title>Route styles</title>
+<!-- What the route change of a single page app does to style (patch 0173), on a page styled like
+     Tailwind (`*, ::before, ::after` declare many custom properties) with a web font on the root:
+     a ::before or ::after that declares no `content` generates no box and gets no style of its own
+     (getComputedStyle() resolves one when asked); a removed sheet restyles only the elements its
+     rules may match, @font-face rules of added and removed sheets reach the styles as a font
+     change; a new style resolver and a measured SVG text give the styles no new fonts, so a
+     change of the root or the body after them restyles no subtree (before, every SVG text emptied
+     the font cascade cache and the root's next change restyled the whole document for its `rem`
+     units). Every change below must give the same computed style, custom properties and geometry
+     as a fresh style of the whole tree; the costs are checked against a restyle of all elements. -->
+<style id="base">
+  @font-face { font-family: Web; src: local("Noto Serif"); }
+  html { font-family: Web, sans-serif; }
+  body { margin: 0; font-size: 14px; line-height: 18px; }
+  *, ::before, ::after { --tw-a: 0; --tw-b: 1px; --tw-c: rgb(1, 2, 3); --tw-d: ; box-sizing: border-box; }
+  ::before, ::after { --tw-content: ""; }
+  .icon::before { content: "B"; padding-left: 2px; }
+  .icon::after { content: var(--tw-content); }
+  .tag::after { --tw-content: "tag"; content: var(--tw-content); color: var(--tw-c); }
+  .gone { font-family: Gone, serif; }
+  .moved { font-family: Moved, serif; }
+  .root-class { outline-color: rgb(1, 1, 1); }
+  .root-class .rooted { padding-left: 1rem; }
+  .flip * { outline-color: rgb(4, 5, 6); }
+  .k { outline-color: rgb(6, 5, 4); }
+</style>
+<style id="player">
+  .player { padding-left: 7px; color: rgb(20, 30, 40); }
+  .player::before { content: "P"; }
+  .holder:has(.player) { margin-top: 3px; }
+  .player + .after-player { margin-left: 4px; }
+  @media (min-width: 1px) { .player-media { padding-top: 5px; } }
+</style>
+<style id="faces">@font-face { font-family: Gone; src: local("Noto Sans Mono"); }</style>
+<style id="keys">@keyframes fade { from { opacity: 0.5; } to { opacity: 0.6; } } .spin { animation: fade 100s infinite alternate paused; }</style>
+<div id="app">
+  <p><span id="probe">Plain text in the web font</span> <span class="rooted">Rooted</span></p>
+  <p><span class="icon">Icon</span> <span class="tag">Tag</span> <span id="late">Late</span></p>
+  <div class="holder"><span class="player">Player</span><span class="after-player">After</span></div>
+  <p class="player-media">Media</p>
+  <p><span class="gone" id="gone">Gone face</span> <span class="moved" id="moved">Moved face</span></p>
+  <p class="spin">Animated</p>
+  <div id="host"></div>
+</div>
+<div id="many"></div>
+<div id="plain"></div>
+<svg width="200" height="30"><text id="label" x="0" y="20">Label</text></svg>
+<script>
+const $ = (id) => document.getElementById(id);
+const shadow = $('host').attachShadow({ mode: 'open' });
+shadow.innerHTML = '<style>.inner { color: rgb(9, 9, 9); } .inner::before { content: "S"; }</style><p class="inner">Inner</p><span class="icon">Shadow icon</span>';
+
+const properties = ['font-family', 'color', 'padding-left', 'padding-top', 'margin-top', 'margin-left', 'opacity', '--tw-a', '--tw-c', '--tw-content'];
+const elements = () => [...$('app').querySelectorAll('*'), ...shadow.querySelectorAll('*')];
+const snapshot = () =>
+  elements().flatMap((element) => {
+    const rect = element.getBoundingClientRect();
+    return [null, '::before', '::after'].map((pseudo) => {
+      const style = getComputedStyle(element, pseudo);
+      return `${properties.map((name) => style.getPropertyValue(name)).join(',')},${style.content}`;
+    }).concat(`${rect.width.toFixed(2)}x${rect.height.toFixed(2)}`);
+  });
+// A fresh style: the whole tree is styled again from nothing
+const fresh = () => {
+  for (const element of [$('app'), $('host')]) {
+    element.style.display = 'none';
+    element.offsetHeight;
+    element.style.display = '';
+  }
+  return snapshot();
+};
+const results = [];
+const compare = (name) => {
+  const incremental = snapshot();
+  const expected = fresh();
+  const differ = incremental.filter((value, index) => value !== expected[index]);
+  if (differ.length) results.push(`${name}:${differ.length}`);
+  if (differ.length) console.log(`ROUTESTYLES differ ${name}: ${incremental.find((value, index) => value !== expected[index])} / ${expected.find((value, index) => value !== incremental[index])}`);
+};
+const width = (id) => $(id).getBoundingClientRect().width;
+const addStyle = (id, text, before) => {
+  const style = document.createElement('style');
+  style.id = id;
+  style.textContent = text;
+  if (before) document.head.insertBefore(style, before);
+  else document.head.append(style);
+  return style;
+};
+const fontsSettled = () => document.fonts.ready.then(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+addEventListener('load', async () => {
+  await fontsSettled();
+  fresh();
+  // ::before and ::after without content: no box, but their computed style is there
+  const before = getComputedStyle($('late'), '::before');
+  if (before.content !== 'none' || before.getPropertyValue('--tw-b').trim() !== '1px')
+    results.push(`style of a ::before without content: ${before.content} ${before.getPropertyValue('--tw-b')}`);
+  $('late').classList.add('icon');
+  compare('content comes');
+  $('late').classList.remove('icon');
+  compare('content goes');
+  $('late').classList.add('tag');
+  compare('content through a custom property');
+  $('late').animate({ opacity: [0.2, 0.3] }, { duration: 100000, pseudoElement: '::before' });
+  $('late').animate({ opacity: [0.2, 0.3] }, { duration: 100000, pseudoElement: '::after' });
+  compare('animations of pseudo-elements');
+
+  // Removed sheets: their elements only, also through :has(), a sibling and @media
+  const gone = width('gone');
+  $('player').remove();
+  compare('removed sheet');
+  $('faces').remove();
+  await fontsSettled();
+  compare('removed font face');
+  if (Math.abs(width('gone') - gone) < 1) results.push('the removed font face still applies');
+  addStyle('player', '.player { padding-left: 9px; } .player::after { content: "Q"; }', $('keys'));
+  compare('sheet inserted before another');
+  const moved = width('moved');
+  addStyle('moved-face', '@font-face { font-family: Moved; src: local("Noto Sans Mono"); } .after-player { color: rgb(1, 1, 1); }');
+  await fontsSettled();
+  compare('added font face');
+  if (Math.abs(width('moved') - moved) < 1) results.push('the added font face does not apply');
+  $('player').remove();
+  addStyle('route', '.holder { padding-top: 2px; } .icon::before { content: "R"; }');
+  compare('route change: one sheet out, one in');
+  document.head.insertBefore($('route'), $('base'));
+  compare('sheets in another order');
+  $('keys').remove();
+  compare('removed keyframes');
+  document.adoptedStyleSheets = [new CSSStyleSheet()];
+  document.adoptedStyleSheets[0].replaceSync('.rooted { margin-left: 3px; }');
+  compare('adopted sheet');
+  document.adoptedStyleSheets = [];
+  compare('removed adopted sheet');
+  shadow.querySelector('style').remove();
+  compare('removed shadow tree sheet');
+  $('moved-face').remove();
+  await fontsSettled();
+  compare('removed sheet with a face and a rule');
+  document.documentElement.classList.add('root-class');
+  compare('class on the root');
+  measure();
+});
+
+// Costs, 3000 elements each: restyling all of them with the custom properties also on ::before and
+// ::after against only on the elements; a removed sheet that matches one element, a class on the
+// root after a rule removed through the CSSOM (a new style resolver) and a class on the body after
+// an SVG text was measured against a restyle of all
+function measure() {
+  const rows = (n) => Array.from({ length: n }, (_, i) => `<div class="row"><span>${i}</span><b>x</b></div>`).join('');
+  const vars = Array.from({ length: 50 }, (_, i) => `--v${i}: ${i}px;`).join(' ');
+  addStyle('sets', `#many *, #many ::before, #many ::after { ${vars} } #plain * { ${vars} } .one { color: rgb(7, 7, 7); }`);
+  $('many').innerHTML = rows(1000);
+  $('plain').innerHTML = rows(1000);
+  document.body.offsetHeight;
+  const median = (run) => {
+    const times = [];
+    for (let i = 0; i < 9; i++) {
+      const start = performance.now();
+      run(i);
+      document.body.offsetHeight;
+      times.push(performance.now() - start);
+    }
+    times.sort((a, b) => a - b);
+    return times[4];
+  };
+  const all = median(() => $('many').classList.toggle('flip'));
+  const plain = median(() => $('plain').classList.toggle('flip'));
+  $('many').firstChild.classList.add('one');
+  const removed = median((i) => {
+    const sheet = addStyle(`one-${i}`, `.one { padding-left: ${i}px; }`);
+    document.body.offsetHeight;
+    sheet.remove();
+  });
+  // Median time of change() after prepare()
+  const after = (prepare, change) => {
+    const times = [];
+    for (let i = 0; i < 9; i++) {
+      prepare(i);
+      document.body.offsetHeight;
+      const start = performance.now();
+      change(i);
+      document.body.offsetHeight;
+      times.push(performance.now() - start);
+    }
+    return times.sort((a, b) => a - b)[4];
+  };
+  const sets = $('sets').sheet;
+  const root = after(() => {
+    sets.insertRule('.nothing { color: red; }', 0);
+    document.body.offsetHeight;
+    sets.deleteRule(0);
+  }, () => document.documentElement.classList.toggle('root-class'));
+  const svg = after((i) => { $('label').textContent = `Label ${i}`; }, () => document.body.classList.toggle('k'));
+  console.log(`ROUTESTYLES all=${all.toFixed(2)}ms plain=${plain.toFixed(2)}ms removed=${removed.toFixed(2)}ms root=${root.toFixed(2)}ms svg=${svg.toFixed(2)}ms`);
+  if (all / plain > 1.5) results.push(`custom properties on ::before and ::after cost ${Math.round((all / plain) * 100)}% of a restyle without`);
+  if (removed / all > 0.5) results.push(`a removed sheet costs ${Math.round((removed / all) * 100)}% of a full restyle`);
+  if (root / all > 0.5) results.push(`a class on the root after a new style resolver costs ${Math.round((root / all) * 100)}% of a full restyle`);
+  if (svg / all > 0.5) results.push(`a class on the body after SVG text was measured costs ${Math.round((svg / all) * 100)}% of a full restyle`);
+  console.log(`ROUTESTYLES done=${results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'}`);
+}
+</script>

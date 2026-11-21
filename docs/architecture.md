@@ -104,7 +104,21 @@ without `blocking=render`) is not render-blocking, as in HTML and Chrome: while 
 still get their style and scripts of the parser still run, and it applies once it arrived. WebKit
 counted it like a sheet of the parser, so no element without a style got one until every such
 sheet had arrived, and every layout a script asked for meanwhile restyled the whole document
-(patch 0160, #619). `CompressionStream` and
+(patch 0160, #619). A `::before` or `::after` whose matched rules declare no `content` generates
+no box, so the style resolution gives it no style of its own (`getComputedStyle()` resolves one
+when asked); WebKit built both for every element a rule like Tailwind's
+`*, ::before, ::after { --tw-...: ... }` matches, with all their custom properties. A removed
+sheet restyles only the elements the rules of the removed and added sheets may match when the
+other sheets kept their order, like Blink, and the `@font-face` rules of added and removed sheets
+reach the styles as a font change (the font selector tells its clients, the next style update
+gives the styles their new fonts) instead of restyling every element. A new style resolver changes the font selector's
+version only when its faces or palettes changed, the root's `rem` check compares its font
+description and line height instead of its fonts, and an SVG text drops the measurements of its
+own fonts instead of emptying the font cascade cache (WebKit's fix for metrics of bidi SVG text,
+which on this port, where all kerned text takes the complex path, ran for every SVG text). Each
+of the three gave every style fonts the cache no longer gives, so the next change of the root or
+the body restyled the whole document and all text was measured again (patch 0173, #640).
+`CompressionStream` and
 `DecompressionStream` take every `BufferSource`, also one of another realm such as an iframe's
 `Uint8Array`: WebKit's builtin refused chunks that failed `instanceof ArrayBuffer` of its own
 realm, now the WebIDL conversion of the encoder and decoder checks them by brand (patch 0110, #506).
