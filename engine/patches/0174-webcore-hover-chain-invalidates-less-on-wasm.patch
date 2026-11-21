@@ -1,0 +1,191 @@
+diff --git a/Source/WebCore/dom/Document.cpp b/Source/WebCore/dom/Document.cpp
+index efa1a0b972..75fde815bc 100644
+--- a/Source/WebCore/dom/Document.cpp
++++ b/Source/WebCore/dom/Document.cpp
+@@ -10027,6 +10027,15 @@ void Document::updateHoverActiveState(const HitTestRequest& request, Element* in
+             if (hasShadowRootParent(element) || element->assignedSlot())
+                 descendantStyleInvalidations.append({ element, pseudoClass, value, Style::InvalidationScope::Descendants });
+         }
++        // browser-lite: the innermost element of each tree scope the chain crosses has all its
++        // elements of that scope as ancestors (reserved: a moved invalidation would run its
++        // after-change part early)
++        Vector<Style::PseudoClassChangeInvalidation> ancestorStyleInvalidations;
++        ancestorStyleInvalidations.reserveInitialCapacity(elements.size());
++        for (size_t index = 0; index < elements.size(); ++index) {
++            if (!index || &elements[index]->treeScope() != &elements[index - 1]->treeScope())
++                ancestorStyleInvalidations.append({ elements[index], pseudoClass, value, Style::InvalidationScope::Ancestors });
++        }
+ 
+         for (auto& element : elements)
+             setter(element.get());
+diff --git a/Source/WebCore/style/PseudoClassChangeInvalidation.cpp b/Source/WebCore/style/PseudoClassChangeInvalidation.cpp
+index 36800a2eba..9771aaf679 100644
+--- a/Source/WebCore/style/PseudoClassChangeInvalidation.cpp
++++ b/Source/WebCore/style/PseudoClassChangeInvalidation.cpp
+@@ -96,15 +96,23 @@ void PseudoClassChangeInvalidation::collectRuleSets(const PseudoClassInvalidatio
+                 continue;
+ 
+             // For focus/hover we flip the whole ancestor chain. We only need to do deep invalidation traversal in the change root.
++            // browser-lite: a universal pseudo-class inside :has() (`.grid:has(:active) .cell`) looks
++            // at the ancestors of the changed element, which the innermost element of the chain has
++            // all; the top of the chain has none of them.
+             auto shouldInvalidate = [&] {
+-                bool invalidatesAllDescendants = invalidationRuleSet.matchElement.relation == MatchElement::Relation::Ancestor && isUniversalInvalidation(key);
++                auto& matchElement = invalidationRuleSet.matchElement;
++                bool isUniversal = isUniversalInvalidation(key);
++                bool invalidatesAllDescendants = isUniversal && matchElement.relation == MatchElement::Relation::Ancestor && !matchElement.hasRelation;
++                bool invalidatesAllAncestors = isUniversal && matchElement.hasRelation == MatchElement::HasRelation::Descendant;
+                 switch (invalidationScope) {
+                 case InvalidationScope::All:
+                     return true;
+                 case InvalidationScope::SelfChildrenAndSiblings:
+-                    return !invalidatesAllDescendants;
++                    return !invalidatesAllDescendants && !invalidatesAllAncestors;
+                 case InvalidationScope::Descendants:
+                     return invalidatesAllDescendants;
++                case InvalidationScope::Ancestors:
++                    return invalidatesAllAncestors;
+                 }
+                 ASSERT_NOT_REACHED();
+                 return true;
+diff --git a/Source/WebCore/style/RuleFeature.cpp b/Source/WebCore/style/RuleFeature.cpp
+index e2e9de80a7..2c1ea0c529 100644
+--- a/Source/WebCore/style/RuleFeature.cpp
++++ b/Source/WebCore/style/RuleFeature.cpp
+@@ -37,6 +37,7 @@
+ #include "StyleProperties.h"
+ #include "StylePropertiesInlines.h"
+ #include "StyleRule.h"
++#include <ranges>
+ #include <wtf/MainThread.h>
+ 
+ namespace WebCore {
+@@ -272,8 +273,26 @@ struct RuleFeatureSet::RecursiveCollectionContext {
+     // matching :has() arg simples — invariant "has-bearer is an ancestor of changed element"
+     // does not hold. Treat as scope-breaking.
+     bool hasInNonSubjectCompoundOfLogical { false };
++    // browser-lite: the compounds of enclosing :is(), :where() and :not() that the element matching
++    // the rightmost compound of this argument matches too, innermost last
++    Vector<const CSSSelector*> sameElementCompounds { };
+ };
+ 
++static PseudoClassInvalidationKey makePseudoClassInvalidationKey(CSSSelector::PseudoClass, const CSSSelector&, std::span<const CSSSelector* const> sameElementCompounds);
++
++static bool describesSameElement(CSSSelector::PseudoClass pseudoClass)
++{
++    switch (pseudoClass) {
++    case CSSSelector::PseudoClass::Is:
++    case CSSSelector::PseudoClass::Where:
++    case CSSSelector::PseudoClass::WebKitAny:
++    case CSSSelector::PseudoClass::Not:
++        return true;
++    default:
++        return false;
++    }
++}
++
+ void RuleFeatureSet::collectFeaturesFromSelector(SelectorFeatures& selectorFeatures, const CSSSelector& selector, MatchElement matchElement)
+ {
+     recursivelyCollectFeaturesFromSelector(selectorFeatures, selector, { matchElement });
+@@ -358,8 +377,10 @@ void RuleFeatureSet::recursivelyCollectFeaturesFromSelector(SelectorFeatures& se
+             // Pseudo-elements are handled in collectPseudoElementFeatures.
+         } else if (selector->match() == CSSSelector::Match::PseudoClass) {
+             bool isLogicalCombination = isLogicalCombinationPseudoClass(selector->pseudoClass());
+-            if (!isLogicalCombination)
+-                selectorFeatures.pseudoClasses.append({ selector, matchElement, context.isNegation, scopeSourcesForFeature() });
++            if (!isLogicalCombination) {
++                auto key = makePseudoClassInvalidationKey(selector->pseudoClass(), *selector, crossedCombinator ? std::span<const CSSSelector* const> { } : context.sameElementCompounds.span());
++                selectorFeatures.pseudoClasses.append({ selector, matchElement, context.isNegation, scopeSourcesForFeature(), WTF::move(key) });
++            }
+         }
+ 
+         collectHasPseudoClassFeatureIfNeeded();
+@@ -374,6 +395,14 @@ void RuleFeatureSet::recursivelyCollectFeaturesFromSelector(SelectorFeatures& se
+ 
+                 RecursiveCollectionContext subContext { subResult, subSelectorIsNegation, context.outerCompoundSelectors, context.hasPseudoClass, context.isNestedInLogicalCombination, crossedScopeBreakingCombinator, context.hasInNonSubjectCompoundOfLogical };
+ 
++                // browser-lite: the rightmost compound of an :is(), :where() or :not() argument
++                // describes the same element as the compound the pseudo-class sits in
++                if (selector->match() == CSSSelector::Match::PseudoClass && describesSameElement(selector->pseudoClass())) {
++                    if (!crossedCombinator)
++                        subContext.sameElementCompounds = context.sameElementCompounds;
++                    subContext.sameElementCompounds.append(selector);
++                }
++
+                 // When entering a logical combination (not :has() itself), record the outer compound
+                 // so nested :has() can use it for scope selector extraction. Only do this for
+                 // :is()/:not() appearing outside :has(); :is()/:not() inside a :has() argument
+@@ -462,6 +491,20 @@ static PseudoClassInvalidationKey makePseudoClassInvalidationKey(CSSSelector::Ps
+     return makePseudoClassInvalidationKey(pseudoClass, InvalidationKeyType::Universal);
+ };
+ 
++// browser-lite: `.item:is(:hover, :active) .title` keys :hover on `item`, not on every element. A
++// universal key makes a change of the pseudo-class on the top of the hover chain invalidate the
++// whole document (InvalidationScope::Descendants of Document::updateHoverActiveState).
++static PseudoClassInvalidationKey makePseudoClassInvalidationKey(CSSSelector::PseudoClass pseudoClass, const CSSSelector& selector, std::span<const CSSSelector* const> sameElementCompounds)
++{
++    auto key = makePseudoClassInvalidationKey(pseudoClass, selector);
++    for (auto* compound : sameElementCompounds | std::views::reverse) {
++        if (!isUniversalInvalidation(key))
++            break;
++        key = makePseudoClassInvalidationKey(pseudoClass, *compound);
++    }
++    return key;
++}
++
+ void RuleFeatureSet::collectFeatures(CollectionContext& collectionContext, const RuleData& ruleData, const Vector<Ref<const StyleRuleScope>>& scopeRules)
+ {
+     RELEASE_ASSERT(isMainThread());
+@@ -553,8 +596,8 @@ void RuleFeatureSet::collectFeatures(CollectionContext& collectionContext, const
+     }
+ 
+     for (auto& entry : selectorFeatures.pseudoClasses) {
+-        auto& [selector, matchElement, isNegation, scopeSources] = entry;
+-        auto& featureVector = *pseudoClassRules.ensure(makePseudoClassInvalidationKey(selector->pseudoClass(), *selector), [] {
++        auto& [selector, matchElement, isNegation, scopeSources, key] = entry;
++        auto& featureVector = *pseudoClassRules.ensure(key, [] {
+             return makeUnique<Vector<RuleFeature>>();
+         }).iterator->value;
+ 
+diff --git a/Source/WebCore/style/RuleFeature.h b/Source/WebCore/style/RuleFeature.h
+index ee8a2bc7de..becaa2c083 100644
+--- a/Source/WebCore/style/RuleFeature.h
++++ b/Source/WebCore/style/RuleFeature.h
+@@ -168,11 +168,14 @@ struct RuleFeatureSet {
+ private:
+     struct SelectorFeatures {
+         using InvalidationFeature = std::tuple<const CSSSelector*, MatchElement, IsNegation, Vector<const CSSSelector*>>;
++        // browser-lite: a pseudo-class also carries its invalidation key, which may come from a
++        // compound around the :is(), :where() or :not() it sits in
++        using PseudoClassFeature = std::tuple<const CSSSelector*, MatchElement, IsNegation, Vector<const CSSSelector*>, PseudoClassInvalidationKey>;
+ 
+         Vector<InvalidationFeature> ids;
+         Vector<InvalidationFeature> classes;
+         Vector<InvalidationFeature> attributes;
+-        Vector<InvalidationFeature> pseudoClasses;
++        Vector<PseudoClassFeature> pseudoClasses;
+         Vector<InvalidationFeature> hasPseudoClasses;
+     };
+     struct RecursiveCollectionContext;
+diff --git a/Source/WebCore/style/StyleValidity.h b/Source/WebCore/style/StyleValidity.h
+index 36a9d44a2c..2a81329667 100644
+--- a/Source/WebCore/style/StyleValidity.h
++++ b/Source/WebCore/style/StyleValidity.h
+@@ -43,10 +43,16 @@ enum class InvalidationMode : uint8_t {
+     InsertedIntoAncestor
+ };
+ 
++// browser-lite: a chain of elements that changes a pseudo-class as a whole (:hover, :active)
++// invalidates per element what only depends on that element (SelfChildrenAndSiblings), once at
++// the top of the chain what a universal pseudo-class in an ancestor compound may change in all
++// descendants (Descendants), and once at the innermost element of each tree scope what a universal
++// pseudo-class inside :has() may change in its ancestors (Ancestors)
+ enum class InvalidationScope : uint8_t {
+     All,
+     SelfChildrenAndSiblings,
+-    Descendants
++    Descendants,
++    Ancestors
+ };
+ 
+ }

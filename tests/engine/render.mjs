@@ -7,6 +7,8 @@
 // this text (e.g. at the end of a test).
 // RENDER_TIMEOUT=seconds: time limit (default 120).
 // RENDER_URL=url: base URL of the page (default file:///test/).
+// A console line `RENDER_TOUCH <start|move|end|cancel> <x> <y> [tap]` of the page touches the view
+// with one finger like a host (bl_touch; `tap` on an end: the engine clicks there).
 // JSC_* and BL_* go to the engine (engine-node.mjs).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { enginePath, runEngine } from './engine-node.mjs';
@@ -24,6 +26,22 @@ const seconds = Number(process.env.RENDER_TIMEOUT || 120);
 let waited = !waitFor;
 let loaded = false;
 let pendingFrame = null;
+let view = null;
+// bl_touch type and the PlatformTouchPoint state of the finger
+const TOUCHES = { start: [0, 1], move: [1, 2], end: [2, 0], cancel: [3, 4] };
+
+function touch(message) {
+  const [, name, x, y, tap] = message.split(' ');
+  const [type, state] = TOUCHES[name];
+  const points = [{ id: 1, x: Number(x), y: Number(y), state, rx: 1, ry: 1, force: 0 }];
+  view.engine._bl_touch(
+    view.viewId,
+    type,
+    view.engine.stringToNewUTF8(JSON.stringify(points)),
+    0,
+    tap ? 1 : 0,
+  );
+}
 const timeout = setTimeout(() => {
   console.error(
     waited
@@ -55,7 +73,11 @@ await runEngine({
   url: process.env.RENDER_URL || 'file:///test/',
   width: Number(widthArg || 800),
   height: Number(heightArg || 600),
+  onEvent({ engine, viewId }) {
+    view ??= { engine, viewId };
+  },
   onConsole(message) {
+    if (message.startsWith('RENDER_TOUCH ')) touch(message);
     if (waited || !message.includes(waitFor)) return;
     waited = true;
     if (pendingFrame) pendingFrame();

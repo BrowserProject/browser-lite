@@ -117,7 +117,16 @@ description and line height instead of its fonts, and an SVG text drops the meas
 own fonts instead of emptying the font cascade cache (WebKit's fix for metrics of bidi SVG text,
 which on this port, where all kerned text takes the complex path, ran for every SVG text). Each
 of the three gave every style fonts the cache no longer gives, so the next change of the root or
-the body restyled the whole document and all text was measured again (patch 0173, #640).
+the body restyled the whole document and all text was measured again (patch 0173, #640). A
+touch's press sets `:active` and `:hover` on the chain of the touched element and its release or
+cancel clears them. A pseudo-class inside `:is()`, `:where()` or `:not()` takes the invalidation
+key (id, class, attribute, tag) of the compound around it, so `.item:is(:hover, :active) .media`
+looks only at the `.item` elements of the chain; WebKit keyed it on every element, and a rule
+with a universal key in an ancestor compound invalidates from the top of the chain, a traversal
+of the whole document for every change (edition.cnn.com). A universal pseudo-class inside
+`:has()` (`.grid:has(:active) .cell`) is handled once at the innermost element of the chain,
+whose ancestors are all the elements it may change; WebKit looked for them above the top of the
+chain and missed them (patch 0174, #641).
 `CompressionStream` and
 `DecompressionStream` take every `BufferSource`, also one of another realm such as an iframe's
 `Uint8Array`: WebKit's builtin refused chunks that failed `instanceof ArrayBuffer` of its own

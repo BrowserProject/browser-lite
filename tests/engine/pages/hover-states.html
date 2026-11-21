@@ -1,0 +1,153 @@
+<!doctype html>
+<title>Hover states</title>
+<!-- :hover and :active of touches (patch 0174). A touch sets :active and :hover on the chain of
+     the touched element and its release or cancel clears them; every element of the chain changes
+     state, and rules like `.item:is(:hover, :active) .media` (edition.cnn.com) gave the pseudo-class
+     no key of its own, so each change invalidated the whole document. Every touch below must give
+     the same computed style and geometry as a fresh style of the whole tree (descendant, child,
+     sibling, :is(), :not() and :has() rules), the states must apply and clear as before, and a
+     touch on a page with many elements must cost about as much with these rules as without. -->
+<style>
+  body { margin: 0; font: 14px/18px sans-serif; }
+  .card, .other { display: block; height: 40px; }
+  .card:hover .title { color: rgb(200, 0, 0); }
+  .card:active > .title { padding-left: 3px; }
+  .item:is(:hover, :active) .media { opacity: 0.5; }
+  .item:not(:hover) .plain { margin-left: 2px; }
+  .item:is(.x, :where(:active)) .media { padding-top: 2px; }
+  .card:hover + .next { color: rgb(0, 100, 0); }
+  .card:active ~ .later { color: rgb(0, 0, 100); }
+  .list:has(.card:hover) { padding-left: 4px; }
+  .list:has(.entry:active) .tail { margin-left: 5px; }
+  .grid:has(:active) .cell { margin-top: 1px; }
+  .grid:has(.card:is(:hover)) .cell { margin-bottom: 1px; }
+  .row:has(> .card:active) + .after { color: rgb(9, 9, 9); }
+  .fresh * { --fresh: 1; }
+</style>
+<style>
+  /* Universal: the top of the chain invalidates its descendants, the cost below has them both times */
+  :hover > .direct { outline-color: rgb(1, 2, 3); }
+  :active .deep { padding-top: 1px; }
+</style>
+<div id="app">
+  <div class="grid">
+    <span class="cell">Cell</span>
+    <div class="list">
+      <div class="row">
+        <a class="card item entry" id="first" href="#first"><span class="title"><b class="direct">First</b></span>
+          <span class="media"><i class="deep">Media</i></span><span class="plain">Plain</span></a>
+        <span class="next">Next</span><span class="later">Later</span>
+      </div>
+      <p class="after">After</p>
+      <span class="tail">Tail</span>
+    </div>
+  </div>
+  <div class="other" id="second"><span class="title">Second</span><span class="media">Media</span></div>
+  <div class="card item" id="third"><span class="title">Third</span><span class="media">Media</span><span class="plain">Plain</span></div>
+</div>
+<div id="many"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const properties = ['color', 'padding-left', 'padding-top', 'margin-left', 'margin-top', 'margin-bottom', 'opacity', 'outline-color'];
+const snapshot = () =>
+  [...$('app').querySelectorAll('*')].map((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return `${element.id || element.className}:${properties.map((name) => style.getPropertyValue(name)).join(',')},${rect.width.toFixed(2)}x${rect.height.toFixed(2)}`;
+  });
+// A fresh style: every element matches all rules again (no display: none, which would move :hover)
+const fresh = () => {
+  document.documentElement.classList.add('fresh');
+  const values = snapshot();
+  document.documentElement.classList.remove('fresh');
+  return values;
+};
+const results = [];
+const compare = (name) => {
+  const incremental = snapshot();
+  const expected = fresh();
+  const differ = incremental.filter((value, index) => value !== expected[index]);
+  if (differ.length) {
+    results.push(`${name}:${differ.length}`);
+    console.log(`HOVERSTATES differ ${name}: ${differ[0]} / ${expected[incremental.indexOf(differ[0])]}`);
+  }
+};
+const states = (id) => `${$(id).matches(':hover') ? 'hover' : ''}${$(id).matches(':active') ? 'active' : ''}`;
+const expectStates = (name, id, wanted) => {
+  if (states(id) !== wanted) results.push(`${name}:${id}_is_${states(id) || 'none'}_not_${wanted || 'none'}`);
+};
+
+// The harness (render.mjs) sends the touch; the promise ends with the page's event of it
+const touch = (type, id, eventType, tap = false) =>
+  new Promise((resolve) => {
+    const rect = $(id).getBoundingClientRect();
+    const x = Math.round(rect.left + Math.min(rect.width / 2, 20));
+    const y = Math.round(rect.top + rect.height / 2);
+    addEventListener(eventType, () => setTimeout(resolve, 0), { once: true, capture: true });
+    console.log(`RENDER_TOUCH ${type} ${x} ${y}${tap ? ' tap' : ''}`);
+  });
+// Time from the request of a touch to the page's event of it, which the engine dispatches after
+// the hit test and the change of :hover and :active
+const timed = (type, id, eventType) => {
+  const start = performance.now();
+  const event = new Promise((resolve) => addEventListener(eventType, () => resolve(performance.now() - start), { once: true, capture: true }));
+  touch(type, id, eventType);
+  return event;
+};
+// A press and its cancel: four changes of the chain
+const timedTouch = async (id) => {
+  const ms = (await timed('start', id, 'pointerdown')) + (await timed('cancel', id, 'pointercancel'));
+  document.body.offsetHeight;
+  return ms;
+};
+const median = (values) => values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
+
+addEventListener('load', async () => {
+  fresh();
+  await touch('start', 'first', 'pointerdown');
+  compare('press');
+  expectStates('press', 'first', 'hoveractive');
+  expectStates('press', 'app', 'hoveractive');
+  await touch('cancel', 'first', 'pointercancel');
+  compare('cancel');
+  expectStates('cancel', 'first', '');
+  expectStates('cancel', 'app', '');
+  await touch('start', 'third', 'pointerdown');
+  compare('press elsewhere');
+  await touch('end', 'third', 'click', true);
+  compare('tap');
+  const afterTap = states('third');
+  await touch('start', 'second', 'pointerdown');
+  compare('press after a tap');
+  await touch('end', 'second', 'pointerup');
+  compare('release');
+  const afterRelease = states('second');
+  await touch('start', 'first', 'pointerdown');
+  await touch('end', 'first', 'click', true);
+  compare('tap on a link');
+  console.log(`HOVERSTATES after tap=${afterTap || 'none'} after release=${afterRelease || 'none'} after link tap=${states('first') || 'none'}`);
+  await measure();
+});
+
+// Cost: 15000 more elements; a touch on #second with the rules of this page against without them
+async function measure() {
+  $('many').innerHTML = Array.from({ length: 5000 }, (_, i) => `<div class="row"><span class="media">${i}</span><b>x</b></div>`).join('');
+  document.body.offsetHeight;
+  const sheet = document.styleSheets[0];
+  // Interleaved, so that warming up counts for both
+  const times = { with: [], without: [] };
+  for (let i = 0; i < 9; i++) {
+    for (const enabled of [false, true]) {
+      sheet.disabled = !enabled;
+      document.body.offsetHeight;
+      times[enabled ? 'with' : 'without'].push(await timedTouch('second'));
+    }
+  }
+  const rules = median(times.with);
+  const without = median(times.without);
+  console.log(`HOVERSTATES touch=${rules.toFixed(2)}ms without=${without.toFixed(2)}ms`);
+  // performance.now() counts whole milliseconds here; before, 6 ms more with the rules, now at most 0
+  if (rules - without >= 3) results.push(`a touch takes ${rules - without} ms longer with the rules`);
+  console.log(`HOVERSTATES done=${results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'}`);
+}
+</script>

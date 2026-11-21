@@ -86,6 +86,11 @@
 //                  about as much with the custom properties on their pseudo-elements as without,
 //                  a removed sheet and a class on the root or the body after the others a
 //                  fraction of it
+//   hover-states.html  touches through render.mjs (RENDER_TOUCH) on rules with :hover and :active
+//                  in descendant, child, sibling, :is(), :not() and :has() selectors (patch 0174):
+//                  each press, cancel, release and tap gives the same computed style and geometry
+//                  as a fresh style, the states apply and clear as before, and a touch on a page
+//                  with 15000 more elements is less than 3 ms slower with these rules than without
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -126,6 +131,7 @@ const CASES = [
   { name: 'image-load-events', wait: 'IMGLOAD done' },
   { name: 'canvas-text-fonts', wait: 'CANVASFONTS done' },
   { name: 'route-styles', size: [800, 600], wait: 'ROUTESTYLES done' },
+  { name: 'hover-states', size: [400, 600], wait: 'HOVERSTATES done' },
   { name: 'select-styles', size: [400, 220], check: 'check-select-styles.mjs' },
   {
     name: 'form-controls',

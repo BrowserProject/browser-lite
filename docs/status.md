@@ -741,9 +741,19 @@ browser (Safari keeps Cmd+L, T and W for itself).
    the tap and its home page within 6 s of Back, 20min.ch's Back under 8 s with no step over 3 s,
    nzz.ch's article within 7 s on the Moto, the longest step halved at a fourth of the CPU) is not
    reached: it needs faster compiled code (phase 4 of [jit.md](jit.md)). A touch's move does not
-   update `:hover` (its hit test is read-only); its press and release do, each an invalidation of
-   the `:hover` and `:active` rules below the top of the chain (`Document::updateHoverActiveState`,
-   edition.cnn.com: 2.3 s over 170 touches), open.
+   update `:hover` (its hit test is read-only); its press and release do. On edition.cnn.com
+   (2026-11-21, local, phone emulation at a fourth of the CPU, a touch probe 4 times a second
+   during the load, CPU profiles of 3 interleaved runs each) rules like
+   `.container_streaming-carousel__item:is(:hover, :active) .image img` gave the pseudo-class a
+   universal key, so every change of the chain traversed the whole document from its top:
+   `Document::updateHoverActiveState` took a median of 19 to 20 ms, 8.3 to 10.8 s in all. Patch
+   0174 (#641) keys it on the compound around the `:is()`: now 0 to 1 ms, 0.37 to 0.44 s in all;
+   `WebView::touchEvent` a median of 21 to 27 ms instead of 50 to 61 ms. Open: the rest of a touch
+   is the style and layout of the loading page that its first hit test (the `touch-action` at the
+   point) brings forward, 3.7 to 8.1 s per run against 4.7 to 6.2 s before (the page's work, not
+   the touch's); the load event came after 50.4 to 60.1 s against 51.2 to 72.0 s (5 interleaved
+   runs without profile, medians 54.9 and 54.6 s, within the noise; Chromium 10 s). The criterion
+   (touches under 15 ms, that style under 2 s, the load under 55 s) is not reached.
    blick.ch (Next.js, 2026-11-09, local, 412x860; the report: 25 to 30 s on a Moto G71): after a
    tap the new route is in the DOM after 7 to 8 s (plain Chromium 3.5 to 6.6 s with the data
    fetch), Back shows the home page after 5 to 7.5 s (Chromium under 1 s). The page got few frames
