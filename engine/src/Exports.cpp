@@ -111,8 +111,13 @@ static void withNavigation(int id, std::optional<uint64_t> request, Function&& f
     runOnEngineThread([id, request, function = std::forward<Function>(function)]() mutable {
         if (request)
             userNavigationTaken(*request);
-        if (auto* view = WebView::fromID(id))
-            view->runWhenNotBlocked(WTF::move(function));
+        if (auto* view = WebView::fromID(id)) {
+            // Also when it waited for a dialog and runs in a later step
+            view->runWhenNotBlocked([function = WTF::move(function)](WebView& view) mutable {
+                nameEngineStep("navigation");
+                function(view);
+            });
+        }
     });
 }
 

@@ -47,6 +47,9 @@ void installHostRegExp();
 // Event loop (EngineLoop.cpp)
 void initializeEngineLoop();
 void scheduleRunLoopPump();
+// Names the running step of the engine thread in the debug log ("RunLoop step took N ms
+// (navigation)") if it has no name yet; kind must outlive the step (a string literal)
+void nameEngineStep(const char* kind);
 // Runs work after the current work item and its GC, where the heap is not deferred: a
 // synchronous full GC (collectNow) inside a work item only runs at its end (patch 0012)
 void runAtTopLevel(Function<void()>&&);

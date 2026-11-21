@@ -1220,6 +1220,24 @@ browser (Safari keeps Cmd+L, T and W for itself).
    visible view that pauses at its safepoint for the host's calls, with the view's own commands
    held and its hiding counted as hidden for the pause (the page itself must not see the
    visibility change while its script is on the stack).
+15. Back from the back/forward cache rebuilds the page's render tree (2026-11-21, local, phone
+   emulation at a fourth of the CPU, 6 runs each over two days, interleaved with the engine
+   before). WebKit keeps no render tree in the cache (`Page::willEnterBackForwardCache`), so the
+   restore styles, builds and lays out every element in the navigation's step, and then restyled
+   and laid out the page a second time; now once (#638). spiegel.de: shown 2.7 to 3.9 s after
+   Back instead of 5.3 to 8.0 s, touch probes answered after 1.7 to 3.6 s (p50) instead of 4.3
+   to 7.2 s, the step 2.3 to 3.1 s; watson.ch 1.7 to 2.9 s instead of 2.4 to 3.5 s; cnn.com 1.3 to
+   1.9 s instead of 2.2 to 3.1 s. Chromium shows spiegel.de's Back after 1.3 to 1.4 s, it keeps its
+   layout tree in the cache. The step left is one build of the render tree: on spiegel.de
+   `display: none` on the root and back costs the same 3.2 to 3.4 s in the page, the profile of
+   the step is style 45 % (`applyCustomProperty`, `collectMatchingRules`), layout 33 %, building
+   the renderers 10 %, `pageshow` handlers 7 %. Not reached: shown within 2.5 s, style and layout
+   under 1 s, probes under 1 s. That needs the render tree kept in the cache like Chromium
+   (against WebKit's invariant that a cached document has none: its layers, scrolling nodes and
+   the timers of renderers would have to be detached and suspended) or a much faster style
+   resolution. 20min.ch's Back is a route change of the same document (`popstate`), not the cache:
+   its step is now in the log (#639), locally 25 s at a fourth of the CPU, and host calls such as
+   a tap during the load showed steps of up to 15 s that were not logged before.
 
 ## Open: features
 

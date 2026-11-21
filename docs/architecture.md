@@ -123,7 +123,10 @@ The view events of a load come from our `FrameLoaderClient` (`engine/src/Clients
 `navigation-start` and `navigation` (`loading` true) when the main frame starts a provisional load
 (#494), `commit`, then `navigation` and `title` of the new document. A page from the back/forward
 cache commits while the frame still holds the page being left, so its `navigation` and `title` follow once it is
-back in the frame (`didRestoreFromBackForwardCache`, #367). Until the commit the engine reports
+back in the frame (`didRestoreFromBackForwardCache`, #367). WebKit keeps no render tree in the cache,
+so the restore builds it with the style and layout of every element; the style environment of each
+restored document is refreshed right before that (`FrameLoader::open`), not after the whole restore
+as in WebKit, which restyled and laid out the page a second time (patch 0172, #638). Until the commit the engine reports
 the address of the document being left; the address a navigation of the host goes to is kept by
 the core (`View.pendingURL`, `packages/core/src/pending.ts`, #382). The core also reads typed
 text like Chrome (`typedAddress`, `packages/core/src/address.ts`, #435): without a scheme
@@ -300,7 +303,10 @@ a frame is) is urgent work on the engine thread like input (see Input), so a bus
 a frame every task or two (#359). At most one RunLoop pump waits among the engine's local tasks, so a
 pass of them returns to the JS event loop, where the host's frame calls arrive, after one RunLoop
 cycle (#477). A long cycle is one long task of the page, not many short ones, so a cycle has no
-time budget of its own (#551). A view without a rendering update for two stall checks (2 s
+time budget of its own (#551). Every step of the engine thread over 50 ms, from its JS event loop
+back to it, is in the debug log as `RunLoop step took N ms`, with its kind when it is no RunLoop
+cycle: `(navigation)` (a navigation of the host such as Back), `(priority task)` (another call
+of the host or a compositor's answer), `(task)` (#639). A view without a rendering update for two stall checks (2 s
 apart, `WebView.cpp`) logs where it and its compositor stand (`stallState`), with the
 compositor's phase and how long it lasts, since the scene started if it never ran (#402). Paint holding like Chrome and Safari (`WebView::holdPaintForNewPage`, #568): from the commit of a
 new page (not after the initial empty document, not for a page from the back/forward cache) the

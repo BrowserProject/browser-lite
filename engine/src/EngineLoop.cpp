@@ -152,6 +152,72 @@ bool engineThreadInLongScript(Seconds minimum)
     return std::atomic_ref(vm->entryScope).load(std::memory_order_relaxed);
 }
 
+// A step of the engine thread: one task it takes from its JS event loop (a RunLoop pass, a local
+// task, a call of the host such as a navigation) until it returns there, with its GC. A step over
+// 50 ms goes into the debug log as "RunLoop step took N ms", naming what ran when it was no
+// RunLoop pass (a Back on 20min.ch ran as a navigation for 17 s on a phone without a line).
+// Nested work of a step is part of it; the steps of a nested event loop (a dialog) are their own.
+class EngineStep {
+public:
+    // Inside a step a named one only names that step, if it has no name yet
+    EngineStep(const char* kind, bool named)
+        : m_outer(s_current)
+        , m_kind(kind)
+        , m_named(named)
+        , m_start(WTF::MonotonicTime::now())
+    {
+        if (m_outer && named)
+            name(kind);
+        s_current = this;
+    }
+
+    ~EngineStep()
+    {
+        s_current = m_outer;
+        if (m_outer)
+            return;
+        auto duration = (WTF::MonotonicTime::now() - m_start).milliseconds();
+        if (duration <= 50)
+            return;
+        if (!strcmp(m_kind, runLoopKind))
+            debugLog("RunLoop step took %.0f ms", duration);
+        else
+            debugLog("RunLoop step took %.0f ms (%s)", duration, m_kind);
+    }
+
+    // Names the outermost running step
+    static void name(const char* kind)
+    {
+        auto* step = s_current;
+        while (step && step->m_outer)
+            step = step->m_outer;
+        if (step && !step->m_named) {
+            step->m_kind = kind;
+            step->m_named = true;
+        }
+    }
+
+    // A nested event loop's steps are steps of their own
+    static EngineStep* enterNestedEventLoop() { return std::exchange(s_current, nullptr); }
+    static void leaveNestedEventLoop(EngineStep* outer) { s_current = outer; }
+
+    static constexpr const char* runLoopKind = "RunLoop";
+
+private:
+    static EngineStep* s_current;
+    EngineStep* m_outer;
+    const char* m_kind;
+    bool m_named;
+    WTF::MonotonicTime m_start;
+};
+
+EngineStep* EngineStep::s_current;
+
+void nameEngineStep(const char* kind)
+{
+    EngineStep::name(kind);
+}
+
 // All work on the engine thread runs under JSLock and a DeferGC. In
 // WebAssembly the conservative GC does not see local variables. So it may only
 // run when nothing of JSC/WebCore is on the stack: at the end of the outermost
@@ -266,6 +332,7 @@ static void runPriorityTasks()
     auto& tasks = priorityTasks();
     while (!tasks.isEmpty()) {
         auto* function = tasks.takeFirst();
+        EngineStep step("priority task", false);
         runWithGCAfterwards([&] {
             (*function)();
         });
@@ -292,6 +359,7 @@ static void runLocalTasks()
         if (tasks.isEmpty())
             break;
         auto* function = tasks.takeFirst();
+        EngineStep step("task", false);
         runWithGCAfterwards([&] {
             (*function)();
         });
@@ -430,15 +498,12 @@ static void armTimerForNextScheduledTask()
 
 static void pumpRunLoop()
 {
-    auto start = WTF::MonotonicTime::now();
+    EngineStep step(EngineStep::runLoopKind, true);
     // Run all due timers and waiting tasks once
     runWithGCAfterwards([] {
         WTF::RunLoop::cycle();
     });
     armTimerForNextScheduledTask();
-    auto duration = (WTF::MonotonicTime::now() - start).milliseconds();
-    if (duration > 50)
-        debugLog("RunLoop step took %.0f ms", duration);
 }
 
 void scheduleRunLoopPump()
@@ -628,6 +693,7 @@ void runNestedEventLoop(const Function<bool()>& done, const Function<bool()>& on
     // A JS entry records the caller's frame here; at the waiting script's frames walks stop
     auto* topCallFrame = std::exchange(vm.topCallFrame, nullptr);
     ++s_nestedEventLoops;
+    auto* outerStep = EngineStep::enterNestedEventLoop();
     // Called from a timer: WebCore's timers may fire again
     WebCore::TimerBase::fireTimersInNestedEventLoop();
     pthread_t self = pthread_self();
@@ -660,6 +726,7 @@ void runNestedEventLoop(const Function<bool()>& done, const Function<bool()>& on
         __builtin_wasm_memory_atomic_wait32(reinterpret_cast<int*>(self), static_cast<int>(self), static_cast<int64_t>(wait * 1e6));
     }
     --s_nestedEventLoops;
+    EngineStep::leaveNestedEventLoop(outerStep);
     vm.topCallFrame = topCallFrame;
     threadData.setCurrentState(scriptState);
     restartScriptWatchdog();

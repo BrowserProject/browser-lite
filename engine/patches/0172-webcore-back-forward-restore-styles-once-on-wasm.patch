@@ -1,0 +1,38 @@
+diff --git a/Source/WebCore/history/CachedPage.cpp b/Source/WebCore/history/CachedPage.cpp
+index 4e4f6239b5..9f12b21119 100644
+--- a/Source/WebCore/history/CachedPage.cpp
++++ b/Source/WebCore/history/CachedPage.cpp
+@@ -170,7 +170,8 @@ void CachedPage::restore(Page& page)
+     if (m_needsDeviceOrPageScaleChanged && localMainFrame)
+         localMainFrame->deviceOrPageScaleFactorChanged();
+ 
+-    page.setNeedsRecalcStyleInAllFrames();
++    // browser-lite: FrameLoader::open() refreshed the style environment of every restored document
++    // before building its render tree; doing it here restyled the whole page a second time
+ 
+ #if ENABLE(VIDEO)
+     if (m_needsCaptionPreferencesChanged)
+diff --git a/Source/WebCore/loader/FrameLoader.cpp b/Source/WebCore/loader/FrameLoader.cpp
+index a8422b2cac..5133a3315c 100644
+--- a/Source/WebCore/loader/FrameLoader.cpp
++++ b/Source/WebCore/loader/FrameLoader.cpp
+@@ -140,6 +140,7 @@
+ #include "SerializedScriptValue.h"
+ #include "Settings.h"
+ #include "ShouldTreatAsContinuingLoad.h"
++#include "StyleDocumentScope.h"
+ #include "StyleTreeResolver.h"
+ #include "SubframeLoader.h"
+ #include "SubresourceLoader.h"
+@@ -2835,6 +2836,11 @@ void FrameLoader::open(CachedFrameBase& cachedFrame)
+ 
+     document->attachToCachedFrame(cachedFrame);
+     document->setBackForwardCacheState(Document::NotInBackForwardCache);
++    // browser-lite: the cached document has no render tree (Page::destroyRenderTrees). Its style
++    // environment (settings, fonts, viewport) may have changed while it was cached: refresh it here,
++    // before setDocument() builds the tree, instead of after the whole restore
++    // (CachedPage::restore), which restyled and laid out every element a second time.
++    document->styleScope().didChangeStyleSheetEnvironment();
+ 
+     m_needsClear = true;
+     m_isComplete = false;
