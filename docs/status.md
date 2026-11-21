@@ -1098,6 +1098,28 @@ browser (Safari keeps Cmd+L, T and W for itself).
    layers covered by later layers with effects, children or animations stay in the frames. On devices with a real GPU a whole view frame costs far less (not
    measured).
 
+   Idle pages with animation frames (2026-11-21, local, Chromium host 1280x800, the 20 s after the
+   first 45 s and a 10 s engine profile, 3 interleaved runs): a reset rule
+   `*, ::before, ::after { box-sizing: inherit }` gives every element explicit inheritance, and
+   WebKit matched the rules of every child of an element whose transform or background color an
+   animation or script changes every frame; Lottie's attribute changes built `<use>` shadow trees
+   again. Patch 0175 (#642) restyles only children and pseudo-elements a rule for a changed property
+   may make inherit, keeps the inline style fast path next to `[style]` selectors and updates use
+   clones in place. webflow.com (its marquee's inline transform about 30 times a second): style
+   resolution 0.02 to 0.03 instead of 0.13 s per 3 s, but style with its compositing update still
+   0.37 to 0.44 s (before 0.49 to 0.61): moving a composited layer makes WebKit walk and
+   re-evaluate every later layer of its 415 for overlap (0.27 to 0.35 s); renderer 0.34 to 0.42
+   cores at 26 to 32 frames per second against 0.32 to 0.45 at 19 to 38 (Chromium 0.07 to 0.24).
+   duolingo.com: style 0.09 instead of 0.21 to 0.22 s per 3 s, `setAttribute` 0.38 to 0.40 s per
+   10 s (path parsing), but Lottie's JS takes about two thirds of the engine thread and a rAF loop
+   fills what a frame saves: renderer 0.83 to 0.90 instead of 0.91 to 0.95 cores (Chromium 0.09 to
+   0.25). edition.cnn.com: unchanged, 0.94 to 1.06 s of style per 3 s and 1.75 to 1.86 cores; its
+   11 animated elements are animation-only updates that still match all their rules every frame
+   (WebKit falls back to full matching when the cascade overrides an animated property or no base
+   style was kept), next to the host decoding its videos. Not reached: webflow under 0.15 s of
+   style per 3 s and 0.3 cores, duolingo under 0.45 cores, cnn under 1.2 cores. Next: a compositing
+   update that skips the layers after a moved composited layer whose clipped overlap bounds stayed,
+   a kept base style for animation-only updates, and faster JS for Lottie (see 1.).
 6. Images drawn small still decode at full size unless they are JPEGs or still WebPs (#270,
    #286): PNG, AVIF, GIF and animated WebP decoders ignore the subsampling level. A JPEG also
    decodes at full size for `img.decode()`, WebGL, `createImageBitmap`, `createPattern` and

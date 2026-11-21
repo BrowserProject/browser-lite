@@ -1,0 +1,200 @@
+<!doctype html>
+<title>Frame restyles</title>
+<!-- What an animation frame restyles (patch 0175), on a page that sets `box-sizing: inherit` on every
+     element like most CSS resets: when only non-inherited properties of an element change (a
+     transform, a background color), a child, or the ::before and ::after of an animated element, is
+     restyled only if a rule or declaration that may set a changed property to `inherit` exists for it; an inline style change keeps its fast path next to
+     selectors on the style attribute; attributes of elements that <use> clones (Lottie's paths and
+     groups) reach the clones without building the use's shadow tree again. Every change must give
+     the same computed style as a fresh style, and the clones of the first <use> must paint like a
+     <use> made at the end (check-frame-restyles.mjs compares the two halves of the frame). -->
+<style>
+  html { box-sizing: border-box; overflow: hidden; }
+  *, ::before, ::after { box-sizing: inherit; }
+  body { margin: 0; font: 12px sans-serif; }
+  .bg > .bg-child { background-color: inherit; }
+  .radius > * { border-radius: inherit; }
+  .styled[style*="rotate"] { color: rgb(1, 2, 3); }
+  .styled[style*="scale"] + .next { color: rgb(4, 5, 6); }
+  .blue { fill: rgb(0, 0, 255); }
+  #many-root > div { padding-left: 1px; }
+  .glow::before { content: ""; display: block; height: 2px; background-color: inherit; }
+  .glow::after { content: ""; display: block; height: 2px; outline-style: solid; }
+</style>
+<svg id="pictures" width="600" height="120">
+  <defs>
+    <rect id="leaf" width="10" height="10" fill="rgb(200, 100, 0)" />
+    <g id="src">
+      <path id="p" d="M10 10 L30 10 L30 30 Z" fill="rgb(120, 0, 120)" />
+      <g id="inner" transform="translate(60 10)">
+        <rect id="r" width="30" height="20" style="fill: red" />
+      </g>
+      <circle id="c" cx="150" cy="40" r="10" fill="rgb(0, 160, 0)" />
+      <use href="#leaf" x="200" y="20" />
+    </g>
+  </defs>
+  <use id="u1" href="#src" />
+</svg>
+<div id="parent" class="bg radius" style="background-color: rgb(10, 20, 30); border-radius: 3px">
+  <div class="bg-child" id="bg-child">bg</div>
+  <div id="plain-child">plain</div>
+  <div id="inline-child" style="outline-color: inherit; outline-style: solid">inline</div>
+  <span id="leaf-child"><b id="grandchild">b</b></span>
+</div>
+<svg width="10" height="10"><g id="fading" opacity="0.5"><rect id="fading-rect" opacity="inherit" width="5" height="5" /></g></svg>
+<table id="table" border="1" style="border-color: rgb(1, 1, 1)"><tr><td id="cell">cell</td></tr></table>
+<div class="glow" id="glow">glow</div>
+<p class="styled" id="styled">styled</p><p class="next" id="next">next</p>
+<div id="many-root"></div>
+<svg id="lottie" width="10" height="10" style="position: absolute; top: 400px"><defs><g id="frames"></g></defs></svg>
+<script>
+const $ = (id) => document.getElementById(id);
+const results = [];
+const properties = ['box-sizing', 'background-color', 'border-top-left-radius', 'outline-color', 'opacity', 'border-top-color', 'color', 'transform'];
+const watched = () => [...document.querySelectorAll('#parent, #parent *, #fading, #fading-rect, #table, #cell, #glow, #styled, #next')];
+const snapshot = () => watched().flatMap((element) => [null, '::before', '::after'].map((pseudo) => {
+  const style = getComputedStyle(element, pseudo);
+  return `${element.id || element.localName}${pseudo || ''}:${properties.map((name) => style.getPropertyValue(name)).join(',')}`;
+}));
+// A fresh style: every watched element is styled again from nothing
+const fresh = () => {
+  for (const element of [$('parent'), $('fading'), $('table'), $('glow'), $('styled'), $('next')]) {
+    element.style.display = 'none';
+    element.getBoundingClientRect();
+    element.style.display = '';
+  }
+  return snapshot();
+};
+const compare = (name) => {
+  document.body.offsetHeight;
+  const incremental = snapshot();
+  const expected = fresh();
+  const index = incremental.findIndex((value, i) => value !== expected[i]);
+  if (index >= 0) {
+    results.push(name);
+    console.log(`FRAMERESTYLES differ ${name}: ${incremental[index]} / ${expected[index]}`);
+  }
+};
+const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+addEventListener('load', async () => {
+  fresh();
+  // Only non-inherited properties change: explicitly inherited ones follow, the others stay
+  $('parent').style.transform = 'translateX(3px)';
+  compare('transform of the parent');
+  $('parent').style.backgroundColor = 'rgb(40, 50, 60)';
+  compare('background through background-color: inherit');
+  $('parent').style.borderRadius = '7px';
+  compare('border radius through a universal child rule');
+  $('parent').style.outlineColor = 'rgb(70, 80, 90)';
+  compare('inline outline-color: inherit');
+  $('fading').setAttribute('opacity', '0.25');
+  compare('presentation attribute opacity="inherit"');
+  $('table').style.borderColor = 'rgb(9, 9, 9)';
+  compare('table cell border color through the table');
+  for (let i = 0; i < 4; i++) {
+    $('parent').animate({ transform: ['none', 'translateX(9px)'] }, { duration: 1000, delay: -500 * i, fill: 'forwards' });
+    await frame();
+  }
+  compare('animated transform of the parent');
+  // An animation of the element itself: ::before inherits the animated background color explicitly
+  const glow = $('glow').animate({ backgroundColor: ['rgb(0, 0, 0)', 'rgb(200, 100, 50)'], transform: ['none', 'translateX(4px)'] }, 100000);
+  glow.pause();
+  for (const time of [10000, 50000, 90000]) {
+    glow.currentTime = time;
+    await frame();
+    compare(`animated background color at ${time / 1000} s`);
+  }
+
+  // Selectors on the style attribute
+  $('styled').style.transform = 'rotate(1deg)';
+  compare('[style*=rotate] starts to match');
+  $('styled').style.transform = 'scale(1.5)';
+  compare('[style*=rotate] stops, [style*=scale] + .next starts');
+  $('styled').style.transform = 'translateX(1px)';
+  compare('[style*=scale] + .next stops');
+
+  // Clones of <use>: attributes, inline styles, classes, a nested use and an id
+  $('u1').getBBox();
+  $('p').setAttribute('d', 'M10 10 L50 10 L50 60 Z');
+  $('inner').setAttribute('transform', 'translate(70 20) rotate(10)');
+  $('r').style.fill = 'rgb(0, 128, 0)';
+  await frame();
+  $('r').setAttribute('style', 'fill: rgb(0, 0, 200); stroke: black; stroke-width: 2');
+  $('c').classList.add('blue');
+  $('c').removeAttribute('r');
+  await frame();
+  $('c').setAttribute('r', '15');
+  $('leaf').setAttribute('width', '40');
+  $('p').setAttribute('stroke', 'rgb(200, 0, 0)');
+  $('p').setAttribute('stroke-width', '4');
+  $('inner').id = 'renamed';
+  for (let i = 0; i < 20; i++) {
+    $('p').setAttribute('d', `M10 ${10 + i} L${50 + i} 10 L50 ${60 + i} Z`);
+    $('renamed').setAttribute('transform', `translate(${70 + i} 20) rotate(${10 + i})`);
+    await frame();
+  }
+  const fresh2 = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  fresh2.setAttribute('href', '#src');
+  fresh2.setAttribute('x', '300');
+  $('pictures').append(fresh2);
+  const box = (element) => { const b = element.getBBox(); return `${b.width.toFixed(2)}x${b.height.toFixed(2)}`; };
+  if (box($('u1')) !== box(fresh2)) results.push(`use clones ${box($('u1'))} instead of ${box(fresh2)}`);
+  measure();
+  await frame();
+  await frame();
+  console.log(`FRAMERESTYLES done=${results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'}`);
+});
+
+// Costs: a transform change of an element with 3000 children that inherit box-sizing against a change
+// of an inherited property that restyles them all; Lottie-like attribute changes of 5 paths of a group
+// that 10 <use> clone, against cloning the group again
+// The fastest of 27 runs, the least disturbed by other work of the engine
+function fastest(run) {
+  const times = [];
+  for (let i = 0; i < 27; i++) {
+    document.body.offsetHeight;
+    const start = performance.now();
+    run(i);
+    document.body.offsetHeight;
+    times.push(performance.now() - start);
+  }
+  return Math.min(...times);
+}
+function measure() {
+  for (const animation of document.getAnimations()) animation.finish();
+  // 300 rules every child is matched against, like the rules of a large site
+  const rules = document.createElement('style');
+  rules.textContent = Array.from({ length: 300 }, (_, i) => `#many-root > div:nth-child(300n + ${i}) { padding-top: ${i % 3}px; }`).join('\n');
+  document.head.append(rules);
+  $('many-root').innerHTML = Array.from({ length: 3000 }, (_, i) => `<div>${i}</div>`).join('');
+  document.body.offsetHeight;
+  let offset = 0;
+  const moveRoot = () => { $('many-root').style.transform = `translateX(${++offset % 5}px)`; };
+  fastest(moveRoot);
+  const transform = fastest(moveRoot);
+  const inherited = fastest((i) => { $('many-root').style.cursor = i % 2 ? 'pointer' : 'text'; });
+
+  const group = $('frames');
+  group.innerHTML = Array.from({ length: 100 }, (_, i) => `<path d="M${i} 0 L${i + 1} 5 L${i} 9 Z" />`).join('');
+  for (let i = 0; i < 10; i++) {
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#frames');
+    $('lottie').append(use);
+  }
+  document.body.offsetHeight;
+  const paths = [...group.children];
+  const attributes = fastest((i) => {
+    for (let k = 0; k < 5; k++) paths[k * 20].setAttribute('d', `M${k} ${i} L${k + 2} 5 L${k} 9 Z`);
+  });
+  const recloned = fastest(() => {
+    for (const use of [...$('lottie').querySelectorAll('use')]) {
+      const again = use.cloneNode();
+      use.replaceWith(again);
+    }
+  });
+  console.log(`FRAMERESTYLES transform=${transform.toFixed(2)}ms inherited=${inherited.toFixed(2)}ms attributes=${attributes.toFixed(2)}ms recloned=${recloned.toFixed(2)}ms`);
+  if (transform / inherited > 0.3) results.push(`a transform restyles the children: ${Math.round((transform / inherited) * 100)}% of an inherited change`);
+  if (attributes / recloned > 0.3) results.push(`attributes of cloned paths cost ${Math.round((attributes / recloned) * 100)}% of cloning again`);
+}
+</script>

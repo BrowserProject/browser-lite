@@ -91,6 +91,14 @@
 //                  each press, cancel, release and tap gives the same computed style and geometry
 //                  as a fresh style, the states apply and clear as before, and a touch on a page
 //                  with 15000 more elements is less than 3 ms slower with these rules than without
+//   frame-restyles.html  what an animation frame restyles on a page with `box-sizing: inherit` on
+//                  every element (patch 0175): a change of non-inherited properties restyles only
+//                  the children that may inherit one of them explicitly, an inline style keeps its
+//                  fast path next to selectors on the style attribute, and attributes of what a
+//                  <use> clones reach the clones in place: same computed style as a fresh style,
+//                  check-frame-restyles.mjs: the updated clones paint like new ones; a transform
+//                  next to 3000 children costs a fraction of restyling them, attributes of 5 cloned
+//                  paths a fraction of cloning again
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -132,6 +140,12 @@ const CASES = [
   { name: 'canvas-text-fonts', wait: 'CANVASFONTS done' },
   { name: 'route-styles', size: [800, 600], wait: 'ROUTESTYLES done' },
   { name: 'hover-states', size: [400, 600], wait: 'HOVERSTATES done' },
+  {
+    name: 'frame-restyles',
+    size: [600, 300],
+    wait: 'FRAMERESTYLES done',
+    check: 'check-frame-restyles.mjs',
+  },
   { name: 'select-styles', size: [400, 220], check: 'check-select-styles.mjs' },
   {
     name: 'form-controls',

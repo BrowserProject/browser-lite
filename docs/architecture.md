@@ -126,7 +126,23 @@ with a universal key in an ancestor compound invalidates from the top of the cha
 of the whole document for every change (edition.cnn.com). A universal pseudo-class inside
 `:has()` (`.grid:has(:active) .cell`) is handled once at the innermost element of the chain,
 whose ancestors are all the elements it may change; WebKit looked for them above the top of the
-chain and missed them (patch 0174, #641).
+chain and missed them (patch 0174, #641). When only non-inherited properties of an element change
+(a transform or a background color of an animation or a script, every frame), a child is resolved
+again only if a rule, its inline style or its presentational hints may set one of the changed
+properties to `inherit` (the rules are collected per property with the invalidation features, a
+rule may match when the ids, classes and tag of its rightmost compound do); WebKit resolved every
+child that inherits any property explicitly, and the reset rule
+`*, ::before, ::after { box-sizing: inherit }` makes that every element, with all its rule matching
+and pseudo-elements. The same holds for the `::before` and `::after` of an element whose animation
+changes only non-inherited properties: they keep their style instead of matching their rules every
+frame. A child without a box stays without one (only its display could change that, and a change of
+the parent's display restyles all children). Selectors on the style attribute
+(`[style*=...]`) are invalidated like those of any attribute, so an inline style change keeps its
+fast path (WebKit matched all rules of the element again whenever a sheet had such a selector).
+An attribute of an element that a `<use>` clones reaches the clones in place, like a new clone
+would have it (not for a `use`, `symbol` or `svg` element, ids and references); WebKit built the
+use's whole shadow tree again for every attribute, which Lottie changes every frame (patch 0175,
+#642).
 `CompressionStream` and
 `DecompressionStream` take every `BufferSource`, also one of another realm such as an iframe's
 `Uint8Array`: WebKit's builtin refused chunks that failed `instanceof ArrayBuffer` of its own

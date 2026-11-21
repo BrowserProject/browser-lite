@@ -1,0 +1,492 @@
+diff --git a/Source/WebCore/dom/StyledElement.cpp b/Source/WebCore/dom/StyledElement.cpp
+index 50d58d7099..f5866a3cd2 100644
+--- a/Source/WebCore/dom/StyledElement.cpp
++++ b/Source/WebCore/dom/StyledElement.cpp
+@@ -196,18 +196,17 @@ void StyledElement::invalidateStyleAttribute()
+ 
+     elementData()->setStyleAttributeIsDirty(true);
+ 
+-    // Inline style invalidation optimization does not work if there are selectors targeting the style attribute
+-    // as some rule may start or stop matching.
+-    auto selectorsForStyleAttribute = styleResolver().ruleSets().selectorsForStyleAttribute();
+-    auto validity = selectorsForStyleAttribute == Style::SelectorsForStyleAttribute::None ? Style::Validity::InlineStyleInvalid : Style::Validity::ElementInvalid;
+-
+-    Node::invalidateStyle(validity);
++    // browser-lite: selectors on the style attribute (`[style*="transform"]`) are invalidated like any
++    // attribute, from the serialized old and new value, so the element keeps the inline style fast path
++    // (its other matched rules stay) unless one of them starts or stops matching.
++    Node::invalidateStyle(Style::Validity::InlineStyleInvalid);
+ 
+-    if (auto* svgElement = dynamicDowncast<SVGElement>(*this))
+-        svgElement->invalidateInstances();
++    if (RefPtr svgElement = dynamicDowncast<SVGElement>(*this); svgElement && !svgElement->instances().isEmptyIgnoringNullReferences()) {
++        RefPtr inlineStyle = this->inlineStyle();
++        svgElement->updateInstancesForAttributeChange(styleAttr, inlineStyle ? inlineStyle->asTextAtom(CSS::defaultSerializationContext()) : nullAtom());
++    }
+ 
+-    // In the rare case of selectors like "[style] ~ div" we need to synchronize immediately to invalidate.
+-    if (selectorsForStyleAttribute == Style::SelectorsForStyleAttribute::NonSubjectPosition)
++    if (styleResolver().ruleSets().selectorsForStyleAttribute() != Style::SelectorsForStyleAttribute::None)
+         synchronizeStyleAttributeForSelectorInvalidation();
+ }
+ 
+diff --git a/Source/WebCore/style/RuleFeature.cpp b/Source/WebCore/style/RuleFeature.cpp
+index 2c1ea0c529..b1277c1695 100644
+--- a/Source/WebCore/style/RuleFeature.cpp
++++ b/Source/WebCore/style/RuleFeature.cpp
+@@ -29,6 +29,8 @@
+ #include "config.h"
+ #include "RuleFeature.h"
+ 
++#include "CSSKeywordValueInlines.h"
++#include "CSSProperty.h"
+ #include "CSSSelector.h"
+ #include "CSSSelectorList.h"
+ #include "CSSSelectorParser.h"
+@@ -88,6 +90,12 @@ RuleFeature::RuleFeature(const RuleData& ruleData, MatchElement matchElement, Is
+ {
+ }
+ 
++ExplicitInheritance::ExplicitInheritance(const RuleData& ruleData, CSSPropertyID property)
++    : RuleAndSelector(ruleData)
++    , property(property)
++{
++}
++
+ SelectorDeduplicationKey::SelectorDeduplicationKey(const CSSSelector& selector)
+     : selector(&selector)
+ {
+@@ -523,6 +531,8 @@ void RuleFeatureSet::collectFeatures(CollectionContext& collectionContext, const
+     if (ruleData.canMatchPseudoElement())
+         collectPseudoElementFeatures(ruleData);
+ 
++    collectExplicitInheritances(ruleData);
++
+     for (auto& scopeRule : scopeRules) {
+         auto collectSelectorList = [&] (const auto& selectorList) {
+             if (!selectorList.isEmpty()) {
+@@ -657,6 +667,20 @@ void RuleFeatureSet::collectPseudoElementFeatures(const RuleData& ruleData)
+     }
+ }
+ 
++// browser-lite: a value that substitutes var() or attr() may turn out to be `inherit` too.
++void RuleFeatureSet::collectExplicitInheritances(const RuleData& ruleData)
++{
++    for (auto property : ruleData.styleRule().properties()) {
++        auto id = property.id();
++        if (id == CSSPropertyCustom || CSSProperty::isInheritedProperty(id))
++            continue;
++        auto* value = property.value();
++        if (!value || !(isValueID(*value, CSSValueInherit) || value->hasSubstitutionFunctions()))
++            continue;
++        explicitInheritances.append({ ruleData, id });
++    }
++}
++
+ void RuleFeatureSet::add(const RuleFeatureSet& other)
+ {
+     RELEASE_ASSERT(isMainThread());
+@@ -701,6 +725,7 @@ void RuleFeatureSet::add(const RuleFeatureSet& other)
+     usesFirstLetterRules = usesFirstLetterRules || other.usesFirstLetterRules;
+     hasStartingStyleRules = hasStartingStyleRules || other.hasStartingStyleRules;
+     usesHasPseudoClass = usesHasPseudoClass || other.usesHasPseudoClass;
++    explicitInheritances.appendVector(other.explicitInheritances);
+ }
+ 
+ void RuleFeatureSet::registerSubstitutionAttribute(const AtomString& attributeName, AffectsShadowTree affectsShadowTree)
+@@ -735,6 +760,7 @@ void RuleFeatureSet::clear()
+     usesFirstLineRules = false;
+     usesFirstLetterRules = false;
+     hasStartingStyleRules = false;
++    explicitInheritances.clear();
+ }
+ 
+ void RuleFeatureSet::shrinkToFit()
+@@ -749,6 +775,7 @@ void RuleFeatureSet::shrinkToFit()
+         rules->shrinkToFit();
+     for (auto& rules : hasPseudoClassRules.values())
+         rules->shrinkToFit();
++    explicitInheritances.shrinkToFit();
+ }
+ 
+ } // namespace Style
+diff --git a/Source/WebCore/style/RuleFeature.h b/Source/WebCore/style/RuleFeature.h
+index becaa2c083..382d716503 100644
+--- a/Source/WebCore/style/RuleFeature.h
++++ b/Source/WebCore/style/RuleFeature.h
+@@ -21,6 +21,7 @@
+ 
+ #pragma once
+ 
++#include "CSSPropertyNames.h"
+ #include "CSSSelectorList.h"
+ #include "CommonAtomStrings.h"
+ #include <wtf/Forward.h>
+@@ -109,6 +110,15 @@ struct RuleFeature : public RuleAndSelector {
+ static_assert(sizeof(RuleFeature) <= 32, "RuleFeature is a frequently allocated object. Keep it small.");
+ #pragma pack(pop)
+ 
++// browser-lite: a rule that may set a non-inherited property to `inherit` (also through var()), like
++// `*, ::before, ::after { box-sizing: inherit }`. When only non-inherited properties of a parent change,
++// its children are restyled only if such a rule for a changed property may match them.
++struct ExplicitInheritance : public RuleAndSelector {
++    ExplicitInheritance(const RuleData&, CSSPropertyID);
++
++    CSSPropertyID property;
++};
++
+ using PseudoClassInvalidationKey = std::tuple<unsigned, uint8_t, AtomString>;
+ 
+ using RuleFeatureVector = Vector<RuleFeature>;
+@@ -165,6 +175,9 @@ struct RuleFeatureSet {
+     bool hasStartingStyleRules { false };
+     bool usesHasPseudoClass { false };
+ 
++    // browser-lite
++    Vector<ExplicitInheritance> explicitInheritances;
++
+ private:
+     struct SelectorFeatures {
+         using InvalidationFeature = std::tuple<const CSSSelector*, MatchElement, IsNegation, Vector<const CSSSelector*>>;
+@@ -182,6 +195,7 @@ private:
+     void collectFeaturesFromSelector(SelectorFeatures&, const CSSSelector&, MatchElement = { MatchElement::Relation::Subject, { } });
+     void recursivelyCollectFeaturesFromSelector(SelectorFeatures&, const CSSSelector&, const RecursiveCollectionContext&);
+     void NODELETE collectPseudoElementFeatures(const RuleData&);
++    void collectExplicitInheritances(const RuleData&);
+ };
+ 
+ MatchElement::HasRelation computeHasArgumentRelation(const CSSSelector&);
+diff --git a/Source/WebCore/style/StyleTreeResolver.cpp b/Source/WebCore/style/StyleTreeResolver.cpp
+index 0d3c44984e..e81de3811a 100644
+--- a/Source/WebCore/style/StyleTreeResolver.cpp
++++ b/Source/WebCore/style/StyleTreeResolver.cpp
+@@ -29,7 +29,9 @@
+ #include "AXObjectCache.h"
+ #include "AnchorPositionEvaluator.h"
+ #include "CSSFontSelector.h"
++#include "CSSKeywordValueInlines.h"
+ #include "CSSPositionTryRule.h"
++#include "CSSProperty.h"
+ #include "CSSSerializationContext.h"
+ #include "ComposedTreeAncestorIterator.h"
+ #include "ComposedTreeIterator.h"
+@@ -39,6 +41,7 @@
+ #include "DocumentQuirks.h"
+ #include "DocumentTimeline.h"
+ #include "DocumentView.h"
++#include "ElementInlines.h"
+ #include "EventTarget.h"
+ #include "HTMLBodyElement.h"
+ #include "HTMLInputElement.h"
+@@ -70,9 +73,14 @@
+ #include "StyleComputedStyle+SettersInlines.h"
+ #include "StyleDocumentScope.h"
+ #include "StyleFontSizeFunctions.h"
++#include "StyleInterpolation.h"
+ #include "StyleOriginatedTimelinesController.h"
+ #include "StylePositionTryFallbackTactic.h"
++#include "StyleProperties.h"
++#include "StylePropertiesInlines.h"
+ #include "StyleResolver.h"
++#include "StyleScopeRuleSets.h"
++#include "StyledElement.h"
+ #include "StyleTreeResolverInlines.h"
+ #include "SVGElement.h"
+ #include "Text.h"
+@@ -408,6 +416,11 @@ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle*
+         // browser-lite: new fonts give no ::before or ::after a box it did not have.
+         if (resolutionType == ResolutionType::FontUpdate && isBeforeOrAfter && !existingPseudoStyle)
+             return OptionSet<Change> { };
++        if (resolutionType == ResolutionType::AnimationOnly && isBeforeOrAfter && animationLeavesPseudoElementStyle(element, pseudoElementIdentifier, existingStyle, existingPseudoStyle, *update.style)) {
++            if (existingPseudoStyle)
++                update.style->addPseudoElementStyle(Style::ComputedStyle::clonePtr(*existingPseudoStyle));
++            return OptionSet<Change> { };
++        }
+         auto pseudoElementUpdate = resolvePseudoElement(element, pseudoElementIdentifier, update, parent().isInDisplayNoneTree, existingPseudoStyle);
+ 
+         auto pseudoElementChanges = [&]() -> OptionSet<Change> {
+@@ -1321,6 +1334,123 @@ static std::unique_ptr<Style::ComputedStyle> createInheritedDisplayContentsStyle
+     return style;
+ }
+ 
++// browser-lite: whether a selector may match the element itself (no pseudo-element given) or its ::before or
++// ::after, by the ids, classes and tag of its rightmost compound and the pseudo-element there.
++static bool subjectMayMatch(const CSSSelector& selector, const Element& element, std::optional<CSSSelector::PseudoElement> pseudoElement = std::nullopt)
++{
++    bool inQuirksMode = element.document().inQuirksMode();
++    bool matchesPseudoElement = false;
++    for (auto* simpleSelector = &selector; simpleSelector; simpleSelector = simpleSelector->precedingInComplexSelector()) {
++        switch (simpleSelector->match()) {
++        case CSSSelector::Match::Tag: {
++            auto& localName = simpleSelector->tagQName().localName();
++            if (localName != starAtom() && !equalIgnoringASCIICase(localName, element.localName()))
++                return false;
++            break;
++        }
++        case CSSSelector::Match::Id:
++            if (!inQuirksMode && element.getIdAttribute() != simpleSelector->value())
++                return false;
++            break;
++        case CSSSelector::Match::Class:
++            if (!inQuirksMode && !element.hasClassName(simpleSelector->value()))
++                return false;
++            break;
++        case CSSSelector::Match::PseudoElement:
++            if (!pseudoElement || simpleSelector->pseudoElement() != *pseudoElement)
++                return false;
++            matchesPseudoElement = true;
++            break;
++        default:
++            break;
++        }
++        if (simpleSelector->relation() != CSSSelector::Relation::Subselector)
++            break;
++    }
++    return !pseudoElement || matchesPseudoElement;
++}
++
++static bool propertyMayDiffer(CSSPropertyID property, const Style::ComputedStyle& a, const Style::ComputedStyle& b, const Document& document)
++{
++    // A logical property is compared by the physical one it sets for the parent's writing mode (the same
++    // in both styles, as a change of it restyles all children).
++    if (CSSProperty::isDirectionAwareProperty(property))
++        property = CSSProperty::resolveDirectionAwareProperty(property, b.writingMode());
++    if (!Interpolation::canInterpolate(property))
++        return true;
++    return !Interpolation::equals(property, a, b, document);
++}
++
++// browser-lite: a style that inherits a non-inherited property explicitly needs to be resolved again
++// only if a rule or a declaration of the element that may set a changed property to `inherit` exists.
++// Rules of other scopes (`:host`, `::slotted()`, `::part()`) and animations are not looked at.
++bool TreeResolver::explicitlyInheritedPropertiesMayChange(const Element& element, Parent& parent)
++{
++    if (!parent.previousStyle)
++        return true;
++    if (element.isInShadowTree() || element.shadowRoot() || element.assignedSlot() || element.hasKeyframeEffects({ }))
++        return true;
++    if (!(parent.previousStyle->nonInheritedCustomProperties() == parent.style.nonInheritedCustomProperties()))
++        return true;
++
++    auto propertyChanged = [&](CSSPropertyID property) {
++        if (!parent.comparedProperties.testAndSet(property)) {
++            if (propertyMayDiffer(property, *parent.previousStyle, parent.style, m_document.get()))
++                parent.changedProperties.set(property);
++        }
++        return parent.changedProperties.get(property);
++    };
++    for (auto& inheritance : scope().resolver->ruleSets().features().explicitInheritances) {
++        if (subjectMayMatch(inheritance.selector(), element) && propertyChanged(inheritance.property))
++            return true;
++    }
++
++    auto* styledElement = dynamicDowncast<StyledElement>(element);
++    if (!styledElement)
++        return false;
++    for (auto* properties : { styledElement->inlineStyle(), static_cast<const StyleProperties*>(styledElement->presentationalHintStyle()), static_cast<const StyleProperties*>(styledElement->additionalPresentationalHintStyle()) }) {
++        if (!properties)
++            continue;
++        for (auto property : *properties) {
++            auto id = property.id();
++            auto* value = property.value();
++            if (id == CSSPropertyCustom || CSSProperty::isInheritedProperty(id) || !value || !(isValueID(*value, CSSValueInherit) || value->hasSubstitutionFunctions()))
++                continue;
++            if (propertyChanged(id))
++                return true;
++        }
++    }
++    return false;
++}
++
++// browser-lite: an animation of an element that changes none of its inherited properties leaves the style of
++// its ::before and ::after as it was, unless a rule for them may set a changed property to `inherit`;
++// a pseudo-element that generated no box still generates none.
++bool TreeResolver::animationLeavesPseudoElementStyle(const Element& element, const PseudoElementIdentifier& pseudoElementIdentifier, const Style::ComputedStyle* existingStyle, const Style::ComputedStyle* existingPseudoStyle, const Style::ComputedStyle& newStyle)
++{
++    if (!existingStyle || newStyle.display() == DisplayType::None)
++        return false;
++    if (element.isInShadowTree() || element.shadowRoot() || element.hasKeyframeEffects(pseudoElementIdentifier))
++        return false;
++    auto changes = determineChanges(*existingStyle, newStyle);
++    if (changes.containsAny({ Change::Inherited, Change::FastPathInherited, Change::Renderer, Change::Container }))
++        return false;
++    if (!existingPseudoStyle)
++        return true;
++    if (existingPseudoStyle->usesAnchorFunctions() || existingPseudoStyle->isContainerDependent())
++        return false;
++    if (!existingPseudoStyle->hasExplicitlyInheritedProperties())
++        return true;
++    if (!(existingStyle->nonInheritedCustomProperties() == newStyle.nonInheritedCustomProperties()))
++        return false;
++    auto pseudoElement = pseudoElementIdentifier.type == PseudoElementType::Before ? CSSSelector::PseudoElement::Before : CSSSelector::PseudoElement::After;
++    for (auto& inheritance : scope().resolver->ruleSets().features().explicitInheritances) {
++        if (subjectMayMatch(inheritance.selector(), element, pseudoElement) && propertyMayDiffer(inheritance.property, *existingStyle, newStyle, m_document.get()))
++            return false;
++    }
++    return true;
++}
++
+ void TreeResolver::resetDescendantStyleRelations(Element& element, DescendantsToResolve descendantsToResolve)
+ {
+     switch (descendantsToResolve) {
+@@ -1412,6 +1542,8 @@ void TreeResolver::resolveComposedTree()
+         }
+ 
+         auto* style = existingStyle(element.get());
++        // The root's existing style is replaced below.
++        auto* previousStyle = element.ptr() == m_document->documentElement() ? nullptr : style;
+ 
+         auto changes = OptionSet<Change> { };
+         auto descendantsToResolve = DescendantsToResolve::None;
+@@ -1420,7 +1552,19 @@ void TreeResolver::resolveComposedTree()
+         bool didAXUpdateFontSubtree = parent.didAXUpdateFontSubtree;
+         bool didAXUpdateTextColorSubtree = parent.didAXUpdateTextColorSubtree;
+ #endif
+-        auto resolutionType = resolutionTypeAfterFontChange(element.get(), style, determineResolutionType(element.get(), style, parent.descendantsToResolve, parent.changes));
++        // browser-lite: when only non-inherited properties of the parent changed, a child whose explicitly
++        // inherited properties did not change is resolved as if the parent had not changed (also by its
++        // own fast paths, like an animation or an inline style). A child without a box keeps having none:
++        // only its display could give it one, and a change of the parent's display restyles all children.
++        auto parentDescendantsToResolve = parent.descendantsToResolve;
++        if (parentDescendantsToResolve == DescendantsToResolve::ChildrenWithExplicitInherit) {
++            if (!style) {
++                element->resetComputedStyle();
++                parentDescendantsToResolve = DescendantsToResolve::None;
++            } else if (!style->hasExplicitlyInheritedProperties() || !explicitlyInheritedPropertiesMayChange(element.get(), parent))
++                parentDescendantsToResolve = DescendantsToResolve::None;
++        }
++        auto resolutionType = resolutionTypeAfterFontChange(element.get(), style, determineResolutionType(element.get(), style, parentDescendantsToResolve, parent.changes));
+         if (resolutionType) {
+             element->resetComputedStyle();
+ 
+@@ -1507,6 +1651,8 @@ void TreeResolver::resolveComposedTree()
+ #else
+         pushParent(element.get(), *style, changes, descendantsToResolve, isInDisplayNoneTree ? IsInDisplayNoneTree::Yes : IsInDisplayNoneTree::No);
+ #endif
++        if (previousStyle != style)
++            m_parentStack.last().previousStyle = previousStyle;
+         it.traverseNext();
+     }
+ 
+diff --git a/Source/WebCore/style/StyleTreeResolver.h b/Source/WebCore/style/StyleTreeResolver.h
+index 3a0ac4eba5..9a56095c88 100644
+--- a/Source/WebCore/style/StyleTreeResolver.h
++++ b/Source/WebCore/style/StyleTreeResolver.h
+@@ -26,6 +26,7 @@
+ #pragma once
+ 
+ #include "AnchorPositionEvaluator.h"
++#include "CSSPropertyNames.h"
+ #include "PropertyCascade.h"
+ #include "ResolvedStyle.h"
+ #include "SelectorChecker.h"
+@@ -37,6 +38,7 @@
+ #include "StyleUpdate.h"
+ #include "Styleable.h"
+ #include "TreeResolutionState.h"
++#include <wtf/BitSet.h>
+ #include <wtf/Function.h>
+ #include <wtf/Ref.h>
+ 
+@@ -132,6 +134,11 @@ private:
+         bool resolvedFirstLineAndLetterChild { false };
+         bool needsUpdateQueryContainerDependentStyle { false };
+         IsInDisplayNoneTree isInDisplayNoneTree { IsInDisplayNoneTree::No };
++        // browser-lite: the style before this resolution, and which properties differ from it (each
++        // compared when a child may inherit it explicitly).
++        const Style::ComputedStyle* previousStyle { nullptr };
++        WTF::BitSet<cssPropertyIDEnumValueCount> comparedProperties;
++        WTF::BitSet<cssPropertyIDEnumValueCount> changedProperties;
+ 
+ #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+         // Used to determine whether the AXObjectCache has already propagated down font and color updates for the current subtree.
+@@ -166,6 +173,8 @@ private:
+     static std::optional<ResolutionType> determineResolutionType(const Element&, const Style::ComputedStyle*, DescendantsToResolve, OptionSet<Change> parentChange);
+     std::optional<ResolutionType> resolutionTypeAfterFontChange(const Element&, const Style::ComputedStyle*, std::optional<ResolutionType>) const;
+     void resetDescendantStyleRelations(Element&, DescendantsToResolve);
++    bool explicitlyInheritedPropertiesMayChange(const Element&, Parent&);
++    bool animationLeavesPseudoElementStyle(const Element&, const PseudoElementIdentifier&, const Style::ComputedStyle* existingStyle, const Style::ComputedStyle* existingPseudoStyle, const Style::ComputedStyle& newStyle);
+ 
+     ResolutionContext makeResolutionContext();
+     ResolutionContext makeResolutionContextForPseudoElement(const ElementUpdate&, const PseudoElementIdentifier&);
+diff --git a/Source/WebCore/svg/SVGElement.cpp b/Source/WebCore/svg/SVGElement.cpp
+index 0e44be8b8d..ffc61173ca 100644
+--- a/Source/WebCore/svg/SVGElement.cpp
++++ b/Source/WebCore/svg/SVGElement.cpp
+@@ -74,7 +74,9 @@
+ #include "StyleKeyword+Mappings.h"
+ #include "StyleResolver.h"
+ #include "StyleUpdate.h"
++#include "XLinkNames.h"
+ #include "XMLNames.h"
++#include <ranges>
+ #include <wtf/HashMap.h>
+ #include <wtf/NeverDestroyed.h>
+ #include <wtf/RobinHoodHashMap.h>
+@@ -547,12 +549,52 @@ void SVGElement::attributeChanged(const QualifiedName& name, const AtomString& o
+         break;
+     }
+ 
++    // browser-lite: the instances take the new value instead of being cloned again (Lottie sets attributes of
++    // groups that masks and mattes <use> every frame).
++    bool updatesInstances = attributeModificationReason == AttributeModificationReason::Directly && !instanceUpdatesBlocked() && !instances().isEmptyIgnoringNullReferences();
++    if (updatesInstances)
++        setInstanceUpdatesBlocked(true);
++
+     // Changes to the style attribute are processed lazily (see Element::getAttribute() and related methods),
+     // so we don't want changes to the style attribute to result in extra work here except invalidateInstances().
+     if (name == HTMLNames::styleAttr)
+         invalidateInstances();
+     else
+         svgAttributeChanged(name);
++
++    if (updatesInstances) {
++        setInstanceUpdatesBlocked(false);
++        updateInstancesForAttributeChange(name, newValue);
++    }
++}
++
++// The use element's shadow tree clones its target with all attributes; only a use, a symbol or an svg
++// element is cloned into something else, and ids and references change what the tree refers to.
++static bool instanceTakesAttributeAsIs(const SVGElement& element, const QualifiedName& name)
++{
++    if (is<SVGUseElement>(element) || is<SVGSymbolElement>(element) || is<SVGSVGElement>(element))
++        return false;
++    return name != HTMLNames::idAttr && name != SVGNames::hrefAttr && name != XLinkNames::hrefAttr;
++}
++
++void SVGElement::updateInstancesForAttributeChange(const QualifiedName& name, const AtomString& newValue)
++{
++    if (instanceUpdatesBlocked())
++        return;
++    auto instances = copyToVectorOf<Ref<SVGElement>>(this->instances());
++    bool asIs = instanceTakesAttributeAsIs(*this, name) && std::ranges::all_of(instances, [&](auto& instance) {
++        return instance->tagQName() == tagQName() && instance->correspondingElement() == this;
++    });
++    if (!asIs) {
++        invalidateInstances();
++        return;
++    }
++    for (auto& instance : instances) {
++        if (newValue.isNull())
++            instance->removeAttribute(name);
++        else
++            instance->setAttribute(name, newValue);
++    }
+ }
+ 
+ void SVGElement::synchronizeAttribute(const QualifiedName& name)
+diff --git a/Source/WebCore/svg/SVGElement.h b/Source/WebCore/svg/SVGElement.h
+index 5bb8cdca63..36b08beeab 100644
+--- a/Source/WebCore/svg/SVGElement.h
++++ b/Source/WebCore/svg/SVGElement.h
+@@ -195,6 +195,9 @@ public:
+ 
+     bool NODELETE hasAssociatedSVGLayoutBox() const;
+     void invalidateInstances();
++    // browser-lite: gives the instances of this element in <use> shadow trees a changed attribute like a
++    // new clone would have it, or invalidates them where a clone would differ in more.
++    void updateInstancesForAttributeChange(const QualifiedName&, const AtomString& newValue);
+ 
+ protected:
+     SVGElement(const QualifiedName&, Document&, UniqueRef<SVGPropertyRegistry>&&, OptionSet<TypeFlag> = { });
