@@ -235,7 +235,7 @@ for (const { name, label = name, size = [200, 200], wait, env = {}, check, expec
     const frame = spawnSync(process.execPath, [path.join(here, check), ppm], {
       encoding: 'utf8',
     });
-    process.stdout.write(frame.stdout.replace(/^/gm, '     '));
+    process.stdout.write(`${frame.stdout}${frame.stderr}`.replace(/^/gm, '     '));
     ok = frame.status === 0;
     info = ok ? 'frame ok' : 'frame differs';
   }

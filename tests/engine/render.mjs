@@ -81,8 +81,9 @@ await runEngine({
     if (waited || !message.includes(waitFor)) return;
     waited = true;
     if (pendingFrame) pendingFrame();
-    // If nothing changed no new frame comes: then done without a frame
+    // If nothing changed no new frame comes: then the last frame is the page as it is
     setTimeout(() => {
+      if (lastFrame) savePPM(lastFrame);
       console.log('Done (no new frame)');
       process.exit(0);
     }, 3000);
