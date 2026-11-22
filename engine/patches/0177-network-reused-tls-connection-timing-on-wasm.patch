@@ -1,0 +1,21 @@
+diff --git a/Source/WebCore/platform/network/curl/CurlContext.cpp b/Source/WebCore/platform/network/curl/CurlContext.cpp
+index 671238dc81..3ee197650e 100644
+--- a/Source/WebCore/platform/network/curl/CurlContext.cpp
++++ b/Source/WebCore/platform/network/curl/CurlContext.cpp
+@@ -872,6 +872,16 @@ std::optional<NetworkLoadMetrics> CurlHandle::getNetworkLoadMetrics(MonotonicTim
+         networkLoadMetrics.secureConnectionStart = networkLoadMetrics.connectEnd;
+         networkLoadMetrics.connectEnd = startTime + Seconds(appConnect);
+     }
++#if PLATFORM(WASM)
++    // An https load without a TLS handshake ran on a connection that was already open, like
++    // NetworkDataTaskSoup: resource timing gives fetchStart as its secureConnectionStart
++    long newConnections = 0;
++    char* scheme = nullptr;
++    if (curl_easy_getinfo(m_handle, CURLINFO_NUM_CONNECTS, &newConnections) == CURLE_OK && !newConnections)
++        networkLoadMetrics.isReusedConnection = true;
++    if (appConnect <= 0.0 && curl_easy_getinfo(m_handle, CURLINFO_SCHEME, &scheme) == CURLE_OK && scheme && equalLettersIgnoringASCIICase(String::fromLatin1(scheme), "https"_s))
++        networkLoadMetrics.secureConnectionStart = reusedTLSConnectionSentinel;
++#endif
+ 
+     networkLoadMetrics.requestStart = networkLoadMetrics.connectEnd;
+     networkLoadMetrics.responseStart = startTime + Seconds(startTransfer);

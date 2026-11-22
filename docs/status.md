@@ -523,7 +523,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   and `pdfViewerEnabled` false (Safari 26 lists 5 PDF plugins and true), which is honest, since
   the engine shows no PDFs (#130); some polyfilled APIs have no Safari counterpart
   (`navigator.vibrate`, `scheduler`), and errors thrown inside a polyfill show `browser-lite` as
-  the file of their frames in `Error.stack`.
+  the file of their frames in `Error.stack`. DataDome blocks on www.nytimes.com because of a Linux Safari, these
+  polyfills and the host's WebGL names together (Open: features). `performance.timing` has the
+  network phases like Safari (#644).
 - **Browsers and devices** (2026-10-28, real devices through BrowserStack): macOS Safari 18.4
   (incl. profile sync), iPhone 16 and iPad Air 13 on iOS 18 (Wikipedia mobile, YouTube, MP4 with
   sound after a tap, the on-screen keyboard with the field's input mode, 20min.ch with its consent
@@ -1325,21 +1327,40 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
-- DataDome's slider on www.nytimes.com (2026-11-19, local, Chromium host, desktop viewport, the
-  slider dragged once like a person): plain headed Chromium passes in 3 of 3 runs (the check
-  answers with a cookie), browser-lite is blocked in 6 of 6, before and after #629. The check
-  request has the same 18 fields in the same order; its encoded payload is about 8.9 KB against
-  10.0 KB and `plv3` 547 against 568 characters, so some signal the challenge collects differs.
-  One was found and fixed (#634): the engine reported every event's `screenX/Y` equal to its
-  `clientX/Y` and the window at 0, 0 with no chrome, and the captcha's slider handler checks
-  `pageY == screenY && pageX == screenX`. Now the same drag in headed Chromium at 1280x800 gives
-  the same `screenX/Y` in browser-lite as in plain Chromium (140,217 for a press at 130,120 with
-  the window at 10,10). Retried after #634 (2026-11-20, 3 runs, fresh profiles, headed Chromium
-  host, each run with plain Chromium beside it on the same IP and the same drag): browser-lite
-  blocked in 3 of 3 (once Retry, twice "You have been blocked"), plain Chromium passed in 3 of 3,
-  so the IP does not block and another signal still differs. Remaining differences seen in the
-  events of the same drag: `detail` of `pointerdown` and `pointerup` is 1 (Chrome 0), and `click`
-  has `isPrimary` true (Chrome false); both are WebKit's behaviour, which Safari shares.
+- DataDome's slider on www.nytimes.com is passed but the next request is blocked (2026-11-22,
+  local, headed Chromium host 1280x800, fresh profiles, the slider dragged once like a person,
+  plain Chromium on the same IP in the same minutes passed every time). The challenge itself
+  succeeds: the check answers `passed` with a cookie, the page sets it and reloads, and the reload
+  with that cookie gets the hard block ("You have been blocked"). Plain Chromium through a TLS
+  terminating proxy (curl_cffi as Chrome 152, the same JA4, Akamai HTTP/2 fingerprint and header
+  order) failed the same way, so the verdict at the reload uses more than the slider. What the
+  captcha reads was recorded in its frame (diagnosis only, an extension script in the main world
+  logging getters and calls) and compared with real Safari 26.4 on BrowserStack (macOS Tahoe).
+  Under a Safari identity it checks `getOwnPropertyDescriptor(window, ...)` for `EyeDropper`,
+  `WebSocketStream` and `WebSocketError`, reads `navigator.connection` (the engine's prints as
+  `[object EventTarget]`), `deviceMemory`, `getBattery()`, `keyboard` (`[object Object]`), `gpu`
+  (absent: "noGpu"), `plugins`, `mimeTypes`, `pdfViewerEnabled`, `platform`, the WebGL unmasked
+  vendor and renderer, `performance.timing` and the navigation entry, and measures 50 font families.
+  Experiments that changed only what the frames see (not shipped): the slider passed in 8 of 8 runs
+  with all three of a macOS identity (the demo's Mac device: `Macintosh` user agent, `MacIntel`),
+  no `navigator.connection`, `deviceMemory`, `getBattery`, `keyboard` and `vibrate`, and the WebGL
+  vendor and renderer Safari reports ("Apple Inc.", "Apple GPU"); every combination of two of them
+  was blocked (each tried, 1 to 2 runs), so were the default identity with any of them alone, the
+  window globals alone, the WebKit extras alone (`Touch`, `TouchEvent`, `requestIdleCallback`,
+  `CloseWatcher`, `Temporal`), a WebGPU stub and `pdfViewerEnabled` true. Not the cause: the broken
+  `performance.timing` (fixed, #644) and the font matching (#645), with and without them the same.
+  Each of the three needs the owner, so none is changed: the default desktop identity is Safari on
+  Linux (`X11; Linux x86_64`, a Safari that does not exist; the demo's default device), the
+  polyfills are decisions #90, #106 and #120, and #496 gives pages the host's GPU (Google Maps draws
+  with WebGL on SwiftShader otherwise). Proposal: a macOS desktop identity as default, the
+  Chrome-only polyfills only under a Chrome-like identity (none today, so off), and Safari's
+  "Apple Inc." and "Apple GPU" as unmasked WebGL names under a Safari identity, with the Maps case
+  of #496 measured again. The Moto G71 (iPhone identity through the public demo) was not retried:
+  the same polyfills and the host's Mali renderer apply there. The engine step that runs the
+  captcha's script is 3.1 to 3.3 s at a load of 3 to 5 (7.3 to 10.5 s at a load of 13 to 30 in
+  the survey); its profile is mostly the captcha's own code in the interpreter and the JIT
+  (`CLoop::execute`, `llint_slow_path_get_by_val`), the getters it calls about a seventh
+  (`offsetWidth` with font matching, computed style), see #645.
 - Spell checking (#624): only the English dictionary (en_US of SCOWL) ships, so pages whose first
   language is not English are not checked; more dictionaries are a `dict-*` line pair in
   `deps/sources.txt` each, after a look at their licenses (most are GPL or LGPL). Chrome's Spell

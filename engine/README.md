@@ -140,7 +140,8 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
     `WorkerGraphics.cpp` (WebGL in dedicated and shared workers, on the worker's own thread)
   - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one
     keeps its request; favicons, `data:` and `blob:` ones without a request; named like in
-    Chrome, patch 0155), `SyncLoad.cpp` (synchronous loads like a synchronous `XMLHttpRequest`:
+    Chrome, patch 0155; responses carry curl's load timing for `performance.timing`, #644),
+    `SyncLoad.cpp` (synchronous loads like a synchronous `XMLHttpRequest`:
     the page waits like below a dialog, the other views go on), `Sockets.cpp`, `HttpCache.cpp`,
     `HttpAuth.cpp` (401 with Basic and Digest: stored credentials, the host's sign-in prompt),
     `ViewSource.cpp` (`view-source:` pages: the source of the address with numbered lines),

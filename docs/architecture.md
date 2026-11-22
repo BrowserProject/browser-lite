@@ -721,7 +721,10 @@ has Safari's JA4; HTTP/2 with Safari's SETTINGS, windows and pseudo-header order
 fingerprint); request headers in Safari's order with its `Accept-Language`, `Priority` (urgency
 from the load priority) and `Accept-Encoding`. OpenSSL has no GREASE and its own extension order,
 so JA3 differs; the TCP/IP fingerprint is the relay's. All loaders share one request path (`LoaderStrategy.cpp`: cookies, at most 20
-redirects, CORS and CSP for pings). curl keeps 64 connections, 6 per host (#176). A new HTTP/2
+redirects, CORS and CSP for pings); its responses carry curl's load timing up to the headers like
+`NetworkDataTaskCurl`, which `performance.timing` reads, converted from the time origin like the
+timeline's entries (patch 0178), and an https load on an open connection has `fetchStart` as its
+`secureConnectionStart` (patch 0177, #644). curl keeps 64 connections, 6 per host (#176). A new HTTP/2
 connection carries only the request that opened it until the server's SETTINGS announce how many
 streams it allows; the waiting requests then take what the limit leaves, the rest open the next
 connection (curl patch `deps/patches/curl/0003`, #479). curl decodes gzip, deflate, br and zstd;
@@ -804,7 +807,8 @@ Japanese, Korean and emoji (#229), and `/lazy/dictionaries`, the spell checker's
 needs no request) and fetches a file whole with a synchronous request on its first read, so only
 pages that need a locale, collation, dictionary, charset converter or font download it.
 fontconfig's cache in `engine.data` already describes every font of `/lazy/fonts`, so finding a
-font for a character reads no font file; Chinese, Japanese and Korean are cut into the slices of
+font for a character reads no font file; a family is matched with the bindings fontconfig stores
+for its names instead of a match per name (patch 0176, #645); Chinese, Japanese and Korean are cut into the slices of
 Google Fonts (most frequent characters first, about 30 KB each with Brotli), emoji into the
 Unicode emoji groups and the symbol fonts into Unicode blocks. Files usually needed together are
 a group (a CJK font's most frequent slices, the data of an ICU locale): the first read fetches the

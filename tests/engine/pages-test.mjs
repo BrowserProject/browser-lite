@@ -9,7 +9,8 @@
 //   bridges.html   features and host bridges: no __bl globals, disabled features missing (none, all)
 //   lazy.html      ICU data and fonts loaded on first use (lazy/ next to the engine)
 //   svg-use.html   load events of <use> elements of an external sprite (patch 0051)
-//   font-stacks.html  unknown families skipped in a stack, Apple and system names mapped
+//   font-stacks.html  unknown families skipped in a stack, also 200 in a row, Apple and system
+//                  names mapped, also before another generic family (patch 0176)
 //   computed-style.html  getComputedStyle() without a renderer: selectors match exactly (patch 0069)
 //   localized-strings.html  UI strings with placeholders filled: validation messages (patch 0076)
 //   absent-properties.html  missing properties of module namespaces and named properties are not

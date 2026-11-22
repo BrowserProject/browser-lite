@@ -107,9 +107,12 @@ void storeCookies(const ResourceRequest& request, const CurlResponse& response)
     }
 }
 
+// With the timing of the load up to its headers, like NetworkDataTaskCurl: performance.timing
+// and PerformanceNavigation read it from the document's response
 ResourceResponse networkResponse(CurlResponse& curlResponse)
 {
     ResourceResponse response(curlResponse);
+    response.setDeprecatedNetworkLoadMetrics(Box<NetworkLoadMetrics>::create(curlResponse.networkLoadMetrics));
     if (response.mimeType().isEmpty()) {
         auto type = MIMETypeRegistry::mimeTypeForPath(response.url().path());
         response.setMimeType(type.isEmpty() || type == "application/octet-stream"_s ? "text/html"_s : WTF::move(type));

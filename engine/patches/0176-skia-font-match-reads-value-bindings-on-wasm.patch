@@ -1,0 +1,51 @@
+diff --git a/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp b/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp
+index f37164556a..6f5a7e5b5e 100644
+--- a/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp
++++ b/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp
+@@ -171,6 +171,7 @@ static const FcMatrix* get_matrix(FcPattern* pattern, const char object[]) {
+     return matrix;
+ }
+ 
++#if !defined(__EMSCRIPTEN__)
+ enum SkWeakReturn {
+     kIsWeak_WeakReturn,
+     kIsStrong_WeakReturn,
+@@ -250,6 +251,8 @@ static SkWeakReturn is_weak(FcPattern* pattern, const char object[], int id) {
+                         ? kIsWeak_WeakReturn : kIsStrong_WeakReturn;
+ }
+ 
++#endif
++
+ /** Removes weak elements from either FC_FAMILY or FC_POSTSCRIPT_NAME objects in the property.
+  *  This can be quite expensive, and should not be used more than once per font lookup.
+  *  This removes all of the weak elements after the last strong element.
+@@ -257,6 +260,21 @@ static SkWeakReturn is_weak(FcPattern* pattern, const char object[], int id) {
+ static void remove_weak(FcPattern* pattern, const char object[]) {
+     FCLocker::AssertHeld();
+ 
++#if defined(__EMSCRIPTEN__)
++    // WebAssembly (browser-lite): the binding of each value directly (FcPatternGetWithBinding,
++    // fontconfig 2.13.1), instead of a match of two patterns per value: strong and same bind
++    // with the strong priority. Font fingerprinting asks for hundreds of families in a row.
++    int lastStrongId = -1;
++    int numIds = 0;
++    FcValue value;
++    FcValueBinding binding;
++    while (FcPatternGetWithBinding(pattern, object, numIds, &value, &binding) == FcResultMatch) {
++        if (binding != FcValueBindingWeak) {
++            lastStrongId = numIds;
++        }
++        ++numIds;
++    }
++#else
+     SkAutoFcObjectSet requestedObjectOnly(FcObjectSetBuild(object, nullptr));
+     SkAutoFcPattern minimal(FcPatternFilter(pattern, requestedObjectOnly));
+ 
+@@ -274,6 +292,7 @@ static void remove_weak(FcPattern* pattern, const char object[]) {
+         }
+         SkAssertResult(FcPatternRemove(minimal, object, 0));
+     }
++#endif
+ 
+     // If they were all weak, then leave the pattern alone.
+     if (lastStrongId < 0) {

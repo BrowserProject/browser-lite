@@ -1,0 +1,28 @@
+diff --git a/Source/WebCore/page/PerformanceTiming.cpp b/Source/WebCore/page/PerformanceTiming.cpp
+index 1247c887e6..9d150abc83 100644
+--- a/Source/WebCore/page/PerformanceTiming.cpp
++++ b/Source/WebCore/page/PerformanceTiming.cpp
+@@ -36,6 +36,7 @@
+ #include "DocumentLoadTiming.h"
+ #include "DocumentLoader.h"
+ #include "FrameLoader.h"
++#include "LocalDOMWindow.h"
+ #include "LocalFrame.h"
+ #include "LocalFrameInlines.h"
+ #include "NetworkLoadMetrics.h"
+@@ -390,6 +391,15 @@ unsigned long long PerformanceTiming::monotonicTimeToIntegerMilliseconds(Monoton
+     ASSERT(timeStamp.secondsSinceEpoch().seconds() >= 0);
+     if (!timeStamp)
+         return 0;
++#if PLATFORM(WASM)
++    // From the time origin like the entries of the performance timeline: one conversion to the
++    // wall clock for all values (patch 0134). Each value converted at its own moment let clocks of
++    // different resolution put requestStart a millisecond before fetchStart.
++    if (auto* window = this->window()) {
++        Ref performance = window->performance();
++        return static_cast<unsigned long long>(performance->timeOrigin() + performance->relativeTimeFromTimeOriginInReducedResolution(timeStamp));
++    }
++#endif
+     auto reduced = Performance::reduceTimeResolution(timeStamp.approximate<WallTime>().secondsSinceEpoch());
+     return static_cast<unsigned long long>(reduced.milliseconds());
+ }
