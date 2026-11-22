@@ -62,9 +62,18 @@ never baked into the code (the GC resets inline caches).
   an obfuscated VM of 50 KB of bytecode was 1.6 MB of WASM, about 3 MB of machine code, and ran
   little faster than the interpreter, its code too large for the processor's instruction caches
   (`perf stat` on the engine thread: 0.58 instructions per cycle against the interpreter's 1.22,
-  24 % of instruction fetches missed the L1 cache, 23 % of the cycles waited for them). A
-  variable the bytecode generator resolved in a closure (`ResolvedClosureVar`) is read inline
-  without a slow path, as linking makes it a `ClosureVar` for good. Arithmetic, bit operations,
+  24 % of instruction fetches missed the L1 cache, 23 % of the cycles waited for them). Scope
+  access is inline for the type its metadata had when the function compiled, like JSC's baseline
+  JIT before it shared its code: a closure variable that the bytecode generator or linking
+  resolved (`ResolvedClosureVar`, `ClosureVar`, for good) through its scope's chain at the linked
+  depth and offset, without a check; a global variable, global `let` or property of the global
+  object behind a check that the metadata still has that type (and its cache: the epoch of the
+  global lexical bindings, the global object's structure, the kind of offset), else the slow
+  path. Only unresolved names change their type after their first runs: those keep the module's
+  function, which dispatches on the type. A free variable of a function is such a closure
+  variable or a global, so an obfuscated VM reads its state and calls its top-level functions this
+  way; the call of the module's function for every one was 13 to 15 % of the engine thread in
+  Turnstile's challenge (#646). Arithmetic, bit operations,
   comparisons, equality and conditional jumps keep only their int32 path inline (and `if`, `!` and
   `&&` that of booleans and int32); doubles, ToInt32, cells and the slow path are one function of
   the module per opcode, called with the frame, the instruction and the operands' values, which
@@ -85,6 +94,10 @@ never baked into the code (the GC resets inline caches).
   reads of own properties also from the last 4 structures of the site, until the next GC, looked
   up in C++ after the inline cache missed),
   array elements (int32, double, contiguous, array storage), scopes (closure, global), `switch`.
+  An element read or write whose site's array profile saw only int32 and contiguous butterflies
+  within bounds (an obfuscated VM's stack, registers and operands) is inline, like JSC's baseline
+  JIT for its array mode: within the public length, into an int32 butterfly only an int32, with
+  the write barrier; after a miss the site calls the module's function (#646).
   Reads and writes with a string key (`o[key]`, which an obfuscated VM's handlers do for every
   property access of its program, so one site sees every key and shape) go through JSC's own
   megamorphic cache of the VM, which this build had but did not use: entries by structure and key
@@ -92,8 +105,24 @@ never baked into the code (the GC resets inline caches).
   butterfly, emptied by every GC and every change of a prototype chain (its epoch). A helper
   function of the module looks the key up there in WASM (a string that is no rope: its atom), and
   the slow path fills it like JSC's JITs (`getByValMegamorphic`, `putByValMegamorphic`), atomizing
-  the key first so the next access finds it; `length`, `name`, `prototype`, `__proto__`, index
-  keys, getters and objects with their own lookup stay with the interpreter's slow path (#604).
+  the key first so the next access finds it; `length` (but a typed array's), `name`, `prototype`,
+  `__proto__`, index keys and objects with their own lookup stay with the interpreter's slow path
+  (#604). Getters go into that cache too, an own or prototype accessor like a data property: the
+  WASM lookup leaves them to C++, which calls the getter in a frame above the caller's registers
+  like a call of compiled code (`callInFrame`: a compiled getter directly, a host getter such as a
+  typed array's `length` like the interpreter calls host functions) instead of the VM entry of
+  `GetterSetter::callGetter`. A `get_by_id` or `get_length` whose interpreter cache missed (it takes
+  only data properties) caches a getter there after the interpreter's slow path read it, and
+  looks it up there first; a site whose misses found no getter 4 times stops looking (#646).
+- **Array literals** (`new_array`, `new_array_buffer`) without a call into C++, like JSC's JITs
+  make them: the array's cell and its butterfly bumped from the free lists of their allocators
+  (within the current interval, else the slow path, never a call between the two), the structure
+  of the indexing type that the site's allocation profile selects (its last array checked like
+  `selectIndexingType`, which updates the profile in C++ when the array changed its type), the
+  elements checked against that type (an int32 array takes only int32 values, a double array
+  numbers but NaN, its hole) and the rest of the vector filled with holes; a literal of constants
+  gets the constant's copy-on-write butterfly. Up to 32 elements and while the global object has
+  no bad time; everything else is the slow path (#646).
   Beyond the interpreter, for hashing code (bot checks, fingerprinting, #424): bit operations
   and `~` also on doubles (ToInt32 inline, `i64.trunc_sat` below 2^63, so uint32 values above
   2^31 stay inline), `op_unsigned` (`x >>> 0`) and `>>>` with any result, elements of typed
@@ -103,7 +132,13 @@ never baked into the code (the GC resets inline caches).
   ToBoolean (`if`, `while`, `&&`, `!`) also of strings and doubles, where the interpreter takes
   only booleans (`!`) or booleans, int32, undefined, null and objects: a string is false only
   as the VM's empty string, which every empty string is (JSC's own JITs rely on that too), a
-  double unless it is 0, -0 or NaN (#502).
+  double unless it is 0, -0 or NaN (#502). Equality of two strings that are no ropes: the same
+  text or two atoms compare as pointers, another length is unequal and two 8-bit strings of up to
+  64 characters compare in WASM (strings an obfuscated VM decodes at run time against its atoms,
+  #646).
+- **Names**: the module has a name section, so CPU profiles show the compiled function as
+  `js:<name>#<hash>` of its `CodeBlock` and its helpers by kind (`getByVal`, `newArray`,
+  `outOfLine op_jstricteq`) instead of `wasm-function[n]`.
 - **Calls**: to a compiled function directly in the frame the bytecode prepared. The VM's callee
   table (direct mapped by the callee's executable, 2048 entries) holds what a call needs of a
   compiled or host callee: its `CodeBlock`, table index and frame sizes, or its host function. One
@@ -317,6 +352,34 @@ took as long (4.3 to 19.5 s against 5.6 to 21.4 s): those functions run little f
 V8's optimized code of the dispatch's module (0.39 MB) took 0.45 s to compile in node, so it is
 not the wait for TurboFan either.
 
+Obfuscated VMs (#646, 2026-11-22). In Turnstile's challenge (CPU profile of the engine thread,
+57 s) the module's functions of scope access took 9.4 % (13 to 15 % once the VM's functions were
+compiled), `===` of strings made at run time 7 % (the slow path through C++), array literals 4 to
+5 %, getters through `GetterSetter::callGetter` and element access through the module's function
+most of the rest beside calls and the interpreter. In the jsc shell (node, fastest of 7): reading
+three globals or closure variables took 4.3 to 5.1 times as long as three locals, now 1.6 to 1.9
+times (`tests/jsc/jit-scope.js`); three element reads 2.0 to 2.1 times the same arithmetic, now 1.3
+to 1.5, three writes 3.1 to 3.5 times, now 1.7 to 1.9 (`tests/jsc/jit-elements.js`); a literal of
+three values 3.2 to 3.6 times three element writes through the module's function, then 1.0 to
+1.2, a getter 4.8 to 5.4 times a method call, now 2.9 to 3.9 (`tests/jsc/jit-literal-speed.js`);
+a comparison of a substring with an atom 141 to 162 ns, now 90 to 117. The dispatch of
+`tests/jsc/jit-size.js` runs 11800 to 13300 steps per ms instead of 6250 to 7150, its module is
+0.57 MB instead of 0.45 MB (7.7 times its bytecode instead of 6.1). peet.ws's managed widget (local,
+Chromium host at 1280x900, 5 runs interleaved with the engine before, load 10 to 15): the checkbox
+26.1 to 33.7 s after the widget's start (median 29.1) against 33.9 to 57.8 s (median 38.1), the
+longest step 6.5 to 10.8 s (median 8.4) against 9.7 to 18.2 s (median 11.1); the invisible
+widget's token after 25.9 to 30.8 s against 33.0 to 40.0 s, the non-interactive one's after 31.6
+to 41.4 s against 43.8 to 53.8 s. tiktok.com's longest step 3.5 to 4.2 s against 5.2 to 7.1 s (3
+runs each). hCaptcha's checkbox at a fourth of a CPU per thread (cgroup) opens the challenge 12.7
+to 17.4 s after the tap (median 13.4) against 12.7 to 22.0 s (median 15.0), its longest step 10.0
+to 13.6 s as before: `hsw.js` runs mostly once and interpreted. Speedometer 3.1 (NewsSite-Next and
+TodoMVC-React-Redux, 5 rounds each) 0.80 to 1.13 (median 1.01) against 0.68 to 1.01 (median 0.98).
+What is left in the challenge (profile with scope access inline): the interpreter 15 % (20 to 40 %
+while the VM's large functions warm up; a 4 times shorter warm-up gave 28 to 46 s against 34 to
+44 s in 4 runs, within the spread), calls between functions 8 % (`compiledCall`, `slow_path_enter`,
+`callInFrame`), `===` of strings that are ropes, 16-bit or longer than 64 characters 5 %, keyed
+reads 2.3 %, array literals 2.5 %.
+
 Hashing code (#424, `tests/jsc/jit-hash.js`, jsc shell): bit operations on uint32 values 5x and
 typed array elements 3x the time of their int32 twins before, now 1.8x and 1.3x; `Math.imul` 6.5x
 an addition before, 2x now; a host call about 20 % cheaper. In the engine, the loops of
@@ -338,7 +401,10 @@ to 2.7 s, Chromium 24 to 44 ms).
    (#636): about 75 to 120 bytes per such statement instead of 200 to 260, no faster on
    Turnstile's challenge. Branch hints keep the code of slow paths out of the instruction cache
    (#643): 1.38 times as fast for a VM's large function on a Moto G71, whose caches did not hold
-   its code. Next: the code size of large functions (operands and frame accesses per instruction,
-   values in WASM locals between safepoints: a register written and read again in a block is
-   loaded from the frame each time) and array literals without a call into C++. A shorter
-   warm-up of an obfuscated VM's large functions did not shorten Turnstile's first phase.
+   its code. Scope access inline for the type a site had when its function compiled, element
+   access inline for int32 and contiguous butterflies, array literals and getters without a call
+   into C++ or a VM entry, `===` of strings made at run time in WASM (#646): a VM's dispatch 1.8 to
+   2 times as fast, Turnstile's managed widget about a quarter sooner. Next: calls between
+   functions, values in WASM locals between safepoints (a register written and read again in a
+   block is loaded from the frame each time), the warm-up of an obfuscated VM's large functions
+   now that compiled code is faster, `===` of ropes.

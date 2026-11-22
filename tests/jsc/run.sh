@@ -40,6 +40,9 @@ run gc-stress "$here/gc-stress.js"
 run gc-stress-aggressive --slowPathAllocsBetweenGCs=10 "$here/gc-stress.js"
 run gc-stress-collect-continuously --collectContinuously=1 "$here/gc-stress.js"
 run jit "$here/jit.js"
+# Array literals and getters from compiled code, also while the GC collects continuously
+run jit-literals "$here/jit-literals.js"
+run jit-literals-gc --collectContinuously=1 "$here/jit-literals.js"
 # Speed of the JIT's fast paths for hashing code against their int32 twins
 [ "$jit" = 0 ] || run jit-hash "$here/jit-hash.js"
 # A loop entered once gets V8's optimized code too
@@ -48,6 +51,12 @@ run jit "$here/jit.js"
 [ "$jit" = 0 ] || run jit-calls "$here/jit-calls.js"
 # Keyed reads and writes: many keys and shapes at one site through the megamorphic cache
 [ "$jit" = 0 ] || run jit-keyed "$here/jit-keyed.js"
+# Array literals without a call into C++, getters without a VM entry
+[ "$jit" = 0 ] || run jit-literal-speed "$here/jit-literal-speed.js"
+# Global and closure variables through the inline fast path of their resolve type
+[ "$jit" = 0 ] || run jit-scope "$here/jit-scope.js"
+# Element reads of int32 and contiguous arrays inline where the site's profile saw only those
+[ "$jit" = 0 ] || run jit-elements "$here/jit-elements.js"
 # The warm-up's bookkeeping with thousands of warm functions costs no more than with a few hundred
 [ "$jit" = 0 ] || run jit-warmup-map "$here/jit-warmup-map.js"
 done

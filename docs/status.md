@@ -922,11 +922,17 @@ browser (Safari keeps Cmd+L, T and W for itself).
    same time (medians 36.3 and 36.8 s against 33.0 and 34.4 s, 2 rounds of 5 interleaved runs at
    1280x900, load 2 to 17; `BL_JIT=0` 43.6 s); the invisible widget gave its token in 5 of 5 runs
    after 34.7 to 41.1 s without 110600 or a 400, scrapingcourse.com's checkbox came after 53 and
-   67 s (before 44 and 68 s) and passed after one click. Open: compiled code itself (values in
-   WASM locals, array literals without C++, the warm-up of the VM's large functions, which run
-   interpreted for 5 to 15 s; phase 4 of [jit.md](jit.md)); the criteria of 25 s to the checkbox
-   and 6 s for the longest step are not reached, nor 90 s on a Moto G71 (not measured with
-   #636).
+   67 s (before 44 and 68 s) and passed after one click. Compiled code for obfuscated VMs (#646,
+   2026-11-22, [jit.md](jit.md#measured)): scope access and int32 or contiguous element access
+   inline, array literals and getters without C++ or a VM entry, `===` of strings made at run time
+   in WASM. The checkbox now comes 26.1 to 33.7 s after the widget's start (median 29.1) against
+   33.9 to 57.8 s (median 38.1) with the engine before, the longest step 6.5 to 10.8 s (median
+   8.4) against 9.7 to 18.2 s (5 interleaved runs at 1280x900, load 10 to 15); the invisible
+   widget's token after 25.9 to 30.8 s (before 33.0 to 40.0 s), the non-interactive one's after
+   31.6 to 41.4 s (before 43.8 to 53.8 s). Open: steps under 8 s (2 of 5 runs had one) and the
+   non-interactive token under 40 s in every run; the challenge's engine thread is now the
+   interpreter 15 % (the warm-up of the VM's large functions), calls between functions 8 %,
+   `===` of ropes and long strings 5 %; 90 s on a Moto G71 not measured with #646.
    Turnstile on a low-end phone (2026-11-22, #643): on a Moto G71 (BrowserStack, the deployed
    build and two local ones through the tunnel, 7 runs) the challenge's `ci` request got 400 in 6
    runs (200 once, followed by a step of 86 s), and the checkbox came only 124 to 163 s after the
@@ -996,12 +1002,15 @@ browser (Safari keeps Cmd+L, T and W for itself).
    during `hsw.js` waits for its step and then opens the challenge (the checkbox frame is the
    input's target and same-site, no frame pause, #589). Under a load of 22 with the profiler, a
    tap 5 s after the checkbox frame got its size came before the frame asked for its site config,
-   and hCaptcha ignored it; the measurement now waits for the drawn checkbox. Open: the criteria
-   (challenge under 8 s after the tap, steps under 6 s, the invisible widget under 5 s, Moto G71
-   under 7 s, not measured with #637) are not reached; the layout of a long task still goes on
-   without a lazy font 300 ms after its first one even when the file is there a few ms later,
-   because the arrivals are reported to the engine thread as tasks; fetching a canvas text's fonts
-   side by side would need the fallback's choice ahead of its reads. LinkedIn Learning
+   and hCaptcha ignored it; the measurement now waits for the drawn checkbox. With #646 (faster
+   compiled code for obfuscated VMs, 2026-11-22, a fourth of a CPU per thread, 5 interleaved runs)
+   the challenge opens 12.7 to 17.4 s after the tap (median 13.4) against 12.7 to 22.0 s (median
+   15.0), the longest step 10.0 to 13.6 s as before: `hsw.js` runs mostly once, in the
+   interpreter. Open: the criteria (challenge under 7 s after the tap, steps under 5 s, the
+   invisible widget under 5 s, Moto G71 under 7 s) are not reached; the layout of a long task
+   still goes on without a lazy font 300 ms after its first one even when the file is there a few
+   ms later, because the arrivals are reported to the engine thread as tasks; fetching a canvas
+   text's fonts side by side would need the fallback's choice ahead of its reads. LinkedIn Learning
    (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain
    Chromium also loads, its main thread 10 % busy then): after the load the engine thread answered
    no eval for up to 10 s, about 35 s in all, then recovered. Its hashing loops now run inline
@@ -1248,8 +1257,10 @@ browser (Safari keeps Cmd+L, T and W for itself).
    the interpreter's slow path from compiled code, 14 % of the engine thread; now they go through
    JSC's megamorphic cache in WASM (#604, [jit.md](jit.md#measured)): 4.4 %, the longest step 5.5
    to 6.7 s instead of 7.5 to 8.2 s. Still open: the longest task of Chromium on the same page is
-   0.35 to 0.6 s, the rest is compiled and interpreted JS (see above); `typedArray.length` in the
-   VM's dispatch loop still calls its getter through the generic path (about 5 % of such a step).
+   0.35 to 0.6 s, the rest is compiled and interpreted JS (see above). Getters (a typed array's
+   `length`) now run without a VM entry and array literals, scope and element access without C++
+   or a call (#646): the longest step 3.5 to 4.2 s against 5.2 to 7.1 s (2026-11-22, 3 runs each,
+   load about 10); under 3 s is open.
    www.nytimes.com while it loads (2026-11-15, local, Chromium host, load 3 to 9, 45 s): steps of
    1.5 to 5 s every few seconds. A quarter to a third of the engine thread was style: WebKit
    restyled the whole document from scratch (3000 elements, 0.45 to 0.65 s each with its custom

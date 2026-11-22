@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -78,6 +79,9 @@ public:
     const std::vector<std::pair<uint32_t, Hint>>& hints() const { return m_hints; }
     // Blocks, loops and ifs open at this point, for branch depths
     uint32_t depth() const { return m_depth; }
+    // The function's name in the module's name section, which CPU profiles show
+    void setName(std::string name) { m_name = std::move(name); }
+    const std::string& name() const { return m_name; }
 
 private:
     friend class Module;
@@ -87,6 +91,7 @@ private:
     std::vector<std::pair<uint32_t, Hint>> m_hints;
     uint32_t m_parameterCount { 0 };
     uint32_t m_depth { 0 };
+    std::string m_name;
 };
 
 class Module {
@@ -97,6 +102,9 @@ public:
     FunctionBody& function(uint32_t parameterCount);
     // A function of the module for the exported one to call (index 1, 2, ...)
     FunctionBody& addFunction(uint32_t typeIndex, uint32_t parameterCount);
+    // The functions added so far
+    size_t functionCount() const { return 1 + m_helpers.size(); }
+    FunctionBody& functionAt(size_t index) { return index ? *m_helpers[index - 1].second : m_function; }
     std::vector<uint8_t> bytes() const;
     // Branch hints of all functions
     size_t hintCount() const;

@@ -255,6 +255,27 @@ std::vector<uint8_t> Module::bytes() const
     for (auto& [type, helper] : m_helpers)
         functionCode(code, *helper);
     section(out, 10, code);
+
+    // The name section (its function names), after the code section
+    std::vector<uint8_t> names;
+    size_t named = 0;
+    for (auto* body : functionBodies)
+        named += !body->name().empty();
+    if (named) {
+        std::vector<uint8_t> functionNames;
+        unsignedLEB(functionNames, named);
+        for (size_t index = 0; index < functionBodies.size(); ++index) {
+            if (functionBodies[index]->name().empty())
+                continue;
+            unsignedLEB(functionNames, index);
+            name(functionNames, functionBodies[index]->name().c_str());
+        }
+        name(names, "name");
+        names.push_back(1);
+        unsignedLEB(names, functionNames.size());
+        names.insert(names.end(), functionNames.begin(), functionNames.end());
+        section(out, 0, names);
+    }
     return out;
 }
 

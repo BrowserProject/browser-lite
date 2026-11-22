@@ -2,7 +2,8 @@
 // reads and writes many keys of objects of many shapes, like an obfuscated VM's handler for every
 // property access of its program (o[key]), costs a few times an array element's access through the
 // VM's megamorphic cache (in the engine 1.1 to 1.2 times; before it every access took the
-// interpreter's slow path, 2.3 to 2.9 times).
+// interpreter's slow path, 2.3 to 2.9 times). Since an element read of a site that saw only int32
+// and contiguous arrays is inline (#646) the elements take less: 1.6 to 1.8 times.
 // Results with every kind of key: jit.js.
 const now = typeof preciseTime === "function" ? () => preciseTime() * 1000 : () => Date.now();
 const n = 400000;
@@ -56,6 +57,6 @@ if (objects[3].key5 !== 3 + 15 * n / 128 || elements[45] !== (45 >> 4) + 15 * n 
     throw new Error("wrong result " + objects[3].key5 + " " + elements[45]);
 const ratio = Math.max(fastest, 0.1) / Math.max(twinFastest, 0.1);
 print("keyed reads and writes: " + ratio.toFixed(2) + " times element reads and writes");
-if (ratio > 2)
-    throw new Error("keyed reads and writes take " + ratio.toFixed(2) + " times the time of element ones (at most 2)");
+if (ratio > 2.5)
+    throw new Error("keyed reads and writes take " + ratio.toFixed(2) + " times the time of element ones (at most 2.5)");
 print("OK jit-keyed");

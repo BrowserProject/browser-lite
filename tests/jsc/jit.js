@@ -804,6 +804,24 @@ for (let round = 0; round < 3000; round++) {
     check("=== built strings", strictEqual(built, ["o", "p"].join("")), true);
     check("=== rope", strictEqual("op", "o" + o.constructor.name.slice(0, 0) + "p"), true);
     check("=== other atoms", strictEqual("op", "po"), false);
+    // Strings made at run time: compared in WASM up to 64 8-bit characters, in C++ beyond
+    const text = "operation:" + round, long = "x".repeat(70) + round;
+    check("=== substring", strictEqual(text.slice(0, 9), "operation"), true);
+    check("=== substring other", strictEqual(text.slice(0, 9), "operatioN"), false);
+    check("=== substring length", strictEqual(text.slice(0, 8), "operation"), false);
+    check("=== substrings", strictEqual(text.slice(10), String(round)), true);
+    check("=== long", strictEqual(long.slice(0), "x".repeat(70) + round), true);
+    check("=== long other", strictEqual(long.slice(1), "x".repeat(70) + round), false);
+    check("=== 16-bit", strictEqual("\u0101b".slice(0, 2), "\u0101" + "b".slice(0)), true);
+    check("=== 8-bit and 16-bit", strictEqual("ab", "\u0101ab".slice(1)), true);
+    check("=== 16-bit substrings", strictEqual(("\u0101xy" + round).slice(0, 3), "\u0101xy".slice(0)), true);
+    check("=== substring of substring", strictEqual(text.slice(1).slice(1, 8), "eration"), true);
+    check("=== same substring", strictEqual(text.slice(2, 9), text.slice(2, 9)), true);
+    check("=== substrings other", strictEqual(text.slice(2, 9), text.slice(3, 10)), false);
+    check("== substring", looseEqual(text.slice(0, 9), "operation"), true);
+    check("== substring other", looseEqual(text.slice(1, 10), "operation"), false);
+    check("jstricteq substring", jumpStrictEqual(text.slice(0, 9), "operation"), "y");
+    check("jstricteq substring other", jumpStrictEqual(text.slice(0, 9), "Operation"), "n");
     check("=== string object", strictEqual("x", o), false);
     check("=== symbols", strictEqual(Symbol.iterator, Symbol.iterator), true);
     check("=== other symbols", strictEqual(Symbol(), Symbol()), false);
@@ -847,4 +865,36 @@ for (let round = 0; round < 3000; round++) {
         check("== masquerader", looseEqual(masquerader, undefined), true);
     }
 }
+// Scope access after its type or cache changed under compiled code: a global property later
+// shadowed by a global `let` (the epoch of the global lexical bindings), a global property whose
+// object changed its shape, deleted and added again, and a global `let` read and written
+globalThis.shadowed = "property";
+function readShadowed() { return shadowed; }
+globalThis.reshaped = 1;
+function readReshaped() { return reshaped; }
+let lexicalLater = 1;
+function bumpLexical() { lexicalLater++; return lexicalLater; }
+const nested = (() => { let level1 = 1; return () => { let level2 = 2; return () => (() => level1 + level2)(); }; })()();
+for (let round = 0; round < 3000; round++) {
+    check("shadowed", readShadowed(), round < 2000 ? "property" : "lexical");
+    check("reshaped", readReshaped(), round < 1000 ? 1 : round);
+    check("global let bump", bumpLexical(), round + 2);
+    check("closure depth", nested(), 3);
+    if (round === 999) {
+        delete globalThis.reshaped;
+        globalThis.extra = round;
+    }
+    if (round >= 999)
+        globalThis.reshaped = round + 1;
+    if (round === 1999)
+        $262.evalScript("let shadowed = 'lexical';");
+}
+let unresolved = null;
+try {
+    readReshapedMissing();
+} catch (e) {
+    unresolved = e;
+}
+function readReshapedMissing() { return missingGlobal; }
+check("missing global", unresolved instanceof ReferenceError, true);
 print("OK jit");
