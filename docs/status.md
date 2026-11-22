@@ -257,6 +257,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   loaded machine here, so that 25 fps background plays slower (open).
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
+  Pages see only the cameras and microphones the host has, and a device the host cannot open
+  rejects `getUserMedia` (#647; before, every host had a camera, so reCAPTCHA offered its hand
+  gesture challenge on a laptop without one, and `getUserMedia` asked before it failed).
   Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to
   29 % with its teasers below the fold (plain Chromium 6 to 7 %, #399). Sound (media that is not
   muted, Web Audio) starts only after a user activation of the page like in Chrome (#578; BBC's

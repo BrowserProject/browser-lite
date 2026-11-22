@@ -307,7 +307,8 @@ extension with the global `extension`), `onMessage` and `postMessage`, `storage`
   A view gets `picture-in-picture` events when one of its videos enters or leaves that window.
   Picture-in-picture needs the host's `requestPictureInPicture` (not in Firefox): without it the
   pages do not see the API.
-- `capture()`: camera, microphone and screen.
+- `capture()`: camera, microphone and screen; the pages see as many cameras and microphones as the
+  host has (none without one) and wait for the host device to open before `getUserMedia` resolves.
 - `webrtc()`: opt-in; the connections bypass the transport and reveal the IP of the device.
 - `devices({ ... })`: geolocation, sensors, gamepad, speech, notifications, fileSystemAccess,
   clipboard, eyedropper, battery, keyboard, networkInfo, imageDecoder, touch (all on by default).

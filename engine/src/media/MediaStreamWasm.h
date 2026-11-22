@@ -2,11 +2,12 @@
 // getDisplayMedia.
 //
 // WebCore does all the MediaStream logic (tracks, constraints, clones). We
-// provide the devices and sources: when a source starts, the host opens the
-// host camera/microphone and sends the frames and the sound as a stream to
-// the engine worker (engine/js/webcodecs-host.js, blCapture). They arrive here
-// through bl__capture_*. Like in Chrome the host asks per origin for
-// camera/microphone.
+// provide the devices and sources: the devices are as many cameras and
+// microphones as the host has (bl_set_capture_devices). Before getUserMedia
+// resolves the host opens the device (capture-open); when the source starts,
+// it sends the frames and the sound as a stream to the engine worker
+// (engine/js/webcodecs-host.js, blCapture). They arrive here through
+// bl__capture_*. Like in Chrome the host asks per origin for camera/microphone.
 #pragma once
 
 #include <WebCore/AudioStreamDescription.h>

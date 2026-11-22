@@ -232,7 +232,7 @@ document.getElementById('start').addEventListener('click', async () => {
     }
     log('micpeak', peak > 0.01 ? 'sound' : 'silent' + peak);
     const devices = await navigator.mediaDevices.enumerateDevices();
-    log('devices', devices.filter((d) => d.kind !== 'audiooutput').map((d) => d.kind + ':' + d.label).sort().join(','));
+    log('devices', devices.filter((d) => d.kind !== 'audiooutput').map((d) => d.kind + ':' + d.label.replace(/ /g, '_')).sort().join(','));
     stream.getTracks().forEach((track) => track.stop());
     log('stopped', stream.getVideoTracks()[0].readyState);
   } catch (e) {
@@ -306,9 +306,13 @@ check(
   (await result('micpeak', 30000)) === 'sound',
   results.get('micpeak') || err(),
 );
+// As many as the host has (Chromium's fake ones: two microphones and a camera)
+const devices = (await result('devices', 30000))?.split(',') ?? [];
 check(
   'enumerateDevices with names after the permission',
-  (await result('devices', 30000)) === 'audioinput:Microphone,videoinput:Camera',
+  devices.includes('audioinput:Microphone') &&
+    devices.includes('videoinput:Camera') &&
+    devices.every((device) => /^(audio|video)input:(Microphone|Camera)/.test(device)),
   results.get('devices') || err(),
 );
 check(

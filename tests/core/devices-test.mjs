@@ -238,7 +238,8 @@ const { url: siteURL } = await serve((req, res) =>
 );
 
 const stack = await startStack({ token: 'devices-token-0123456789abcdef' });
-const browser = await launch();
+// A camera (the fake one): the engine lists only devices the host has
+const browser = await launch({ args: ['--use-fake-device-for-media-stream'] });
 // Touch screen like a Chromebook, location Bern
 const context = await browser.newContext({
   viewport: { width: 1000, height: 700 },

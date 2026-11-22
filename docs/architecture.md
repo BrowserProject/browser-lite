@@ -891,6 +891,14 @@ that document (WebCore's `RequiresUserGestureForAudioPlayback` and
 `MediaUserGestureInheritsFromDocument`, patch 0147); without it `play()` rejects with
 `NotAllowedError`, `autoplay` waits and an `AudioContext` stays suspended. The engine numbers its play and pause commands for the host `<video>` and takes the host's `paused` only from a report that names the last of them (#590), so a report still on its way does not undo a newer command. WebCodecs, MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's
 implementations (#107, #113, #114, #117 to #119); the corresponding services must be enabled.
+The pages see only the cameras and microphones the host has (#647): the capture service sends
+their numbers (`bl_set_capture_devices`, at start, on `devicechange` and after a device opened;
+no ids or names), the engine lists that many like Safari (before the origin's permission at most
+one of a kind without id and name, no `audiooutput`) and rejects `getUserMedia` for a kind the
+host lacks with `NotFoundError` before any prompt. The host device opens before the page's
+`getUserMedia` or `getDisplayMedia` resolves (`capture-open`, answered by `bl_capture_opened`
+from the source's `whenReady`), so a device the host cannot open rejects the request
+(`NotReadableError`, `NotAllowedError`, `NotFoundError`) instead of giving a track that ends.
 Where the host has no `MediaStreamTrackProcessor` (Firefox), camera, microphone and screen reach
 the engine through a stand-in (`track-reader.ts`): a hidden `<video>` gives `VideoFrame`s, an
 AudioWorklet `AudioData` (#259). A `<video>` in fullscreen shows its whole picture like the native

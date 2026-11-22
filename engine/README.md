@@ -166,7 +166,8 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
     `HostClipboard.cpp` (the host clipboard on the engine clipboard: a paste, and a page's
     `navigator.clipboard.read()` after the permission `clipboard-read`, patch 0150),
     `PlatformResources.cpp` (WebCore's own images: broken image icon, text area corner)
-  - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame,
+  - `media/`: `<video>`/`<audio>`, MSE, MediaStream (as many cameras and microphones as the host
+    has, its device opened before `getUserMedia` resolves, #647), MediaRecorder, WebCodecs, VideoFrame,
     `VideoOverlay.cpp` (holes of videos the host shows behind the canvas, punched only once the
     host's video has a frame), `MediaMenu.cpp` (the video and audio of the context menu and its
     Loop, Show controls and Picture in picture, which goes through the polyfill's window), frame counts of

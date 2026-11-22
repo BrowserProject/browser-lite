@@ -58,16 +58,75 @@ namespace {
 
 // ------------------------------------------------------------ Devices
 
-const CaptureDevice& cameraDevice()
+// The cameras and microphones of the host: only their numbers come from the
+// core (bl_set_capture_devices), no ids or names. Unknown until its first
+// report; without the capture feature there are none.
+struct HostDevices {
+    std::optional<std::pair<unsigned, unsigned>> counts;
+    Vector<CaptureDevice> cameras;
+    Vector<CaptureDevice> microphones;
+    Vector<Function<void()>> waiting;
+    HashMap<UserMediaClient::DeviceChangeObserverToken, Function<void()>> observers;
+};
+
+HostDevices& hostDevices()
 {
-    static NeverDestroyed<CaptureDevice> device { CaptureDevice { "bl-camera"_s, CaptureDevice::DeviceType::Camera, "Camera"_s, "bl-group-camera"_s, true, true } };
-    return device;
+    static NeverDestroyed<HostDevices> devices;
+    return devices;
 }
 
-const CaptureDevice& microphoneDevice()
+Vector<CaptureDevice> makeDevices(CaptureDevice::DeviceType type, unsigned count)
 {
-    static NeverDestroyed<CaptureDevice> device { CaptureDevice { "bl-microphone"_s, CaptureDevice::DeviceType::Microphone, "Microphone"_s, "bl-group-microphone"_s, true, true } };
-    return device;
+    bool camera = type == CaptureDevice::DeviceType::Camera;
+    Vector<CaptureDevice> devices;
+    for (unsigned index = 0; index < count; ++index) {
+        auto name = camera ? "Camera"_s : "Microphone"_s;
+        auto label = index ? makeString(name, ' ', index + 1) : String { name };
+        auto id = makeString(camera ? "bl-camera-"_s : "bl-microphone-"_s, index);
+        devices.append(CaptureDevice { id, type, label, makeString("bl-group-"_s, id), true, !index });
+    }
+    return devices;
+}
+
+// Runs once the host reported its devices
+void whenHostDevicesKnown(Function<void()>&& function)
+{
+    auto& devices = hostDevices();
+    if (devices.counts || !featureEnabled(Feature::Capture))
+        function();
+    else
+        devices.waiting.append(WTF::move(function));
+}
+
+void setHostDevices(unsigned cameras, unsigned microphones)
+{
+    auto& devices = hostDevices();
+    bool first = !devices.counts;
+    if (!first && *devices.counts == std::make_pair(cameras, microphones))
+        return;
+    devices.counts = std::make_pair(cameras, microphones);
+    devices.cameras = makeDevices(CaptureDevice::DeviceType::Camera, cameras);
+    devices.microphones = makeDevices(CaptureDevice::DeviceType::Microphone, microphones);
+    if (first) {
+        for (auto& function : std::exchange(devices.waiting, { }))
+            function();
+        return;
+    }
+    // devicechange of every MediaDevices with a listener (an observer may
+    // remove others)
+    for (auto token : copyToVector(devices.observers.keys())) {
+        auto iterator = devices.observers.find(token);
+        if (iterator != devices.observers.end())
+            iterator->value();
+    }
+}
+
+// Index of a device in its list (capture-open picks the host device with it)
+unsigned deviceIndex(const CaptureDevice& device)
+{
+    auto& devices = device.type() == CaptureDevice::DeviceType::Camera ? hostDevices().cameras : hostDevices().microphones;
+    auto index = devices.findIf([&](auto& candidate) { return candidate.persistentId() == device.persistentId(); });
+    return index == notFound ? 0 : index;
 }
 
 const CaptureDevice& screenDevice()
@@ -78,14 +137,14 @@ const CaptureDevice& screenDevice()
 
 class DeviceManager final : public CaptureDeviceManager {
 public:
-    explicit DeviceManager(const CaptureDevice& device)
-        : m_devices({ device })
+    explicit DeviceManager(CaptureDevice::DeviceType type)
+        : m_type(type)
     {
     }
-    const Vector<CaptureDevice>& captureDevices() final { return m_devices; }
+    const Vector<CaptureDevice>& captureDevices() final { return m_type == CaptureDevice::DeviceType::Camera ? hostDevices().cameras : hostDevices().microphones; }
 
 private:
-    Vector<CaptureDevice> m_devices;
+    const CaptureDevice::DeviceType m_type;
 };
 
 class ScreenManager final : public DisplayCaptureManager {
@@ -111,6 +170,59 @@ void notifyCapture(ASCIILiteral type, const String& json)
 {
     notifyHost(0, type.characters(), json);
 }
+
+// The host device of a capture source. It opens before getUserMedia resolves
+// (capture-open, answered by bl_capture_opened), so a device the host cannot
+// open rejects the request instead of giving a track that ends; it streams
+// while the source produces (capture-start, which opens it again after a
+// stop) and closes with capture-stop.
+class HostDevice {
+public:
+    explicit HostDevice(int id)
+        : m_id(id)
+    {
+    }
+
+    ~HostDevice() { stop(); }
+
+    void open(const String& json, CompletionHandler<void(CaptureSourceError&&)>&& callback)
+    {
+        m_whenOpened = WTF::move(callback);
+        notifyCapture("capture-open"_s, json);
+    }
+
+    // error like bl_capture_opened
+    void opened(int error)
+    {
+        auto callback = WTF::move(m_whenOpened);
+        if (!error)
+            m_open = true;
+        if (!callback)
+            return;
+        if (!error)
+            return callback({ });
+        auto reason = error == 1 ? MediaAccessDenialReason::NoCaptureDevices : error == 2 ? MediaAccessDenialReason::PermissionDenied : MediaAccessDenialReason::HardwareError;
+        callback(CaptureSourceError { String { }, reason });
+    }
+
+    void start(const String& json)
+    {
+        m_open = true;
+        notifyCapture("capture-start"_s, json);
+    }
+
+    void stop()
+    {
+        if (!std::exchange(m_open, false))
+            return;
+        notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
+    }
+
+private:
+    const int m_id;
+    bool m_open { false };
+    CompletionHandler<void(CaptureSourceError&&)> m_whenOpened;
+};
 
 class VideoCaptureSourceWasm;
 class AudioCaptureSourceWasm;
@@ -142,8 +254,6 @@ public:
     ~VideoCaptureSourceWasm()
     {
         videoSources().remove(m_id);
-        if (m_producing && !m_remote)
-            notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
     }
 
     void deliver(Ref<VideoFrame>&& frame)
@@ -164,6 +274,7 @@ public:
         return adoptRef(*new VideoCaptureSourceWasm(device, { }, std::nullopt, true));
     }
 
+    void hostOpened(int error) { m_host.opened(error); }
     void hostFailed() { captureFailed(); }
     void hostEnded() { end(); }
     int id() const { return m_id; }
@@ -175,8 +286,25 @@ private:
         , m_id(nextSourceId())
         , m_type(device.type())
         , m_remote(remote)
+        , m_deviceIndex(device.type() == CaptureDevice::DeviceType::Camera ? deviceIndex(device) : 0)
+        , m_host(m_id)
     {
         videoSources().add(m_id, this);
+    }
+
+    void whenReady(CompletionHandler<void(CaptureSourceError&&)>&& callback) final
+    {
+        if (m_remote)
+            return callback({ });
+        m_host.open(hostRequest(), WTF::move(callback));
+    }
+
+    String hostRequest()
+    {
+        auto requested = size();
+        bool camera = m_type == CaptureDevice::DeviceType::Camera;
+        return makeString("{\"id\":"_s, m_id, ",\"kind\":\""_s, camera ? "camera"_s : "screen"_s, "\",\"device\":"_s, m_deviceIndex,
+            ",\"width\":"_s, requested.width(), ",\"height\":"_s, requested.height(), ",\"frameRate\":"_s, frameRate(), '}');
     }
 
     void generatePresets() final
@@ -240,18 +368,14 @@ private:
     void startProducingData() final
     {
         m_producing = true;
-        if (m_remote)
-            return;
-        auto requested = size();
-        notifyCapture("capture-start"_s, makeString("{\"id\":"_s, m_id, ",\"kind\":\""_s, m_type == CaptureDevice::DeviceType::Camera ? "camera"_s : "screen"_s,
-            "\",\"width\":"_s, requested.width(), ",\"height\":"_s, requested.height(), ",\"frameRate\":"_s, frameRate(), '}'));
+        if (!m_remote)
+            m_host.start(hostRequest());
     }
 
     void stopProducingData() final
     {
         m_producing = false;
-        if (!m_remote)
-            notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
+        m_host.stop();
     }
 
     CaptureDevice::DeviceType deviceType() const final { return m_type; }
@@ -260,6 +384,8 @@ private:
     const int m_id;
     const CaptureDevice::DeviceType m_type;
     const bool m_remote;
+    const unsigned m_deviceIndex;
+    HostDevice m_host;
     bool m_producing { false };
     std::optional<RealtimeMediaSourceCapabilities> m_capabilities;
     std::optional<RealtimeMediaSourceSettings> m_settings;
@@ -280,8 +406,6 @@ public:
     ~AudioCaptureSourceWasm()
     {
         audioSources().remove(m_id);
-        if (m_producing && !m_remote)
-            notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
     }
 
     WTF_ABSTRACT_THREAD_SAFE_REF_COUNTED_AND_CAN_MAKE_WEAK_PTR_IMPL;
@@ -303,6 +427,7 @@ public:
         return adoptRef(*new AudioCaptureSourceWasm(device, { }, std::nullopt, true));
     }
 
+    void hostOpened(int error) { m_host.opened(error); }
     void hostFailed() { captureFailed(); }
     void hostEnded() { end(); }
     int id() const { return m_id; }
@@ -313,6 +438,8 @@ private:
         : RealtimeMediaSource(device, WTF::move(hashSalts), pageIdentifier)
         , m_id(nextSourceId())
         , m_remote(remote)
+        , m_deviceIndex(remote ? 0 : deviceIndex(device))
+        , m_host(m_id)
     {
         audioSources().add(m_id, this);
         setSampleRate(48000);
@@ -358,19 +485,29 @@ private:
 
     void settingsDidChange(OptionSet<RealtimeMediaSourceSettings::Flag>) final { m_settings = std::nullopt; }
 
+    void whenReady(CompletionHandler<void(CaptureSourceError&&)>&& callback) final
+    {
+        if (m_remote)
+            return callback({ });
+        m_host.open(hostRequest(), WTF::move(callback));
+    }
+
+    String hostRequest()
+    {
+        return makeString("{\"id\":"_s, m_id, ",\"kind\":\"microphone\",\"device\":"_s, m_deviceIndex, ",\"echoCancellation\":"_s, echoCancellation() ? "true"_s : "false"_s, '}');
+    }
+
     void startProducingData() final
     {
         m_producing = true;
-        if (m_remote)
-            return;
-        notifyCapture("capture-start"_s, makeString("{\"id\":"_s, m_id, ",\"kind\":\"microphone\",\"echoCancellation\":"_s, echoCancellation() ? "true"_s : "false"_s, '}'));
+        if (!m_remote)
+            m_host.start(hostRequest());
     }
 
     void stopProducingData() final
     {
         m_producing = false;
-        if (!m_remote)
-            notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
+        m_host.stop();
     }
 
     CaptureDevice::DeviceType deviceType() const final { return CaptureDevice::DeviceType::Microphone; }
@@ -378,6 +515,8 @@ private:
 
     const int m_id;
     const bool m_remote;
+    const unsigned m_deviceIndex;
+    HostDevice m_host;
     bool m_producing { false };
     std::optional<RealtimeMediaSourceCapabilities> m_capabilities;
     std::optional<RealtimeMediaSourceSettings> m_settings;
@@ -392,7 +531,7 @@ class AudioFactory final : public AudioCaptureFactory {
     }
     CaptureDeviceManager& audioCaptureDeviceManager() final
     {
-        static NeverDestroyed<DeviceManager> manager { microphoneDevice() };
+        static NeverDestroyed<DeviceManager> manager { CaptureDevice::DeviceType::Microphone };
         return manager;
     }
     const Vector<CaptureDevice>& speakerDevices() const final
@@ -409,7 +548,7 @@ class VideoFactory final : public VideoCaptureFactory {
     }
     CaptureDeviceManager& videoCaptureDeviceManager() final
     {
-        static NeverDestroyed<DeviceManager> manager { cameraDevice() };
+        static NeverDestroyed<DeviceManager> manager { CaptureDevice::DeviceType::Camera };
         return manager;
     }
 };
@@ -596,9 +735,25 @@ private:
             request.deny(MediaAccessDenialReason::PermissionDenied);
             return;
         }
-        RefPtr origin = request.topLevelDocumentOrigin();
+        whenHostDevicesKnown([viewId = m_viewId, request = Ref { request }]() mutable {
+            requestAccess(viewId, WTF::move(request));
+        });
+    }
+
+    static void requestAccess(int viewId, Ref<UserMediaRequest>&& request)
+    {
+        // Like Chrome, Firefox and the specification: a kind the host does not
+        // have is NotFoundError at once, without a prompt
+        auto& streamRequest = request->request();
+        auto& devices = hostDevices();
+        if (streamRequest.type == MediaStreamRequest::Type::UserMedia
+            && ((streamRequest.audioConstraints.isValid && devices.microphones.isEmpty()) || (streamRequest.videoConstraints.isValid && devices.cameras.isEmpty()))) {
+            request->deny(MediaAccessDenialReason::NoCaptureDevices);
+            return;
+        }
+        RefPtr origin = request->topLevelDocumentOrigin();
         String originString = origin ? origin->toString() : String { };
-        RealtimeMediaSourceCenter::singleton().validateRequestConstraints([viewId = m_viewId, request = Ref { request }, originString](Expected<RealtimeMediaSourceCenter::ValidDevices, MediaConstraintType>&& result) mutable {
+        RealtimeMediaSourceCenter::singleton().validateRequestConstraints([viewId, request, originString](Expected<RealtimeMediaSourceCenter::ValidDevices, MediaConstraintType>&& result) mutable {
             if (!result) {
                 request->deny(MediaAccessDenialReason::InvalidConstraint, emptyString(), result.error());
                 return;
@@ -624,32 +779,42 @@ private:
             // "camera-microphone" applies to both separately (DeviceClients.cpp)
             String kind = audio && video ? "camera-microphone"_s : video ? "camera"_s : "microphone"_s;
             requestDevicePermission(viewId, kind, originString, WTF::move(allow));
-        }, request.request(), saltsFor(originString));
+        }, request->request(), saltsFor(originString));
     }
 
     void cancelUserMediaAccessRequest(UserMediaRequest&) final { }
 
+    // Like Safari: before the permission at most one device of a kind,
+    // without id and name; no audiooutput (Safari lists speakers only after
+    // a microphone capture, and the engine cannot choose one)
     void enumerateMediaDevices(Document& document, EnumerateDevicesCallback&& callback) final
     {
-        String origin = document.topOrigin().toString();
-        RealtimeMediaSourceCenter::singleton().getMediaStreamDevices([callback = WTF::move(callback), origin](Vector<CaptureDevice>&& devices) mutable {
+        whenHostDevicesKnown([origin = document.topOrigin().toString(), callback = WTF::move(callback)]() mutable {
             Vector<CaptureDeviceWithCapabilities> result;
-            for (auto& device : devices) {
-                bool isCamera = device.type() == CaptureDevice::DeviceType::Camera;
-                if (!isCamera && device.type() != CaptureDevice::DeviceType::Microphone)
-                    continue;
-                // Like Chrome: names only once the page may use the device
-                auto copy = device;
-                if (storedPermission(isCamera ? "camera"_s : "microphone"_s, origin) != PermissionDecision::Granted)
-                    copy.setLabel(emptyString());
-                result.append({ WTF::move(copy), { } });
-            }
+            auto add = [&](const Vector<CaptureDevice>& devices, ASCIILiteral kind) {
+                if (devices.isEmpty())
+                    return;
+                if (storedPermission(kind, origin) != PermissionDecision::Granted) {
+                    result.append({ CaptureDevice { emptyString(), devices[0].type(), emptyString(), emptyString() }, { } });
+                    return;
+                }
+                for (auto& device : devices)
+                    result.append({ device, { } });
+            };
+            add(hostDevices().microphones, "microphone"_s);
+            add(hostDevices().cameras, "camera"_s);
             callback(WTF::move(result), saltsFor(origin));
         });
     }
 
-    DeviceChangeObserverToken addDeviceChangeObserver(Function<void()>&&) final { return DeviceChangeObserverToken::generate(); }
-    void removeDeviceChangeObserver(DeviceChangeObserverToken) final { }
+    DeviceChangeObserverToken addDeviceChangeObserver(Function<void()>&& observer) final
+    {
+        auto token = DeviceChangeObserverToken::generate();
+        hostDevices().observers.add(token, WTF::move(observer));
+        return token;
+    }
+
+    void removeDeviceChangeObserver(DeviceChangeObserverToken token) final { hostDevices().observers.remove(token); }
 
     // The indicator on the view comes through ChromeClient::isPlayingMediaDidChange
     void updateCaptureState(const Document&, bool, MediaProducerMediaCaptureKind, CompletionHandler<void(std::optional<Exception>&&)>&& completionHandler) final
@@ -1199,6 +1364,25 @@ EMSCRIPTEN_KEEPALIVE void bl_remote_muted(int id, int muted)
             Ref { *source }->setMuted(muted);
         else if (auto* source = BrowserLite::audioSources().get(id); source && source->isRemote())
             Ref { *source }->setMuted(muted);
+    });
+}
+
+// From the host (main thread): its cameras and microphones changed
+EMSCRIPTEN_KEEPALIVE void bl_set_capture_devices(int cameras, int microphones)
+{
+    BrowserLite::runOnEngineThread([cameras, microphones] {
+        BrowserLite::setHostDevices(std::max(cameras, 0), std::max(microphones, 0));
+    });
+}
+
+// From the host (main thread): answer to capture-open
+EMSCRIPTEN_KEEPALIVE void bl_capture_opened(int id, int error)
+{
+    BrowserLite::runOnEngineThread([id, error] {
+        if (auto* source = BrowserLite::videoSources().get(id))
+            Ref { *source }->hostOpened(error);
+        else if (auto* source = BrowserLite::audioSources().get(id))
+            Ref { *source }->hostOpened(error);
     });
 }
 

@@ -1,5 +1,5 @@
 {
-  "abiVersion": 48,
+  "abiVersion": 49,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -102,6 +102,8 @@
     { "name": "bl_gpu_lose_context_for_testing", "returns": "void", "args": "", "debug": true, "doc": "Loses the WebGL context the engine paints with. Only with BL_TEST_HOOKS=1." },
     { "name": "bl_gpu_restore_context_for_testing", "returns": "void", "args": "", "debug": true, "doc": "Restores the context lost by bl_gpu_lose_context_for_testing. Only with BL_TEST_HOOKS=1." },
     { "name": "bl_frames_shown_for_testing", "returns": "int", "args": "", "debug": true, "thread": "Synchronous.", "doc": "Frames the compositor put on screen so far, all views. -1 without BL_TEST_HOOKS=1." },
+    { "name": "bl_set_capture_devices", "returns": "void", "args": "int cameras, int microphones", "doc": "How many cameras and microphones the host has (its enumerateDevices without the 'default' and 'communications' entries; before the host's permission at most one of a kind), at start and after every change. The pages see as many, without ids or names until their origin may use the kind; until the first call enumerateDevices and getUserMedia wait. A kind with none: getUserMedia rejects with NotFoundError without asking." },
+    { "name": "bl_capture_opened", "returns": "void", "args": "int id, int error", "doc": "Answer to 'capture-open': 0 the host device is open, 1 it has no such device (getUserMedia rejects with NotFoundError), 2 the host denied it (NotAllowedError), 3 it could not open it (NotReadableError)." },
     { "name": "bl_capture_failed", "returns": "void", "args": "int id", "doc": "Capture of 'capture-start' was denied or broke." },
     { "name": "bl_capture_ended", "returns": "void", "args": "int id", "doc": "Capture of 'capture-start' ended (user stopped sharing)." },
     { "name": "bl_remote_muted", "returns": "void", "args": "int id, int muted", "doc": "Remote WebRTC track muted (no packets) or back." }
@@ -247,7 +249,8 @@
     { "type": "gamepad-effect", "scope": "global", "payload": "{index, type, duration, startDelay, strongMagnitude, weakMagnitude}", "feature": "gamepad" },
     { "type": "speak", "scope": "global", "payload": "{id, text, lang, voice, volume, rate, pitch}", "feature": "speech" },
     { "type": "speech-command", "scope": "global", "payload": "{command: 'pause' | 'resume' | 'cancel'}", "feature": "speech" },
-    { "type": "capture-start", "scope": "global", "payload": "{id, kind: 'camera' | 'screen' | 'microphone', width?, height?, frameRate?, echoCancellation?}", "feature": "capture" },
+    { "type": "capture-open", "scope": "global", "payload": "{id, kind: 'camera' | 'screen' | 'microphone', device, width?, height?, frameRate?, echoCancellation?}: before getUserMedia or getDisplayMedia resolves: open the host device (device: index among the cameras or microphones of bl_set_capture_devices) and answer with bl_capture_opened; it stays open for 'capture-start' until 'capture-stop'", "feature": "capture" },
+    { "type": "capture-start", "scope": "global", "payload": "{id, kind: 'camera' | 'screen' | 'microphone', device, width?, height?, frameRate?, echoCancellation?}: stream the device opened by 'capture-open' to the engine worker (opens it again after a 'capture-stop')", "feature": "capture" },
     { "type": "capture-stop", "scope": "global", "payload": "{id}", "feature": "capture" }
   ],
   "features": [
