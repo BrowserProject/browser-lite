@@ -924,7 +924,37 @@ browser (Safari keeps Cmd+L, T and W for itself).
    WASM locals, array literals without C++, the warm-up of the VM's large functions, which run
    interpreted for 5 to 15 s; phase 4 of [jit.md](jit.md)); the criteria of 25 s to the checkbox
    and 6 s for the longest step are not reached, nor 90 s on a Moto G71 (not measured with
-   #636). Hosts without WebGL 2 (headless
+   #636).
+   Turnstile on a low-end phone (2026-11-22, #643): on a Moto G71 (BrowserStack, the deployed
+   build and two local ones through the tunnel, 7 runs) the challenge's `ci` request got 400 in 6
+   runs (200 once, followed by a step of 86 s), and the checkbox came only 124 to 163 s after the
+   page started to load, 0 to 10 s after `widgetStale` (the widget's own timeout of 120 s, which starts the
+   challenge again with a new `fo`): the stale path is what brings it, not the challenge's result.
+   A tap then gave the token in every run. Its first phase (`fo` to `pat`) took 10.8 to 61.7 s (6
+   runs with a whole log, 3 over 20 s, those got 400), the longest step 33 to 86 s. On a desktop
+   Chromium host `ci` gets 200 and the checkbox follows 3 to 7 s later. Why the phone's `ci` gets
+   400 (also once on a Firefox host) is not known; the payload is the challenge's own. The phone
+   runs JS in the host page as fast as this desktop (a loop 247 against 227 ms), but the engine's
+   interpreter 1.8 to 2.3 times slower and the compiled code of large functions 2.8 to 3.4 times: a
+   VM-like function of 200 cases ran compiled only 1.24 times as fast as interpreted there (2.3
+   times on desktop), one of 16 cases 2.5 times; the code of the large one does not stay in the
+   phone's caches. Branch hints ([jit.md](jit.md)) make V8 put the code of slow paths behind the
+   rest of a function: the function of 200 cases 1.38 times as fast on the Moto, 1.24 times on
+   desktop; each challenge brings another VM, so 3 runs per build do not show it in the
+   challenge's phases. Where the first phase goes (CPU profile, desktop): one task of up to 19 s
+   (a message of the challenge's worker), compiled code 33 to 47 %, slow paths 21 to 30 % (the
+   interpreter's `get_by_val` of DOM constructors and getters, array literals, `===` of strings),
+   the interpreter 17 to 22 %. A 4 times shorter warm-up (`JSC_thresholdForJITAfterWarmUp=125`, 8
+   runs) compiled the VM's large functions 5 to 8 s after `fo` instead of 17 to 20 s, but the
+   phase took as long (4.3 to 19.5 s against 5.6 to 21.4 s); V8's optimized code of a module of
+   0.39 MB is ready after 0.45 s on desktop. The criterion's local stand-in, Chromium's CPU
+   throttling (CDP, 6x), slows only the host page's main thread, not the engine's worker (a loop
+   in a worker 686 against 637 ms): `fo` to `pat` took 4.3 to 10.9 s in 10 of 10 runs with both
+   builds, like unthrottled; a third of a CPU per thread (cgroup) gives the phone's order (37 s to
+   `pat`, checkbox after 113 s). Open: the Moto's criterion (first phase within 20 s in 3 of 3,
+   checkbox within 90 s, no step over 15 s) needs the engine's JS about 2.5 times faster there,
+   first the code size of compiled large functions (phase 4 of [jit.md](jit.md)).
+   Hosts without WebGL 2 (headless
    Firefox, a blocklisted GPU; 2026-11-20, #635): the engine worker owned the view canvases there,
    and every read of one by the browser while page script ran (a screenshot, the measurement's
    `drawImage`) held Firefox's main thread 10 s and came back white; meanwhile no web worker of a

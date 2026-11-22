@@ -71,6 +71,15 @@ never baked into the code (the GC resets inline caches).
   returns whether the instruction threw or jumped. A constant operand's tag check is left out.
   Inline, `if (s) t = u` was about 260 bytes of WASM, `s = s ^ c` about 230, now about 75 and 90
   (`tests/jsc/jit-size.js` checks both).
+- **Branch hints**: the module has a section of branch hints (the custom section
+  `metadata.code.branch_hint` of the WebAssembly standard; a browser without them ignores it). The
+  slow path after a fast path missed, the exits at an exception, the trap checks and the double
+  and overflow side of int32 arithmetic and comparisons are marked unlikely, so V8's optimizing
+  compiler puts their code behind the rest of the function and the code that runs stays dense in
+  the instruction cache, which a phone has less of (#643). Equality, bit operations and
+  conditions take their out-of-line side often (strings, objects, uint32 values above 2^31) and
+  get no hint. `tests/jsc/jit-branch-hints.mjs` checks the section: V8 drops all of it when one
+  entry is wrong.
 - **Fast paths**: the interpreter's, reading its caches at run time: int32 and double arithmetic
   and comparisons, equality, property access (own, prototype, array length, unset, transitions;
   reads of own properties also from the last 4 structures of the site, until the next GC, looked
@@ -287,6 +296,27 @@ A 4 times shorter warm-up for all code (`JSC_thresholdForJITAfterWarmUp=125`) ga
 So the size of arithmetic was not what limits the challenge; with the JIT it takes about four
 fifths of the time it takes without.
 
+Branch hints (#643, 2026-11-22): on a Moto G71 (BrowserStack) the JS of the host page runs as
+fast as on the desktop of the measurements (a loop 247 against 227 ms, optimized 29 against 29),
+the engine's interpreter 1.8 to 2.3 times slower, but compiled code of large functions 2.8 to 3.4
+times: a page in the engine running the dispatch of `tests/jsc/jit-size.js` (200 cases of a VM's
+statements) did 1550 to 1580 statements per ms compiled against 1250 interpreted (desktop 5150
+to 5300 against 2300), with 16 cases 3500 to 3800 against 1500, so for large functions the JIT
+gave the phone little; its code did not stay in the phone's caches. With the hints the 200 cases
+run 2181 per ms on the Moto (1.38 times), 16 cases of 12 statements 269 to 273 against 229, 16
+cases and a tight int32 loop as before; on desktop (Chromium host) 6411 against 5155 per ms and
+16 cases 8584 to 8678 against 8196 to 8204. In the jsc shell (node 26) the dispatch's module has
+10819 hints (0.44 instead of 0.39 MB) and runs 6270 to 6850 against 5550 to 5920 steps per ms once
+optimized, with V8's hints switched off (`--no-experimental-wasm-branch-hinting`) 5460 to 5750; the
+tight loop 150 to 160 against 152 to 165 thousand iterations per ms (6 runs each, within the
+spread). Turnstile's first phase was not measurably shorter: each challenge brings another VM and
+its phases vary 4 to 10 times between runs. A 4 times shorter warm-up for all code
+(`JSC_thresholdForJITAfterWarmUp=125`, 8 runs at a phone's viewport) compiled the VM's large
+functions 5 to 8 s after the challenge's `fo` request instead of 17 to 20 s, but the first phase
+took as long (4.3 to 19.5 s against 5.6 to 21.4 s): those functions run little faster compiled.
+V8's optimized code of the dispatch's module (0.39 MB) took 0.45 s to compile in node, so it is
+not the wait for TurboFan either.
+
 Hashing code (#424, `tests/jsc/jit-hash.js`, jsc shell): bit operations on uint32 values 5x and
 typed array elements 3x the time of their int32 twins before, now 1.8x and 1.3x; `Math.imul` 6.5x
 an addition before, 2x now; a host call about 20 % cheaper. In the engine, the loops of
@@ -306,7 +336,9 @@ to 2.7 s, Chromium 24 to 44 ms).
    functions of the module made them 8 to 10 times that in WASM instead of 25 to 31 (#630).
    The double and slow paths of arithmetic, comparisons and conditions are out of line too
    (#636): about 75 to 120 bytes per such statement instead of 200 to 260, no faster on
-   Turnstile's challenge. Next: values in WASM locals between safepoints (a register written and
-   read again in a block is loaded from the frame each time), array literals without a call into
-   C++, and the warm-up of an obfuscated VM's large functions, which fire rarely for the time they
-   run.
+   Turnstile's challenge. Branch hints keep the code of slow paths out of the instruction cache
+   (#643): 1.38 times as fast for a VM's large function on a Moto G71, whose caches did not hold
+   its code. Next: the code size of large functions (operands and frame accesses per instruction,
+   values in WASM locals between safepoints: a register written and read again in a block is
+   loaded from the frame each time) and array literals without a call into C++. A shorter
+   warm-up of an obfuscated VM's large functions did not shorten Turnstile's first phase.

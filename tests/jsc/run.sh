@@ -76,6 +76,17 @@ for kind in ifmov:130 xor:115; do
     fi
 done
 
+# The branch hints of the large VM-like function's module (BL_JIT=3 writes the modules into the
+# working directory): valid, so V8 keeps the code that rarely runs out of the instruction cache
+dump="$(mktemp -d)"
+if hints="$(cd "$dump" && BL_JIT=3 node "$jsc" "$here/jit-size.js" > /dev/null 2>&1; node "$here/jit-branch-hints.mjs" "$dump"/jit-*.wasm 2>&1)" && grep -q "^OK " <<< "$hints"; then
+    echo "ok    jit-branch-hints (jit): ${hints#OK }"
+else
+    echo "FAIL  jit-branch-hints (jit): $hints"
+    fail=1
+fi
+rm -rf "$dump"
+
 # Compiled code stays through a full GC of old code, code thrown away compiles again
 kept="$(compiles)"
 again="$(compiles --forceCodeBlockToJettisonDueToOldAge=true)"

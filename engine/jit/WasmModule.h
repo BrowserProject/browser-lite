@@ -14,6 +14,12 @@ namespace JSC::LLInt::WasmJIT {
 
 enum class ValueType : uint8_t { I32 = 0x7f, I64 = 0x7e, F64 = 0x7c };
 
+// Which way a branch usually goes, for the branch hints of the module (its custom section
+// "metadata.code.branch_hint"): the optimizing compiler of the browser places the code a branch
+// rarely takes after the rest of the function, so the code that runs is dense in the instruction
+// cache. Browsers without branch hints ignore the section.
+enum class Hint : uint8_t { Unlikely = 0, Likely = 1 };
+
 // The body of the one function: instructions in the binary encoding
 class FunctionBody {
 public:
@@ -47,12 +53,16 @@ public:
     void block();
     void loop();
     void ifThen();
+    // An if whose condition is usually true or usually false
+    void ifThen(Hint);
     // An if whose arms leave a value of the type
     void ifThen(ValueType result);
+    void ifThen(ValueType result, Hint);
     void elseThen();
     void end();
     void br(uint32_t depth);
     void brIf(uint32_t depth);
+    void brIf(uint32_t depth, Hint);
     void brTable(std::span<const uint32_t> depths, uint32_t defaultDepth);
     void returnValue();
     void unreachable();
@@ -64,13 +74,17 @@ public:
 
     const std::vector<uint8_t>& code() const { return m_code; }
     const std::vector<ValueType>& locals() const { return m_locals; }
+    // The hinted branches: offset of the if or br_if in code(), and the hint
+    const std::vector<std::pair<uint32_t, Hint>>& hints() const { return m_hints; }
     // Blocks, loops and ifs open at this point, for branch depths
     uint32_t depth() const { return m_depth; }
 
 private:
     friend class Module;
+    void hint(Hint);
     std::vector<uint8_t> m_code;
     std::vector<ValueType> m_locals;
+    std::vector<std::pair<uint32_t, Hint>> m_hints;
     uint32_t m_parameterCount { 0 };
     uint32_t m_depth { 0 };
 };
@@ -84,6 +98,8 @@ public:
     // A function of the module for the exported one to call (index 1, 2, ...)
     FunctionBody& addFunction(uint32_t typeIndex, uint32_t parameterCount);
     std::vector<uint8_t> bytes() const;
+    // Branch hints of all functions
+    size_t hintCount() const;
 
 private:
     std::vector<std::vector<uint8_t>> m_types;

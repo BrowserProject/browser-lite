@@ -1420,6 +1420,7 @@ public:
     std::optional<std::vector<uint8_t>> compile();
     OpcodeID unsupported() const { return m_unsupported; }
     bool tooLarge() const { return m_tooLarge; }
+    size_t branchHints() const { return m_module.hintCount(); }
     // Blocks after loop hints, by bytecode offset
     OffsetMap takeLoops() { return WTF::move(m_loops); }
     Vector<std::unique_ptr<PropertyCache>> takePropertyCaches() { return WTF::move(m_propertyCaches); }
@@ -2738,10 +2739,10 @@ void Compiler::checkException(const JSInstructionStream::Ref& instruction)
     m_body->op(Op::I32Eq);
     if (!m_codeBlock->handlerForBytecodeIndex(BytecodeIndex(instruction.offset()))) {
         // Out through the block around everything, which returns 1
-        m_body->brIf(m_body->depth() - 1);
+        m_body->brIf(m_body->depth() - 1, Hint::Unlikely);
         return;
     }
-    m_body->ifThen();
+    m_body->ifThen(Hint::Unlikely);
     exceptionExit(instruction);
     m_body->end();
 }
@@ -2781,7 +2782,7 @@ void Compiler::endFastPaths(SlowPath slowPath, const JSInstructionStream::Ref& i
 {
     m_body->localGet(m_next);
     m_body->op(Op::I32Eqz);
-    m_body->ifThen();
+    m_body->ifThen(Hint::Unlikely);
     callSlowPath(slowPath, instruction);
     m_body->end();
 }
@@ -3641,12 +3642,12 @@ void Compiler::callOutOfLine(const JSInstructionStream::Ref& instruction, Virtua
         m_body->op(Op::I32Eq);
     }
     if (m_codeBlock->handlerForBytecodeIndex(BytecodeIndex(instruction.offset()))) {
-        m_body->ifThen();
+        m_body->ifThen(Hint::Unlikely);
         exceptionExit(instruction);
         m_body->end();
     } else {
         // Out through the block around everything, which returns 1
-        m_body->brIf(m_body->depth() - 1);
+        m_body->brIf(m_body->depth() - 1, Hint::Unlikely);
     }
     if (isJump)
         m_body->localGet(m_next);
@@ -3887,7 +3888,7 @@ void Compiler::emitArithmetic(const JSInstructionStream::Ref& instruction, uint8
     tagInto(bytecode.m_rhs, m_t2);
     m_body->block();
     bothInt32(bytecode.m_lhs, m_t1, bytecode.m_rhs, m_t2);
-    m_body->ifThen();
+    m_body->ifThen(Hint::Likely);
     {
         loadPayload(bytecode.m_lhs);
         if (isMul)
@@ -3918,7 +3919,7 @@ void Compiler::emitArithmetic(const JSInstructionStream::Ref& instruction, uint8
             m_body->op(Op::I32Eqz);
             m_body->op(Op::I32And);
         }
-        m_body->ifThen();
+        m_body->ifThen(Hint::Likely);
         storeInt32(bytecode.m_dst, m_c);
         // Past the out-of-line call
         m_body->br(2);
@@ -4006,14 +4007,14 @@ void Compiler::emitCompare(const JSInstructionStream::Ref& instruction, unsigned
     };
     bothInt32(bytecode.m_lhs, m_t1, bytecode.m_rhs, m_t2);
     if constexpr (isJump) {
-        m_body->ifThen(ValueType::I32);
+        m_body->ifThen(ValueType::I32, Hint::Likely);
         compare();
         m_body->elseThen();
         callOutOfLine(instruction, bytecode.m_lhs, m_t1, bytecode.m_rhs, m_t2, std::nullopt);
         m_body->end();
         jumpIf(targetOf(instruction, bytecode.m_targetLabel.target()), block);
     } else {
-        m_body->ifThen();
+        m_body->ifThen(Hint::Likely);
         storeTagWithPayload(bytecode.m_dst, booleanTag, compare);
         m_body->elseThen();
         callOutOfLine(instruction, bytecode.m_lhs, m_t1, bytecode.m_rhs, m_t2, bytecode.m_dst);
@@ -5027,7 +5028,7 @@ void Compiler::emitTrapCheck(const JSInstructionStream::Ref& instruction)
     m_body->i32Load(0);
     m_body->i32Const(VMTraps::AsyncEvents);
     m_body->op(Op::I32And);
-    m_body->ifThen();
+    m_body->ifThen(Hint::Unlikely);
     m_body->localGet(cfr);
     m_body->i32Const(instruction.offset());
     m_body->i32Store(CallFrameSlot::argumentCountIncludingThis * sizeof(Register) + TagOffset);
@@ -5036,7 +5037,7 @@ void Compiler::emitTrapCheck(const JSInstructionStream::Ref& instruction)
     m_body->i32Const(reinterpret_cast<uintptr_t>(static_cast<SlowPath>(llint_slow_path_handle_traps)));
     m_body->callIndirect(m_slowPathType);
     m_body->op(Op::I32WrapI64);
-    m_body->ifThen();
+    m_body->ifThen(Hint::Unlikely);
     m_body->i32Const(1);
     m_body->returnValue();
     m_body->end();
@@ -5639,7 +5640,7 @@ void wasmJITTierUp(CodeBlock* codeBlock)
         }
         if (level() >= 2) {
             if (bytes)
-                dataLogLn("[jit] ", *codeBlock, ": ", bytes->size(), " bytes, function ", compiled.function);
+                dataLogLn("[jit] ", *codeBlock, ": ", bytes->size(), " bytes, ", compiler.branchHints(), " branch hints, function ", compiled.function);
             else
                 dataLogLn("[jit] ", *codeBlock, ": not compiled (", compiler.tooLarge() ? "too large" : opcodeNames[compiler.unsupported()], ")");
         }

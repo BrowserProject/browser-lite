@@ -79,12 +79,18 @@ void FunctionBody::select() { m_code.push_back(0x1b); }
 // Blocks without results (empty block type 0x40)
 void FunctionBody::block() { m_code.push_back(0x02); m_code.push_back(0x40); ++m_depth; }
 void FunctionBody::loop() { m_code.push_back(0x03); m_code.push_back(0x40); ++m_depth; }
+// Before the instruction it belongs to: the offset is that of the if or br_if
+void FunctionBody::hint(Hint hint) { m_hints.push_back({ static_cast<uint32_t>(m_code.size()), hint }); }
+
 void FunctionBody::ifThen() { m_code.push_back(0x04); m_code.push_back(0x40); ++m_depth; }
+void FunctionBody::ifThen(Hint hint) { this->hint(hint); ifThen(); }
 void FunctionBody::ifThen(ValueType result) { m_code.push_back(0x04); m_code.push_back(static_cast<uint8_t>(result)); ++m_depth; }
+void FunctionBody::ifThen(ValueType result, Hint hint) { this->hint(hint); ifThen(result); }
 void FunctionBody::elseThen() { m_code.push_back(0x05); }
 void FunctionBody::end() { m_code.push_back(0x0b); --m_depth; }
 void FunctionBody::br(uint32_t depth) { m_code.push_back(0x0c); unsignedLEB(m_code, depth); }
 void FunctionBody::brIf(uint32_t depth) { m_code.push_back(0x0d); unsignedLEB(m_code, depth); }
+void FunctionBody::brIf(uint32_t depth, Hint hint) { this->hint(hint); brIf(depth); }
 
 void FunctionBody::brTable(std::span<const uint32_t> depths, uint32_t defaultDepth)
 {
@@ -138,8 +144,8 @@ FunctionBody& Module::addFunction(uint32_t typeIndex, uint32_t parameterCount)
     return *m_helpers.back().second;
 }
 
-// A function's entry of the code section: its locals in runs of the same type, then its code
-static void functionCode(std::vector<uint8_t>& out, const FunctionBody& function)
+// A function's locals in runs of the same type, the start of its body in the code section
+static std::vector<uint8_t> localDeclarations(const FunctionBody& function)
 {
     std::vector<uint8_t> body;
     std::vector<std::pair<uint32_t, ValueType>> runs;
@@ -153,10 +159,53 @@ static void functionCode(std::vector<uint8_t>& out, const FunctionBody& function
         unsignedLEB(body, count);
         body.push_back(static_cast<uint8_t>(type));
     }
+    return body;
+}
+
+// A function's entry of the code section: its locals, then its code
+static void functionCode(std::vector<uint8_t>& out, const FunctionBody& function)
+{
+    auto body = localDeclarations(function);
     body.insert(body.end(), function.code().begin(), function.code().end());
     body.push_back(0x0b);
     unsignedLEB(out, body.size());
     out.insert(out.end(), body.begin(), body.end());
+}
+
+// The functions' hints with each branch's offset from the start of its body (the local
+// declarations), in the order of functions and offsets; empty without hints
+static std::vector<uint8_t> branchHints(const std::vector<const FunctionBody*>& functions)
+{
+    std::vector<uint8_t> out;
+    uint32_t hinted = 0;
+    for (auto* function : functions)
+        hinted += !function->hints().empty();
+    if (!hinted)
+        return out;
+    name(out, "metadata.code.branch_hint");
+    unsignedLEB(out, hinted);
+    for (uint32_t index = 0; index < functions.size(); ++index) {
+        auto& hints = functions[index]->hints();
+        if (hints.empty())
+            continue;
+        unsignedLEB(out, index);
+        unsignedLEB(out, hints.size());
+        uint32_t start = localDeclarations(*functions[index]).size();
+        for (auto [offset, hint] : hints) {
+            unsignedLEB(out, start + offset);
+            unsignedLEB(out, 1);
+            out.push_back(static_cast<uint8_t>(hint));
+        }
+    }
+    return out;
+}
+
+size_t Module::hintCount() const
+{
+    size_t count = m_function.hints().size();
+    for (auto& [type, helper] : m_helpers)
+        count += helper->hints().size();
+    return count;
 }
 
 std::vector<uint8_t> Module::bytes() const
@@ -192,6 +241,13 @@ std::vector<uint8_t> Module::bytes() const
     name(exports, "f");
     exports.insert(exports.end(), { 0x00, 0x00 });
     section(out, 7, exports);
+
+    // Before the code section, which it describes
+    std::vector<const FunctionBody*> functionBodies { &m_function };
+    for (auto& [type, helper] : m_helpers)
+        functionBodies.push_back(helper.get());
+    if (auto hints = branchHints(functionBodies); !hints.empty())
+        section(out, 0, hints);
 
     std::vector<uint8_t> code;
     unsignedLEB(code, 1 + m_helpers.size());

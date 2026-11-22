@@ -37,7 +37,7 @@ await runEngine({
   width: 200,
   height: 200,
   onPrintErr(text) {
-    const match = /\[jit\] (\w+)#\w+:.*: \d+ bytes, function [1-9]/.exec(text);
+    const match = /\[jit\] (\w+)#\w+:.*: \d+ bytes, \d+ branch hints, function [1-9]/.exec(text);
     if (match) compiled.add(match[1]);
   },
   onConsole(message) {
