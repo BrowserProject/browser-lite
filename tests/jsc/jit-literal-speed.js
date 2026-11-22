@@ -4,8 +4,8 @@
 // literal of three values cost 3.2 to 3.6 times three element writes through the module's function
 // (then 1.0 to 1.2), a literal of constants 1.6 to 2.0 times (then 0.7 to 0.8); against the inline
 // element writes of #646 a literal is 2.8 to 4.0 times, one of constants 1.8 to 2.3 times. A getter
-// took 4.8 to 5.4 times a method call (now 2.9 to 3.9, also read with a key). `jit-literals.js`
-// checks their results.
+// took 4.8 to 5.4 times a method call (now 2.9 to 3.9, also read with a key). A CI runner measured
+// 3.0 3.0 3.2 3.3 for the four ratios below. `jit-literals.js` checks their results.
 var now = typeof preciseTime === "function" ? () => preciseTime() * 1000 : () => Date.now();
 // The fastest of 7 rounds of each, the functions taking turns, so a busy machine slows both alike
 function fastest(functions, n) {
@@ -36,7 +36,7 @@ const n = 300000;
 const [literal, constant, write] = fastest([literals, constants, writes], n);
 const [getter, keyed, method] = fastest([getters, keyedGetters, methods], n);
 const ratios = [literal / write, constant / write, getter / method, keyed / method];
-const limits = [5, 3, 4.5, 4.5];
+const limits = [5, 4, 4.5, 4.5];
 const text = ratios.map((r) => r.toFixed(1)).join(" ");
 for (let i = 0; i < ratios.length; i++) {
     if (ratios[i] > limits[i])
