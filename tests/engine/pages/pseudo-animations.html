@@ -1,0 +1,140 @@
+<!doctype html>
+<title>Pseudo-element animations</title>
+<!-- Animation frames of a ::before or ::after (patch 0181): the element and its animated pseudo-element
+     keep their style before animations as the base of animation-only updates, like an animated
+     element, instead of matching all their rules again every frame (edition.cnn.com pulses the
+     ::after of its ad slots). Every frame must give the same computed style as a fresh style, also
+     when the element's own animation changes what the pseudo-element inherits, when the pseudo-element
+     animation ends, when a rule overrides an animated property with !important and when a class
+     change gives the pseudo-element new rules between frames. -->
+<style>
+  *, ::before, ::after { box-sizing: inherit; }
+  html { box-sizing: border-box; }
+  body { margin: 0; font: 12px sans-serif; }
+  .slot { position: relative; height: 20px; color: rgb(10, 20, 30); background-color: rgb(1, 2, 3); }
+  .slot::after { content: ""; display: block; height: 4px; opacity: 0.75; background-color: rgb(200, 200, 200); }
+  .slot.inherits::after { background-color: inherit; }
+  .slot.important::after { opacity: 0.5 !important; }
+  .slot.big::after { height: 9px; outline-style: solid; }
+  .slot.flip { outline-offset: 1px; }
+  @keyframes fade { from { opacity: 1; } to { opacity: 0; } }
+  .slot.css::after { animation: fade 10s linear infinite paused; }
+</style>
+<div id="cases">
+  <div class="slot" id="plain">plain</div>
+  <div class="slot" id="colored">colored</div>
+  <div class="slot inherits" id="inheriting">inheriting</div>
+  <div class="slot" id="ending">ending</div>
+  <div class="slot important" id="important">important</div>
+  <div class="slot" id="growing">growing</div>
+  <div class="slot css" id="css">css</div>
+</div>
+<div id="many"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const results = [];
+const properties = ['box-sizing', 'height', 'color', 'background-color', 'opacity', 'outline-style', 'outline-offset'];
+const watched = () => [...document.querySelectorAll('#cases > .slot')];
+const snapshot = () => watched().flatMap((element) => [null, '::after'].map((pseudo) => {
+  const style = getComputedStyle(element, pseudo);
+  return `${element.id}${pseudo || ''}:${properties.map((name) => style.getPropertyValue(name)).join(',')}`;
+}));
+// A fresh style: every watched element is styled again from nothing (animations of the Web Animations
+// API keep running, the paused CSS animation is set back to its time)
+const fresh = () => {
+  const cssTime = $('css').getAnimations({ subtree: true })[0]?.currentTime;
+  $('cases').style.display = 'none';
+  $('cases').getBoundingClientRect();
+  $('cases').style.display = '';
+  $('cases').getBoundingClientRect();
+  for (const animation of $('css').getAnimations({ subtree: true })) animation.currentTime = cssTime;
+  return snapshot();
+};
+const compare = (name) => {
+  document.body.offsetHeight;
+  const incremental = snapshot();
+  const expected = fresh();
+  const index = incremental.findIndex((value, i) => value !== expected[i]);
+  if (index >= 0) {
+    results.push(name);
+    console.log(`PSEUDOANIM differ ${name}: ${incremental[index]} / ${expected[index]}`);
+  }
+};
+const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+const pseudoAnimation = (element, keyframes) => {
+  const animation = element.animate(keyframes, { pseudoElement: '::after', duration: 100000 });
+  animation.pause();
+  return animation;
+};
+
+addEventListener('load', async () => {
+  fresh();
+  const animations = [
+    pseudoAnimation($('plain'), { backgroundColor: ['rgb(38, 38, 38)', 'rgb(64, 64, 64)'], opacity: [1, 0.4] }),
+    pseudoAnimation($('colored'), { opacity: [1, 0.2] }),
+    pseudoAnimation($('inheriting'), { opacity: [1, 0.3] }),
+    pseudoAnimation($('ending'), { opacity: [0, 1], height: ['1px', '8px'] }),
+    pseudoAnimation($('important'), { opacity: [0, 1], backgroundColor: ['rgb(0, 0, 0)', 'rgb(0, 0, 100)'] }),
+    pseudoAnimation($('growing'), { backgroundColor: ['rgb(0, 50, 0)', 'rgb(0, 250, 0)'] }),
+  ];
+  // The element's own animation changes an inherited property, or one the ::after inherits explicitly
+  const colored = $('colored').animate({ color: ['rgb(0, 0, 0)', 'rgb(250, 0, 0)'] }, 100000);
+  colored.pause();
+  const inheriting = $('inheriting').animate({ backgroundColor: ['rgb(0, 0, 0)', 'rgb(0, 0, 250)'] }, 100000);
+  inheriting.pause();
+  for (const time of [10000, 30000, 50000, 70000]) {
+    for (const animation of animations) animation.currentTime = time;
+    $('css').getAnimations({ subtree: true })[0].currentTime = time / 10;
+    if (time === 50000) colored.currentTime = inheriting.currentTime = 40000;
+    // Only the pseudo-element animations move: the element keeps its animated style
+    await frame();
+    compare(`pseudo-element animations at ${time / 1000} s`);
+    if (time === 30000) {
+      $('growing').classList.add('big');
+      compare('new ::after rules of a class between frames');
+    }
+  }
+  if (Math.abs(Number(getComputedStyle($('css'), '::after').opacity) - 0.3) > 0.01)
+    results.push(`css animation opacity ${getComputedStyle($('css'), '::after').opacity}`);
+  animations[3].cancel();
+  await frame();
+  compare('the ::after animation ended');
+  colored.cancel();
+  await frame();
+  compare('the element animation ended');
+  measure();
+  await frame();
+  console.log(`PSEUDOANIM done=${results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'}`);
+});
+
+// Costs: an animation frame of the ::after of 200 elements, each matched against 600 rules like those
+// of a large site, against a class change of the 200 elements that styles them and their ::after again
+// The fastest of 27 runs, the least disturbed by other work of the engine
+function fastest(run) {
+  const times = [];
+  for (let i = 0; i < 27; i++) {
+    document.body.offsetHeight;
+    const start = performance.now();
+    run(i);
+    document.body.offsetHeight;
+    times.push(performance.now() - start);
+  }
+  return Math.min(...times);
+}
+function measure() {
+  const rules = document.createElement('style');
+  rules.textContent = Array.from({ length: 300 }, (_, i) => `#many > div:nth-child(300n + ${i}) { padding-top: ${i % 3}px; }\n#many > .slot:nth-child(300n + ${i})::after { margin-top: ${i % 2}px; }`).join('\n');
+  document.head.append(rules);
+  $('many').innerHTML = Array.from({ length: 200 }, (_, i) => `<div class="slot">${i}</div>`).join('');
+  document.body.offsetHeight;
+  const slots = [...$('many').children];
+  const pulses = slots.map((slot) => pseudoAnimation(slot, { backgroundColor: ['rgb(38, 38, 38)', 'rgb(64, 64, 64)'], opacity: [1, 0.4] }));
+  document.body.offsetHeight;
+  const step = (i) => { for (const pulse of pulses) pulse.currentTime = 1000 + (i % 50) * 1000; };
+  fastest(step);
+  const frameCost = fastest(step);
+  const restyle = fastest(() => { for (const slot of slots) slot.classList.toggle('flip'); });
+  console.log(`PSEUDOANIM frame=${frameCost.toFixed(2)}ms restyle=${restyle.toFixed(2)}ms`);
+  if (frameCost / restyle > 0.3) results.push(`a ::after animation frame costs ${Math.round((frameCost / restyle) * 100)}% of restyling its elements`);
+}
+</script>

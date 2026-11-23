@@ -1,0 +1,135 @@
+diff --git a/Source/WebCore/style/StyleTreeResolver.cpp b/Source/WebCore/style/StyleTreeResolver.cpp
+index e81de3811a..9f0e60f675 100644
+--- a/Source/WebCore/style/StyleTreeResolver.cpp
++++ b/Source/WebCore/style/StyleTreeResolver.cpp
+@@ -416,12 +416,22 @@ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle*
+         // browser-lite: new fonts give no ::before or ::after a box it did not have.
+         if (resolutionType == ResolutionType::FontUpdate && isBeforeOrAfter && !existingPseudoStyle)
+             return OptionSet<Change> { };
+-        if (resolutionType == ResolutionType::AnimationOnly && isBeforeOrAfter && animationLeavesPseudoElementStyle(element, pseudoElementIdentifier, existingStyle, existingPseudoStyle, *update.style)) {
+-            if (existingPseudoStyle)
+-                update.style->addPseudoElementStyle(Style::ComputedStyle::clonePtr(*existingPseudoStyle));
+-            return OptionSet<Change> { };
++        // browser-lite: in an animation-only update a ::before or ::after that is not animated, and was not
++        // at its last style (whose style would hold animated values), keeps its style; an animated one is
++        // resolved from its style before animations, like an animated element (styleForStyleable).
++        const Style::ComputedStyle* animationBaseStyle = nullptr;
++        if (resolutionType == ResolutionType::AnimationOnly && isBeforeOrAfter) {
++            Styleable pseudoElement { element, pseudoElementIdentifier };
++            auto* baseStyle = pseudoElement.lastStyleChangeEventStyle();
++            if (!baseStyle && !pseudoElement.hasKeyframeEffects() && animationLeavesPseudoElementBase(element, pseudoElementIdentifier, existingStyle, existingPseudoStyle, *update.style)) {
++                if (existingPseudoStyle)
++                    update.style->addPseudoElementStyle(Style::ComputedStyle::clonePtr(*existingPseudoStyle));
++                return OptionSet<Change> { };
++            }
++            if (baseStyle && !pseudoElement.hasPropertiesOverridenAfterAnimation() && animationLeavesPseudoElementBase(element, pseudoElementIdentifier, existingStyle, baseStyle, *update.style))
++                animationBaseStyle = baseStyle;
+         }
+-        auto pseudoElementUpdate = resolvePseudoElement(element, pseudoElementIdentifier, update, parent().isInDisplayNoneTree, existingPseudoStyle);
++        auto pseudoElementUpdate = resolvePseudoElement(element, pseudoElementIdentifier, update, parent().isInDisplayNoneTree, existingPseudoStyle, animationBaseStyle);
+ 
+         auto pseudoElementChanges = [&]() -> OptionSet<Change> {
+             if (pseudoElementUpdate) {
+@@ -501,7 +511,7 @@ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle*
+     return { WTF::move(update), descendantsToResolve };
+ }
+ 
+-std::optional<ElementUpdate> TreeResolver::resolvePseudoElement(Element& element, const PseudoElementIdentifier& pseudoElementIdentifier, const ElementUpdate& elementUpdate, IsInDisplayNoneTree isInDisplayNoneTree, const Style::ComputedStyle* existingStyle)
++std::optional<ElementUpdate> TreeResolver::resolvePseudoElement(Element& element, const PseudoElementIdentifier& pseudoElementIdentifier, const ElementUpdate& elementUpdate, IsInDisplayNoneTree isInDisplayNoneTree, const Style::ComputedStyle* existingStyle, const Style::ComputedStyle* animationBaseStyle)
+ {
+     ASSERT(pseudoElementIdentifier.type != PseudoElementType::UserAgentPartFallback);
+ 
+@@ -589,7 +599,9 @@ std::optional<ElementUpdate> TreeResolver::resolvePseudoElement(Element& element
+         if (pseudoSupportsPositionTry)
+             resolvedStyle = tryChoosePositionOption(styleable, resolutionContext);
+ 
+-        if (!resolvedStyle) {
++        if (!resolvedStyle && animationBaseStyle)
++            resolvedStyle = ResolvedStyle { Style::ComputedStyle::clonePtr(*animationBaseStyle) };
++        else if (!resolvedStyle) {
+             // browser-lite: no style for a ::before or ::after that generates no box, unless an
+             // animation of the Web Animations API targets it (it may keep the pseudo-element).
+             auto isBeforeOrAfter = pseudoElementIdentifier.type == PseudoElementType::Before || pseudoElementIdentifier.type == PseudoElementType::After;
+@@ -937,7 +949,12 @@ ElementUpdate TreeResolver::createAnimatedElementUpdate(ResolvedStyle&& resolved
+ 
+         if (!styleable.hasKeyframeEffects()) {
+             // FIXME: Push after-change style into parent stack instead.
+-            styleable.setLastStyleChangeEventStyle(resolveAfterChangeStyleForNonAnimated(resolvedStyle, styleable, resolutionContext));
++            auto afterChangeStyle = resolveAfterChangeStyleForNonAnimated(resolvedStyle, styleable, resolutionContext);
++            // browser-lite: an element whose ::before or ::after is animated keeps its style as the base of
++            // their animation-only updates (styleForStyleable), instead of matching all its rules every frame.
++            if (!afterChangeStyle && !styleable.pseudoElementIdentifier && (element->hasKeyframeEffects(PseudoElementIdentifier { PseudoElementType::Before }) || element->hasKeyframeEffects(PseudoElementIdentifier { PseudoElementType::After })))
++                afterChangeStyle = Style::ComputedStyle::clonePtr(*resolvedStyle.style);
++            styleable.setLastStyleChangeEventStyle(WTF::move(afterChangeStyle));
+             styleable.setHasPropertiesOverridenAfterAnimation(false);
+             return { WTF::move(resolvedStyle.style), OptionSet<AnimationImpact> { } };
+         }
+@@ -1401,7 +1418,7 @@ bool TreeResolver::explicitlyInheritedPropertiesMayChange(const Element& element
+         return parent.changedProperties.get(property);
+     };
+     for (auto& inheritance : scope().resolver->ruleSets().features().explicitInheritances) {
+-        if (subjectMayMatch(inheritance.selector(), element) && propertyChanged(inheritance.property))
++        if (propertyChanged(inheritance.property) && subjectMayMatch(inheritance.selector(), element))
+             return true;
+     }
+ 
+@@ -1423,26 +1440,29 @@ bool TreeResolver::explicitlyInheritedPropertiesMayChange(const Element& element
+     return false;
+ }
+ 
+-// browser-lite: an animation of an element that changes none of its inherited properties leaves the style of
+-// its ::before and ::after as it was, unless a rule for them may set a changed property to `inherit`;
+-// a pseudo-element that generated no box still generates none.
+-bool TreeResolver::animationLeavesPseudoElementStyle(const Element& element, const PseudoElementIdentifier& pseudoElementIdentifier, const Style::ComputedStyle* existingStyle, const Style::ComputedStyle* existingPseudoStyle, const Style::ComputedStyle& newStyle)
++// browser-lite: an animation-only update of an element that changes none of its inherited properties
++// leaves the style of its ::before and ::after before their animations (pseudoStyle) as it was, unless a
++// rule for them may set a changed property to `inherit`; a pseudo-element that generated no box still
++// generates none.
++bool TreeResolver::animationLeavesPseudoElementBase(const Element& element, const PseudoElementIdentifier& pseudoElementIdentifier, const Style::ComputedStyle* existingStyle, const Style::ComputedStyle* pseudoStyle, const Style::ComputedStyle& newStyle)
+ {
+     if (!existingStyle || newStyle.display() == DisplayType::None)
+         return false;
+-    if (element.isInShadowTree() || element.shadowRoot() || element.hasKeyframeEffects(pseudoElementIdentifier))
++    if (element.isInShadowTree() || element.shadowRoot())
+         return false;
+     auto changes = determineChanges(*existingStyle, newStyle);
+     if (changes.containsAny({ Change::Inherited, Change::FastPathInherited, Change::Renderer, Change::Container }))
+         return false;
+-    if (!existingPseudoStyle)
++    if (!pseudoStyle)
+         return true;
+-    if (existingPseudoStyle->usesAnchorFunctions() || existingPseudoStyle->isContainerDependent())
++    if (pseudoStyle->usesAnchorFunctions() || pseudoStyle->isContainerDependent())
+         return false;
+-    if (!existingPseudoStyle->hasExplicitlyInheritedProperties())
++    if (!pseudoStyle->hasExplicitlyInheritedProperties())
+         return true;
+     if (!(existingStyle->nonInheritedCustomProperties() == newStyle.nonInheritedCustomProperties()))
+         return false;
++    if (!changes.contains(Change::NonInherited))
++        return true;
+     auto pseudoElement = pseudoElementIdentifier.type == PseudoElementType::Before ? CSSSelector::PseudoElement::Before : CSSSelector::PseudoElement::After;
+     for (auto& inheritance : scope().resolver->ruleSets().features().explicitInheritances) {
+         if (subjectMayMatch(inheritance.selector(), element, pseudoElement) && propertyMayDiffer(inheritance.property, *existingStyle, newStyle, m_document.get()))
+diff --git a/Source/WebCore/style/StyleTreeResolver.h b/Source/WebCore/style/StyleTreeResolver.h
+index 9a56095c88..fad53c1ac4 100644
+--- a/Source/WebCore/style/StyleTreeResolver.h
++++ b/Source/WebCore/style/StyleTreeResolver.h
+@@ -106,7 +106,7 @@ private:
+ 
+     HashSet<AnimatableCSSProperty> applyCascadeAfterAnimation(Style::ComputedStyle&, const HashMap<AnimatableCSSProperty, EnumSet<PropertyCascade::AnimationSource>>&, const MatchResult&, const Element&, const ResolutionContext&);
+ 
+-    std::optional<ElementUpdate> resolvePseudoElement(Element&, const PseudoElementIdentifier&, const ElementUpdate&, IsInDisplayNoneTree, const Style::ComputedStyle*);
++    std::optional<ElementUpdate> resolvePseudoElement(Element&, const PseudoElementIdentifier&, const ElementUpdate&, IsInDisplayNoneTree, const Style::ComputedStyle*, const Style::ComputedStyle* animationBaseStyle = nullptr);
+     std::optional<ElementUpdate> resolveAncestorPseudoElement(Element&, const PseudoElementIdentifier&, const ElementUpdate&);
+     std::optional<ResolvedStyle> resolveAncestorFirstLinePseudoElement(Element&, const ElementUpdate&);
+     std::optional<ResolvedStyle> resolveAncestorFirstLetterPseudoElement(Element&, const ElementUpdate&, ResolutionContext&);
+@@ -174,7 +174,7 @@ private:
+     std::optional<ResolutionType> resolutionTypeAfterFontChange(const Element&, const Style::ComputedStyle*, std::optional<ResolutionType>) const;
+     void resetDescendantStyleRelations(Element&, DescendantsToResolve);
+     bool explicitlyInheritedPropertiesMayChange(const Element&, Parent&);
+-    bool animationLeavesPseudoElementStyle(const Element&, const PseudoElementIdentifier&, const Style::ComputedStyle* existingStyle, const Style::ComputedStyle* existingPseudoStyle, const Style::ComputedStyle& newStyle);
++    bool animationLeavesPseudoElementBase(const Element&, const PseudoElementIdentifier&, const Style::ComputedStyle* existingStyle, const Style::ComputedStyle* pseudoStyle, const Style::ComputedStyle& newStyle);
+ 
+     ResolutionContext makeResolutionContext();
+     ResolutionContext makeResolutionContextForPseudoElement(const ElementUpdate&, const PseudoElementIdentifier&);

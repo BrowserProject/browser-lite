@@ -104,6 +104,12 @@
 //                  check-frame-restyles.mjs: the updated clones paint like new ones; a transform
 //                  next to 3000 children costs a fraction of restyling them, attributes of 5 cloned
 //                  paths a fraction of cloning again
+//   pseudo-animations.html  animation frames of a ::before or ::after (patch 0181): the element and
+//                  its animated pseudo-element are resolved from their styles before animations: same
+//                  computed style as a fresh style, also when the element's own animation changes
+//                  what the pseudo-element inherits, after the animation ended, with an !important
+//                  rule and a class change between frames; a frame of 200 pulsing ::after costs a
+//                  fraction of restyling their elements
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -152,6 +158,7 @@ const CASES = [
     wait: 'FRAMERESTYLES done',
     check: 'check-frame-restyles.mjs',
   },
+  { name: 'pseudo-animations', size: [400, 600], wait: 'PSEUDOANIM done' },
   { name: 'select-styles', size: [400, 220], check: 'check-select-styles.mjs' },
   {
     name: 'form-controls',

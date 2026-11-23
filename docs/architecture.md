@@ -135,7 +135,13 @@ child that inherits any property explicitly, and the reset rule
 `*, ::before, ::after { box-sizing: inherit }` makes that every element, with all its rule matching
 and pseudo-elements. The same holds for the `::before` and `::after` of an element whose animation
 changes only non-inherited properties: they keep their style instead of matching their rules every
-frame. A child without a box stays without one (only its display could change that, and a change of
+frame. A `::before` or `::after` that is animated itself (a pulsing placeholder) and its element
+keep their styles before animations as the base of animation frames, like an animated element in
+WebKit: a frame applies the animations to a copy of the base. WebKit kept no base for an element
+without animations of its own and did not use the one of a pseudo-element, so every frame matched
+all rules of both (edition.cnn.com, its ad slots); and a `::before` or `::after` whose animation
+had just ended kept its last animated values until the next full style (patch 0181, #650). A
+child without a box stays without one (only its display could change that, and a change of
 the parent's display restyles all children). Selectors on the style attribute
 (`[style*=...]`) are invalidated like those of any attribute, so an inline style change keeps its
 fast path (WebKit matched all rules of the element again whenever a sheet had such a selector).

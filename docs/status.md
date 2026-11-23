@@ -1196,13 +1196,20 @@ browser (Safari keeps Cmd+L, T and W for itself).
    duolingo.com: style 0.09 instead of 0.21 to 0.22 s per 3 s, `setAttribute` 0.38 to 0.40 s per
    10 s (path parsing), but Lottie's JS takes about two thirds of the engine thread and a rAF loop
    fills what a frame saves: renderer 0.83 to 0.90 instead of 0.91 to 0.95 cores (Chromium 0.09 to
-   0.25). edition.cnn.com: unchanged, 0.94 to 1.06 s of style per 3 s and 1.75 to 1.86 cores; its
-   11 animated elements are animation-only updates that still match all their rules every frame
-   (WebKit falls back to full matching when the cascade overrides an animated property or no base
-   style was kept), next to the host decoding its videos. Not reached: webflow under 0.15 s of
-   style per 3 s and 0.3 cores, duolingo under 0.45 cores, cnn under 1.2 cores. Next: a compositing
-   update that skips the layers after a moved composited layer whose clipped overlap bounds stayed,
-   a kept base style for animation-only updates, and faster JS for Lottie (see 1.).
+   0.25). Not reached: webflow under 0.15 s of style per 3 s and 0.3 cores, duolingo under 0.45
+   cores. Next: a compositing update that skips the layers after a moved composited layer whose
+   clipped overlap bounds stayed, and faster JS for Lottie (see 1.).
+   edition.cnn.com pulses the `::after` of 6 ad slots (`ad-loading-light` and `ad-loading-dark`,
+   background color and opacity) next to a spinning loader; each frame matched all rules of the slots and their
+   `::after` (WebKit keeps no base style for an element whose pseudo-element alone is animated
+   and does not use the one of the pseudo-element). Patch 0181 (#650) keeps both as the base of
+   animation frames (2026-11-23, local, Chromium host 1280x800, profile of the 20 s after the
+   first 45 s, 2 interleaved runs, loaded machine): style 11.7 to 15.0 % of the engine thread's
+   busy time instead of 50.1 to 50.3 % (1.07 to 1.17 s per 20 s instead of 4.6 to 5.1 s),
+   `SelectorChecker::matchRecursively` none instead of 0.63 to 0.75 s per 10 s. The renderer
+   idled at 2.69 to 2.84 cores against 2.83 to 2.96 before and 2.87 to 3.10 for plain Chromium:
+   that day CNN's playing videos took most of it in both (on 2026-11-21 plain Chromium 1.19 to
+   1.23). What the engine thread still does: painting the frames (about a third) and layout.
 6. Images drawn small still decode at full size unless they are JPEGs or still WebPs (#270,
    #286): PNG, AVIF, GIF and animated WebP decoders ignore the subsampling level. A JPEG also
    decodes at full size for `img.decode()`, WebGL, `createImageBitmap`, `createPattern` and
