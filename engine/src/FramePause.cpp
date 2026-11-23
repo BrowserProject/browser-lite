@@ -21,7 +21,8 @@
 // frame's script and loads go on (#628).
 //
 // Input of the user waits for the paused script when it would reach a paused frame (the focus is
-// in one, it lands in one or the pointer leaves one): the pause ends, the script goes on and the
+// in one, it lands in one, the pointer leaves one or the finger of a touch went down in one; only
+// a finger going down is hit tested): the pause ends, the script goes on and the
 // input runs after it, in order with later input of its view, like input to a busy frame in
 // Chrome. A paused frame whose document goes away meanwhile (its page navigates, the frame is
 // removed) stops its script once it goes on, as Chrome drops the work of a frame it leaves.
@@ -292,7 +293,7 @@ static bool hitsPausedFrame(WebView& view, const DoublePoint& point)
     return node && &node->document().windowEventLoop() == s_paused->eventLoop.ptr();
 }
 
-bool inputWaitsForPausedFrame(WebView& view, std::span<const DoublePoint> points)
+bool inputWaitsForPausedFrame(WebView& view, std::span<const DoublePoint> points, PointerReach reach)
 {
     auto last = view.lastPointerPoint();
     if (!points.empty())
@@ -307,10 +308,14 @@ bool inputWaitsForPausedFrame(WebView& view, std::span<const DoublePoint> points
         debugLog("View %d: the focus is in a paused frame", view.id());
         return true;
     }
-    if (points.empty())
-        return false;
-    // Leaving a paused frame, the pointer's events go to it too
-    bool reaches = last && hitsPausedFrame(view, *last);
+    bool reaches = false;
+    if (reach == PointerReach::Touch) {
+        for (auto& document : view.touchDocuments())
+            reaches = reaches || &document->windowEventLoop() == s_paused->eventLoop.ptr();
+    } else if (!points.empty()) {
+        // Leaving a paused frame, the pointer's events go to it too
+        reaches = last && hitsPausedFrame(view, *last);
+    }
     for (size_t i = 0; !reaches && i < points.size(); ++i)
         reaches = hitsPausedFrame(view, points[i]);
     if (reaches)

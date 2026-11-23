@@ -1,0 +1,22 @@
+diff --git a/Source/WebCore/page/EventHandler.cpp b/Source/WebCore/page/EventHandler.cpp
+index 64ae6f2d35..596446ea68 100644
+--- a/Source/WebCore/page/EventHandler.cpp
++++ b/Source/WebCore/page/EventHandler.cpp
+@@ -5645,6 +5645,17 @@ Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(co
+         RefPtr<EventTarget> pointerTarget = touchTarget;
+ 
+         if (pointState != PlatformTouchPoint::TouchPressed) {
++#if PLATFORM(WASM)
++            // browser-lite: like the spec (firing events using the PointerEvent interface) the
++            // pending capture becomes the capture before the target is chosen. A finger is
++            // captured implicitly by its pointerdown target, so its moves, release and cancel go
++            // there without a hit test, which brought a loading page's style and layout forward
++            // at every move and release; the first move went to the element under the finger.
++            protect(document->page())->pointerCaptureController().processPendingPointerCapture(PointerEvent::pointerIdForTouchPoint(point));
++            // Its gotpointercapture and lostpointercapture listeners may have removed the frame
++            if (!document->frame() || !document->page())
++                continue;
++#endif
+             pointerTarget = protect(document->page())->pointerCaptureController().pointerCaptureElement(document.ptr(), PointerEvent::pointerIdForTouchPoint(point));
+ 
+             if (!pointerTarget) {

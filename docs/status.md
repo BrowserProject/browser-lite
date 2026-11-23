@@ -778,12 +778,26 @@ browser (Safari keeps Cmd+L, T and W for itself).
    universal key, so every change of the chain traversed the whole document from its top:
    `Document::updateHoverActiveState` took a median of 19 to 20 ms, 8.3 to 10.8 s in all. Patch
    0174 (#641) keys it on the compound around the `:is()`: now 0 to 1 ms, 0.37 to 0.44 s in all;
-   `WebView::touchEvent` a median of 21 to 27 ms instead of 50 to 61 ms. Open: the rest of a touch
-   is the style and layout of the loading page that its first hit test (the `touch-action` at the
-   point) brings forward, 3.7 to 8.1 s per run against 4.7 to 6.2 s before (the page's work, not
-   the touch's); the load event came after 50.4 to 60.1 s against 51.2 to 72.0 s (5 interleaved
-   runs without profile, medians 54.9 and 54.6 s, within the noise; Chromium 10 s). The criterion
-   (touches under 15 ms, that style under 2 s, the load under 55 s) is not reached.
+   `WebView::touchEvent` a median of 21 to 27 ms instead of 50 to 61 ms. A touch probe (a
+   press and its cancel) hit tested two to four times, each bringing the loading page's style and
+   layout forward: the check for a paused frame, the `touch-action` at the point, and for the
+   cancel, release or move the target of its pointer event, after `:active` had changed (style,
+   then a compositing update of the whole page). Now only a finger that goes down hit tests (#649,
+   patch 0180): its later pointer events go to its pointerdown target, which captures the pointer
+   like in Chrome, and the paused frame check of a touch looks at the documents its fingers went
+   down in. 2026-11-23 (same setup, 3 interleaved runs each, against the build before): with CPU
+   profile, style and layout brought forward by touches 3.0 to 5.5 s per load against 3.3 to 9.0 s
+   (`handleTouchEvent` none instead of 1.6 to 2.1 s), `WebView::touchEvent` a median of 10 to 12 ms
+   against 18 to 19 ms; without profile the load event after 43.3 to 47.7 s against 44.1 to 46.8 s
+   (medians 44.1 and 45.1 s) and the probes answered after a median of 419 to 576 ms against 564
+   to 656 ms (p90 2.2 to 2.6 s against 2.7 to 3.7 s). nzz.ch's tap phase (2 runs each): style and
+   layout forced by probes 0.3 and 2.4 s (one press 1.4 s) against 0.9 and 0.5 s, hit tests 2.0
+   and 4.9 s against 4.3 and 3.9 s. Open: a press still brings the page's pending style and layout
+   forward, since its touchstart needs an up-to-date hit test (Chrome's too; the work then misses
+   from the next frame), and it hit tests twice on that layout (`touch-action` with the paused
+   frame check, then the touchstart's own; about 3 ms each on nzz.ch at a fourth of the CPU). The
+   criterion (all touch work of a load under 3 s, the load under 50 s with profile) is not
+   reached: what is left is the page's work that a press needs.
    blick.ch (Next.js, 2026-11-09, local, 412x860; the report: 25 to 30 s on a Moto G71): after a
    tap the new route is in the DOM after 7 to 8 s (plain Chromium 3.5 to 6.6 s with the data
    fetch), Back shows the home page after 5 to 7.5 s (Chromium under 1 s). The page got few frames

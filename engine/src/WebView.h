@@ -34,12 +34,14 @@ namespace WebCore {
 enum class PointerLockRequestResult : uint8_t;
 class FileChooser;
 class GraphicsLayer;
+class Document;
 class GraphicsLayerFactory;
 class HitTestResult;
 class LocalFrame;
 class LocalFrameView;
 class Page;
 class ScrollingCoordinator;
+class WeakPtrImplWithEventTargetData;
 }
 
 namespace BrowserLite {
@@ -184,8 +186,10 @@ public:
     // Answer/end from the host: false = not granted or lost (Esc)
     void pointerLockResult(bool locked);
 #endif
-    // The points of touchEvent's JSON, on any thread
-    static Vector<WebCore::DoublePoint> touchPoints(const String& json);
+    // The points of touchEvent's JSON where a finger goes down, on any thread
+    static Vector<WebCore::DoublePoint> pressedTouchPoints(const String& json);
+    // The documents the fingers that are down went down in: their events go there (FramePause.h)
+    Vector<Ref<WebCore::Document>> touchDocuments() const;
     void touchEvent(int type, const String& pointsJSON, int modifiers, bool tap);
     // Every keydown is answered with "key-result": handled false when the page did not handle it
     // (no preventDefault, no editing command, no default action like scrolling), for the host's
@@ -412,6 +416,7 @@ private:
     bool m_progressShown { false };
     // The finger that is down
     std::optional<WebCore::PointerID> m_touchPointer;
+    Vector<std::pair<WebCore::PointerID, WeakPtr<WebCore::Document, WebCore::WeakPtrImplWithEventTargetData>>> m_touchDocuments;
     // Where a long press asked for the context menu; it opens when the finger lifts
     std::optional<WebCore::DoublePoint> m_longPressMenu;
     std::optional<WebCore::DoublePoint> m_lastPointerPoint;

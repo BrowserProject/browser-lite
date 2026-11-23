@@ -1525,24 +1525,36 @@ struct TouchActions {
     bool pinchZoom { true };
 };
 
-TouchActions touchActionAt(LocalFrame& frame, DoublePoint point)
+// What a finger that goes down at the point reaches: the document its events go to until it
+// lifts, and the touch-action there. Its hit test brings the page's style and layout up to date,
+// which the touchstart's own hit test right after needs too: one forced update per touch.
+struct TouchStart {
+    RefPtr<Document> document;
+    TouchActions allowed;
+};
+
+TouchStart touchStartAt(LocalFrame& frame, DoublePoint point)
 {
-    static constexpr TouchActions all;
     RefPtr view = frame.view();
     if (!view)
-        return all;
+        return { };
     auto result = frame.eventHandler().hitTestResultAtPoint(LayoutPoint(view->windowToContents(flooredIntPoint(point))), { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::AllowChildFrameContent });
     RefPtr node = result.innerNode();
-    CheckedPtr renderer = node ? node->renderer() : nullptr;
+    if (!node)
+        return { };
+    TouchStart start { &node->document(), { } };
+    CheckedPtr renderer = node->renderer();
     if (!renderer)
-        return all;
+        return start;
     auto touchAction = renderer->style().usedTouchAction();
     if (touchAction.isAuto() || touchAction.isManipulation())
-        return all;
+        return start;
     auto values = touchAction.tryEnumSet();
     if (!values)
-        return { false, false, false };
-    return { values->contains(Style::TouchActionValue::PanX), values->contains(Style::TouchActionValue::PanY), values->contains(Style::TouchActionValue::PinchZoom) };
+        start.allowed = { false, false, false };
+    else
+        start.allowed = { values->contains(Style::TouchActionValue::PanX), values->contains(Style::TouchActionValue::PanY), values->contains(Style::TouchActionValue::PinchZoom) };
+    return start;
 }
 }
 #endif
@@ -1554,7 +1566,9 @@ TouchActions touchActionAt(LocalFrame& frame, DoublePoint point)
 // tap follows the end at once, in the same task like in a browser: otherwise the
 // page's reaction to the touch (Google opens its suggestions when the field gets
 // focus on touchend) was already there and took the click.
-Vector<DoublePoint> WebView::touchPoints(const String& json)
+// Only a finger that goes down is hit tested: the events of the others go where theirs went
+// (the touch target, the pointer captured by its pointerdown target, patch 0180), like in Chrome.
+Vector<DoublePoint> WebView::pressedTouchPoints(const String& json)
 {
     Vector<DoublePoint> points;
     auto value = JSON::Value::parseJSON(json);
@@ -1562,10 +1576,21 @@ Vector<DoublePoint> WebView::touchPoints(const String& json)
     if (!array)
         return points;
     for (auto& item : *array) {
-        if (auto point = item->asObject())
+        auto point = item->asObject();
+        if (point && point->getInteger("state"_s).value_or(0) == static_cast<int>(PlatformTouchPoint::State::TouchPressed))
             points.append({ point->getDouble("x"_s).value_or(0), point->getDouble("y"_s).value_or(0) });
     }
     return points;
+}
+
+Vector<Ref<Document>> WebView::touchDocuments() const
+{
+    Vector<Ref<Document>> documents;
+    for (auto& [pointer, document] : m_touchDocuments) {
+        if (document)
+            documents.append(*document);
+    }
+    return documents;
 }
 
 void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
@@ -1587,17 +1612,18 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
             continue;
         auto state = static_cast<PlatformTouchPoint::State>(std::clamp(point->getInteger("state"_s).value_or(0), 0, 4));
         DoublePoint position { point->getDouble("x"_s).value_or(0), point->getDouble("y"_s).value_or(0) };
-        if (state == PlatformTouchPoint::State::TouchPressed) {
-            auto here = touchActionAt(*frame, position);
-            allowed = { allowed.panX && here.panX, allowed.panY && here.panY, allowed.pinchZoom && here.pinchZoom };
-        }
         points.append(TouchPointWasm(point->getInteger("id"_s).value_or(0), state, position, ScreenGeometry::toScreen(m_id, position),
             { point->getDouble("rx"_s).value_or(1), point->getDouble("ry"_s).value_or(1) },
             static_cast<float>(point->getDouble("force"_s).value_or(0))));
         auto pointerId = PointerEvent::pointerIdForTouchPoint(points.last());
-        if (state == PlatformTouchPoint::State::TouchPressed)
+        if (state == PlatformTouchPoint::State::TouchPressed) {
+            auto start = touchStartAt(*frame, position);
+            allowed = { allowed.panX && start.allowed.panX, allowed.panY && start.allowed.panY, allowed.pinchZoom && start.allowed.pinchZoom };
+            m_touchDocuments.removeAllMatching([&](auto& entry) { return entry.first == pointerId; });
+            if (start.document)
+                m_touchDocuments.append({ pointerId, *start.document });
             m_touchPointer = pointerId;
-        else if ((state == PlatformTouchPoint::State::TouchReleased || state == PlatformTouchPoint::State::TouchCancelled) && m_touchPointer == pointerId)
+        } else if ((state == PlatformTouchPoint::State::TouchReleased || state == PlatformTouchPoint::State::TouchCancelled) && m_touchPointer == pointerId)
             m_touchPointer = std::nullopt;
         if (state == PlatformTouchPoint::State::TouchReleased) {
             released = position;
@@ -1628,8 +1654,10 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
             showPickerOfFocusedField(m_id, *page, FocusedPicker::DateTime);
     }
     // The pointer of a finger that lifted is gone (its state would stay forever otherwise)
-    for (auto id : ended)
+    for (auto id : ended) {
         frame->page()->pointerCaptureController().touchWithIdentifierWasRemoved(id);
+        m_touchDocuments.removeAllMatching([&](auto& entry) { return entry.first == id; });
+    }
     // The menu of a long press, once its finger lifted
     if (!m_touchPointer && m_longPressMenu) {
         auto position = *std::exchange(m_longPressMenu, std::nullopt);

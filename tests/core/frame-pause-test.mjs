@@ -7,12 +7,14 @@
 // is stopped when the page removes the frame meanwhile; a frame of the same site (one event loop
 // with the page) does not pause, its keys wait as before. Only a long task pauses: a frame that
 // runs a little script per animation frame keeps running while the user types next to it. While
-// the user keeps typing, a paused task still runs a slice every 500 ms.
+// the user keeps typing, a paused task still runs a slice every 500 ms. A finger that went down in
+// the frame lifts during a later task: its release waits for that task too, without a hit test.
 //
 //   node tests/core/frame-pause-test.mjs [engine-dir]
 import {
   canvasOrigin,
   check,
+  chromiumOnly,
   collect,
   finish,
   launch,
@@ -73,6 +75,8 @@ channel.port1.onmessage = () => {
   channel.port2.postMessage(0);
 };
 document.onmousedown = () => console.log('RESULT framedown=' + running + ':' + Date.now());
+document.onpointerdown = (e) => { if (e.pointerType === 'touch') console.log('RESULT framepress=' + running + ':' + Date.now()); };
+document.onpointerup = (e) => { if (e.pointerType === 'touch') console.log('RESULT framelift=' + running + ':' + Date.now()); };
 let observed = 0;
 new ResizeObserver(() => { if (observed++) console.log('RESULT resized=' + running + ':' + Date.now()); }).observe(document.documentElement);
 channel.port2.postMessage(0);
@@ -116,8 +120,8 @@ const all = (results, key) =>
     return match ? [match[1]] : [];
   });
 
-async function openPage(frame, report = 'task') {
-  const tab = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+async function openPage(frame, report = 'task', options = {}) {
+  const tab = await browser.newPage({ viewport: { width: 1000, height: 700 }, ...options });
   const results = collect(tab);
   check('host page starts', await openHost(tab, stack.app({ url: 'about:blank' })));
   await load(tab, `${siteURL}main?frame=${encodeURIComponent(frame)}`);
@@ -267,6 +271,37 @@ async function typeDuringTask(page, keys, interval = 150) {
     !removedReport && latency < 500,
     `report of the task ${removedReport}, next key ${latency} ms`,
   );
+  await page.tab.close();
+}
+
+// A finger goes down in the frame during a task and lifts during a later one: the press waits for
+// the first task, the release for the second (it goes to the frame the finger went down in)
+if (chromiumOnly('a touch into a paused frame (CDP Input.dispatchTouchEvent)')) {
+  const page = await openPage(crossSiteFrame, 'task', { hasTouch: true });
+  const cdp = await page.tab.context().newCDPSession(page.tab);
+  const point = { x: page.origin.x + 100, y: page.origin.y + 150 };
+  const pressTask = await inFrameTask(page.results);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+  const press = await page.results.wait('framepress', 20000);
+  const pressReport = await taskReport(page.results, pressTask);
+  check(
+    'cross-site frame: a finger going down in it during its task arrives right after the task',
+    press?.startsWith('false:') && pressReport && Number(press.split(':')[1]) >= pressReport.end,
+    `framepress ${press}, task ${JSON.stringify(pressReport)}`,
+  );
+  const liftTask = await inFrameTask(page.results);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  const lift = await page.results.wait('framelift', 20000);
+  const liftReport = await taskReport(page.results, liftTask);
+  check(
+    'cross-site frame: the finger lifting during its next task arrives right after that task',
+    lift?.startsWith('false:') &&
+      liftReport &&
+      Number(lift.split(':')[1]) >= liftReport.end &&
+      Number(lift.split(':')[1]) - liftReport.end < 500,
+    `framelift ${lift}, task ${JSON.stringify(liftReport)}`,
+  );
+  await cdp.detach();
   await page.tab.close();
 }
 

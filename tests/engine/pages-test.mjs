@@ -92,6 +92,10 @@
 //                  each press, cancel, release and tap gives the same computed style and geometry
 //                  as a fresh style, the states apply and clear as before, and a touch on a page
 //                  with 15000 more elements is less than 3 ms slower with these rules than without
+//   touch-targets.html  where a finger's pointer events go (patch 0180): its moves, release and
+//                  cancel go to its pointerdown target (implicit pointer capture), also when another
+//                  element came under the finger, its gotpointercapture before the first move; a page
+//                  that releases the capture gets the element under the finger
 //   frame-restyles.html  what an animation frame restyles on a page with `box-sizing: inherit` on
 //                  every element (patch 0175): a change of non-inherited properties restyles only
 //                  the children that may inherit one of them explicitly, an inline style keeps its
@@ -141,6 +145,7 @@ const CASES = [
   { name: 'canvas-text-fonts', wait: 'CANVASFONTS done' },
   { name: 'route-styles', size: [800, 600], wait: 'ROUTESTYLES done' },
   { name: 'hover-states', size: [400, 600], wait: 'HOVERSTATES done' },
+  { name: 'touch-targets', size: [400, 600], wait: 'TOUCHTARGETS done' },
   {
     name: 'frame-restyles',
     size: [600, 300],

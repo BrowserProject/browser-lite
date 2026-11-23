@@ -1,0 +1,85 @@
+<!doctype html>
+<title>Touch targets</title>
+<!-- Where the pointer events of a finger go (patch 0180). A finger is captured
+     by its pointerdown target (implicit pointer capture of the Pointer Events spec, as in Chrome),
+     so its moves, release and cancel go there without a hit test; before, each of them hit tested
+     and brought the style and layout of a loading page forward, and the first move went to the
+     element under the finger. A page that releases the capture gets the element under the finger
+     again. A hit test always brings style and layout up to date, so a move or cancel that goes to
+     A while B is under the finger brought nothing forward. -->
+<style>
+  body { margin: 0; font: 14px/18px sans-serif; }
+  .box { position: absolute; left: 0; width: 200px; height: 100px; }
+  #a { top: 0; background: rgb(200, 220, 255); }
+  #b { top: 100px; background: rgb(255, 220, 200); }
+</style>
+<div class="box" id="a">A</div>
+<div class="box" id="b">B</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const results = [];
+let events = [];
+for (const type of ['pointerdown', 'gotpointercapture', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture'])
+  addEventListener(type, (e) => events.push(`${e.type}:${e.target.id || e.target.nodeName}`), true);
+// Touch events too, so that WebCore dispatches them
+addEventListener('touchstart', () => {}, { passive: true });
+
+// The harness (render.mjs) sends the touch; the promise ends with the page's event of it
+const touch = (type, x, y, eventType) =>
+  new Promise((resolve) => {
+    addEventListener(eventType, () => setTimeout(resolve, 0), { once: true, capture: true });
+    console.log(`RENDER_TOUCH ${type} ${x} ${y}`);
+  });
+const place = (a, b) => {
+  $('a').style.top = `${a}px`;
+  $('b').style.top = `${b}px`;
+};
+// The pointerdown of the next press swaps the boxes: then B is under the finger
+const swapOnPress = (release = false) =>
+  addEventListener('pointerdown', (e) => {
+    if (release) $('a').releasePointerCapture(e.pointerId);
+    place(100, 0);
+  }, { once: true });
+const expectEvent = (name, type, wanted) => {
+  const found = events.find((event) => event.startsWith(`${type}:`));
+  if (found !== `${type}:${wanted}`) results.push(`${name}:${found || `no_${type}`}_not_${type}:${wanted}`);
+};
+
+async function targets() {
+  // Press on A, move and release over B: both go to A, its capture before the move
+  place(0, 100);
+  events = [];
+  swapOnPress();
+  await touch('start', 50, 50, 'pointerdown');
+  await touch('move', 50, 60, 'pointermove');
+  await touch('end', 50, 60, 'pointerup');
+  expectEvent('move', 'pointermove', 'a');
+  expectEvent('release', 'pointerup', 'a');
+  const got = events.indexOf('gotpointercapture:a');
+  if (got < 0 || got > events.findIndex((event) => event.startsWith('pointermove:')))
+    results.push(`capture_after_move:${events.join(',')}`);
+  console.log(`TOUCHTARGETS events ${events.join(' ')}`);
+
+  // Press on A, cancel over B: the cancel goes to A
+  place(0, 100);
+  events = [];
+  swapOnPress();
+  await touch('start', 50, 50, 'pointerdown');
+  await touch('cancel', 50, 50, 'pointercancel');
+  expectEvent('cancel', 'pointercancel', 'a');
+
+  // The page releases the capture in its pointerdown: the move goes to what is under the finger
+  place(0, 100);
+  events = [];
+  swapOnPress(true);
+  await touch('start', 50, 50, 'pointerdown');
+  await touch('move', 50, 60, 'pointermove');
+  await touch('end', 50, 60, 'pointerup');
+  expectEvent('released capture', 'pointermove', 'b');
+}
+
+addEventListener('load', async () => {
+  await targets();
+  console.log(`TOUCHTARGETS done=${results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'}`);
+});
+</script>

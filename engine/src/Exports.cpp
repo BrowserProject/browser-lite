@@ -151,13 +151,13 @@ static void closeMove(int id)
 
 // Input for a view: dropped while a dialog of its page group is open, like Chrome. Hidden views
 // wait while the user works in a visible one (HiddenViews.h). Input that reaches a paused frame
-// waits for its script (FramePause.h); points: where a pointer input lands.
+// waits for its script (FramePause.h); points and reach: where a pointer input lands.
 // `dropped` runs instead when there is no such view or a dialog blocks it.
 template<typename Function, typename Dropped = void (*)()>
-static void withInput(int id, Function&& function, UserInput input = UserInput::Other, Dropped&& dropped = [] { }, Vector<WebCore::DoublePoint>&& points = { })
+static void withInput(int id, Function&& function, UserInput input = UserInput::Other, Dropped&& dropped = [] { }, Vector<WebCore::DoublePoint>&& points = { }, PointerReach reach = PointerReach::Hover)
 {
     closeMove(id);
-    runUrgentOnEngineThread([id, input, function = std::forward<Function>(function), dropped = std::forward<Dropped>(dropped), points = WTF::move(points)]() mutable {
+    runUrgentOnEngineThread([id, input, function = std::forward<Function>(function), dropped = std::forward<Dropped>(dropped), points = WTF::move(points), reach]() mutable {
         auto* view = WebView::fromID(id);
         if (!view || view->isBlockedByDialog()) {
             dropped();
@@ -165,7 +165,7 @@ static void withInput(int id, Function&& function, UserInput input = UserInput::
         }
         if (view->isVisible())
             userWorksInVisibleView(input);
-        if (inputWaitsForPausedFrame(*view, points)) {
+        if (inputWaitsForPausedFrame(*view, points, reach)) {
             holdInputForPausedFrame(*view, WTF::move(function), WTF::move(dropped));
             return;
         }
@@ -175,9 +175,9 @@ static void withInput(int id, Function&& function, UserInput input = UserInput::
 
 // Input of a pointer at these points of the view
 template<typename Function>
-static void withPointerInput(int id, Vector<WebCore::DoublePoint>&& points, Function&& function)
+static void withPointerInput(int id, Vector<WebCore::DoublePoint>&& points, Function&& function, PointerReach reach = PointerReach::Hover)
 {
-    withInput(id, std::forward<Function>(function), UserInput::Other, [] { }, WTF::move(points));
+    withInput(id, std::forward<Function>(function), UserInput::Other, [] { }, WTF::move(points), reach);
 }
 
 // The button a move drags or selects with (like MouseEvent.button, -1 = none)
@@ -754,8 +754,8 @@ EMSCRIPTEN_KEEPALIVE void bl_set_view_origin(int id, double x, double y)
 EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers, int tap)
 {
     String json = takeString(points);
-    auto where = WebView::touchPoints(json);
-    withPointerInput(id, WTF::move(where), [type, json = WTF::move(json), modifiers, tap](WebView& view) { view.touchEvent(type, json, modifiers, tap); });
+    auto pressed = WebView::pressedTouchPoints(json);
+    withPointerInput(id, WTF::move(pressed), [type, json = WTF::move(json), modifiers, tap](WebView& view) { view.touchEvent(type, json, modifiers, tap); }, PointerReach::Touch);
 }
 
 // Permissions, geolocation, notifications (DeviceClients.cpp).

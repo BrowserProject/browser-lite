@@ -284,7 +284,7 @@ it, none of which may be a top-level document, with only its frames on the stack
 are suspended, their loads deferred and their frames' scripts paused (WebCore runs no listener or
 script of a paused frame, as in its debugger), the rendering update leaves out the steps that run
 their script until it goes on (patch 0152). The page answers and renders meanwhile; input that
-would reach the frame (focus, pointer in it or leaving it) ends the pause and runs right after the
+would reach the frame (focus, pointer in it or leaving it, a finger that went down in it) ends the pause and runs right after the
 script, in order with later input of its view. A frame removed or left meanwhile stops its script
 when it goes on. The pause lasts until no input came for 1 s, but while input keeps coming at most
 500 ms: then the script runs a slice of 100 ms (a safepoint request ends it) before it may pause
@@ -602,6 +602,11 @@ Two fingers zoom the view (`touch-pinch.ts`) once the page answered both touchst
 `preventDefault` and touch-action allows it; the movement until then is kept and the zoom catches
 up with it, also after the fingers lifted, so a pinch while the page keeps the engine thread busy
 is not lost, like Chrome replays the queued touch moves (#505).
+Only a finger that goes down is hit tested (#649): its touch events go to its touchstart target and
+its pointer to its pointerdown target, which captures it implicitly like in Chrome (patch 0180
+processes the pending capture before the target is picked), so the moves, release and cancel of a
+finger bring no style and layout of a loading page forward. The press's `touch-action` and the
+check for a paused frame use the same update as its touchstart.
 Tab moves the focus to links too, like in Chrome and Firefox (`ChromeClient::keyboardUIMode`, #372);
 past the last element it goes back to the host (`take-focus`), and `View.focusFirstElement`
 enters the page from outside at the first or last element of the main frame, whatever it had
