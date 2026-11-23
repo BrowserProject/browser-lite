@@ -345,7 +345,9 @@ cycle (#477). A long cycle is one long task of the page, not many short ones, so
 time budget of its own (#551). Every step of the engine thread over 50 ms, from its JS event loop
 back to it, is in the debug log as `RunLoop step took N ms`, with its kind when it is no RunLoop
 cycle: `(navigation)` (a navigation of the host such as Back), `(priority task)` (another call
-of the host or a compositor's answer), `(task)` (#639). A view without a rendering update for two stall checks (2 s
+of the host or a compositor's answer), `(task)` (#639). The steps of a nested event loop inside a
+step (a dialog, a frame's script paused for the user) are steps of their own and not part of its
+time: the line names them apart, `, N ms in a nested event loop` (#648). A view without a rendering update for two stall checks (2 s
 apart, `WebView.cpp`) logs where it and its compositor stand (`stallState`), with the
 compositor's phase and how long it lasts, since the scene started if it never ran (#402). Paint holding like Chrome and Safari (`WebView::holdPaintForNewPage`, #568): from the commit of a
 new page (not after the initial empty document, not for a page from the back/forward cache) the
@@ -1025,7 +1027,9 @@ computes an index from a pointer shifts with `>>>` (#465, `tests/core/heap-above
 
 JSC runs the C loop interpreter (`ENABLE_JIT=OFF`). Patches turn on the interpreter's call
 caches on 32 bit (#62), add caches for `instanceof` and missing properties (#143; not on objects
-whose structure does not list all own properties, such as module namespaces, #431) and leave mini
+whose structure does not list all own properties, such as module namespaces, #431), keep a
+second structure in the cache of a property read (`get_by_id`, `get_length`) and read a
+string's `length` without the slow path (patch 0179, #648) and leave mini
 mode off (#122). Scripts are compiled to bytecode on every visit: a persistent bytecode cache
 brought no measurable gain and was removed (#215). A JIT to WebAssembly compiles hot functions
 (on by default, [jit.md](jit.md)).

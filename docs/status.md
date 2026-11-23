@@ -745,8 +745,33 @@ browser (Safari keeps Cmd+L, T and W for itself).
    changed blick.ch within the noise (3 runs each). The criterion (blick.ch's article within 6 s of
    the tap and its home page within 6 s of Back, 20min.ch's Back under 8 s with no step over 3 s,
    nzz.ch's article within 7 s on the Moto, the longest step halved at a fourth of the CPU) is not
-   reached: it needs faster compiled code (phase 4 of [jit.md](jit.md)). A touch's move does not
-   update `:hover` (its hit test is read-only); its press and release do. On edition.cnn.com
+   reached: it needs faster compiled code (phase 4 of [jit.md](jit.md)).
+   Again on 2026-11-23 (#648, the same setup, 6 interleaved runs each against the engine before):
+   parse and bytecode are 11.7 to 12.9 % of blick.ch's tap and Back, 7.7 to 8.7 % of the engine
+   thread for scripts the page loads then (comment widgets, ads, tracking) and 2.9 to 3.5 % for
+   functions at their first call; it is code the page runs for the first time, not bytecode
+   thrown away: 89 % of the code blocks compiled during Back had not run on the page before, the
+   others took 130 and 206 ms of 2.4 and 3.2 s of compiles (2 runs), so there is nothing to keep
+   across Back. The interpreter's property reads keep a second shape now (patch 0179, two shapes
+   at one read 3.3 times faster interpreted), but the routes are not measurably faster: blick.ch's
+   article 17.6 to 32.5 s after the tap (median 24.4) against 17.6 to 43.3 s (21.1), its home
+   page 6.6 to 42.7 s after Back (36.5) against 9.5 to 39.3 s (24.1), 20min.ch's Back 23.0 to
+   48.5 s (43.8) against 24.9 to 48.2 s (36.3) with a longest step of 21.2 to 33.0 s against
+   22.9 to 34.1 s, the first touch during blick.ch's load answered after 13.1 to 17.5 s against
+   13.2 to 15.6 s. 20min.ch renders the list on Back either in its `popstate` listener, inside
+   the host's navigation step, where no input gets in for 22 to 33 s (1 to 8 of 102 to 157
+   touches answered; one task in Chrome too), or in a later task, often inside the nested event
+   loop of an ad frame's script paused for the user (from a priority task that ran that frame's
+   parser blocking script from the HTTP cache), where input gets in between the page's tasks (58
+   to 185 of 157 to 215 answered); both in either engine. The step log counted that nested task
+   twice (a priority task of 24.9 to 34.1 s around the page's task of 19.9 to 26.9 s); the outer
+   step's line now has its own time and names the nested event loop's apart. The criterion
+   (blick.ch's article within 15 s of the tap, its home page within 20 s of Back, 20min.ch's
+   Back within 40 s without a task over 20 s, the first touch during blick.ch's load under 8 s;
+   on a Moto G71 20min.ch's Back under 15 s and nzz.ch's article within 7 s) is not reached; the
+   Moto was not measured again. What the routes spend is the interpreter's dispatch (13 to 15 %),
+   its entry `slow_path_enter` (3 %), compiled code, the runtime and the parse above. A touch's
+   move does not update `:hover` (its hit test is read-only); its press and release do. On edition.cnn.com
    (2026-11-21, local, phone emulation at a fourth of the CPU, a touch probe 4 times a second
    during the load, CPU profiles of 3 interleaved runs each) rules like
    `.container_streaming-carousel__item:is(:hover, :active) .image img` gave the pseudo-class a

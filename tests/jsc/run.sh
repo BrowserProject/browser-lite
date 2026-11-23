@@ -35,6 +35,8 @@ run resizable "$here/resizable.js"
 run calls-gc --slowPathAllocsBetweenGCs=10 "$here/calls.js"
 run llint-caches "$here/llint-caches.js"
 run llint-caches-no-ics --useLLIntICs=false "$here/llint-caches.js"
+# Two shapes at one property read: both cached, right after changes and GCs, as fast as one
+run llint-two-shapes "$here/llint-two-shapes.js"
 run gc-stress "$here/gc-stress.js"
 # Trigger the GC very often (every few allocations)
 run gc-stress-aggressive --slowPathAllocsBetweenGCs=10 "$here/gc-stress.js"

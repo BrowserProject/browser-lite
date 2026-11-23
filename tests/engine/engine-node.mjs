@@ -23,7 +23,9 @@ export function enginePath(arg) {
 // engine. onPrintErr(text): its stderr (the JIT's log with BL_JIT=2). Without html the view loads
 // url like an address typed by the user (bl_load_url).
 // hostWaits: the host waits for the page from the start (bl_host_wait_address), so the script
-// watchdog stops a script that runs longer than BL_SCRIPT_TIMEOUT.
+// watchdog stops a script that runs longer than BL_SCRIPT_TIMEOUT. onDialog({ engine, dialogId,
+// type, message }): a dialog of the page, which it answers with bl_dialog_answer (by default
+// OK at once).
 export async function runEngine({
   enginePath,
   html,
@@ -37,6 +39,7 @@ export async function runEngine({
   onPrint = () => {},
   onPrintErr = () => {},
   hostWaits = false,
+  onDialog = ({ engine, dialogId }) => engine._bl_dialog_answer(dialogId, 0, 0),
 }) {
   const createEngine = createRequire(import.meta.url)(path.resolve(enginePath));
   // Emscripten (MODULARIZE) uses exactly this object as Module, so the exports
@@ -83,7 +86,7 @@ export async function runEngine({
     },
     engineDialog(dialogId, viewId, type, origin, message) {
       console.log('[dialog]', type, origin, message);
-      engine._bl_dialog_answer(dialogId, 0, 0);
+      onDialog({ engine, dialogId, type, message });
     },
     print: (text) => {
       console.log(text);

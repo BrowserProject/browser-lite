@@ -380,6 +380,22 @@ while the VM's large functions warm up; a 4 times shorter warm-up gave 28 to 46 
 `callInFrame`), `===` of strings that are ropes, 16-bit or longer than 64 characters 5 %, keyed
 reads 2.3 %, array literals 2.5 %.
 
+Two shapes at one property read (#648, 2026-11-23). The interpreter's cache of a `get_by_id`
+held one structure, so a site that sees two shapes (an object literal's and a class instance's,
+the props of two components) went to the slow path at every alternation and replaced the other
+one; the property cache of compiled code fills from there. Patch 0179 keeps the structure held
+before as a second one, which the C loop and compiled code check too, and a string's `length`
+skips the slow path. In the engine (a page, 300000 iterations of four reads, fastest of 5, 5
+runs each, load 4 to 6) two alternating shapes took 75 to 82 ms interpreted against 22 to 26 ms
+for one, now 21 to 25 ms like one; compiled 15 to 16 against 9 to 10 ms, now 10 to 11 ms; a
+string's `length` (300000 reads) 31 to 36 ms interpreted, now 23 to 25 ms, compiled 18 to 21,
+now 14 to 16 ms. On blick.ch's tap and Back (profiles at a fourth of the CPU) the `get_by_id`
+slow path stayed at 2.0 % of the engine thread (1.9 % before): what it does there the cache does
+not take (getters, DOM attributes, proxies, sites with more shapes). The routes were not
+measurably faster ([status.md](status.md)); what they spend is the interpreter's dispatch (13 to
+15 %), its entry `slow_path_enter` (3 %), compiled code, the runtime and parse and bytecode
+(11.7 to 12.9 %, of code the page runs for the first time).
+
 Hashing code (#424, `tests/jsc/jit-hash.js`, jsc shell): bit operations on uint32 values 5x and
 typed array elements 3x the time of their int32 twins before, now 1.8x and 1.3x; `Math.imul` 6.5x
 an addition before, 2x now; a host call about 20 % cheaper. In the engine, the loops of

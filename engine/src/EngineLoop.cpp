@@ -156,7 +156,10 @@ bool engineThreadInLongScript(Seconds minimum)
 // task, a call of the host such as a navigation) until it returns there, with its GC. A step over
 // 50 ms goes into the debug log as "RunLoop step took N ms", naming what ran when it was no
 // RunLoop pass (a Back on 20min.ch ran as a navigation for 17 s on a phone without a line).
-// Nested work of a step is part of it; the steps of a nested event loop (a dialog) are their own.
+// Nested work of a step is part of it; the steps of a nested event loop (a dialog, a frame's script
+// paused for the user) are their own and not part of it: the line counts them apart
+// (", N ms in a nested event loop"). Before, a priority task of 41.7 s on 20min.ch's Back was a
+// paused ad frame's script around the page's React task of 35.6 s, which had its own line.
 class EngineStep {
 public:
     // Inside a step a named one only names that step, if it has no name yet
@@ -176,13 +179,16 @@ public:
         s_current = m_outer;
         if (m_outer)
             return;
-        auto duration = (WTF::MonotonicTime::now() - m_start).milliseconds();
+        auto duration = (WTF::MonotonicTime::now() - m_start - m_nested).milliseconds();
         if (duration <= 50)
             return;
+        char nested[64] = "";
+        if (m_nested)
+            snprintf(nested, sizeof(nested), ", %.0f ms in a nested event loop", m_nested.milliseconds());
         if (!strcmp(m_kind, runLoopKind))
-            debugLog("RunLoop step took %.0f ms", duration);
+            debugLog("RunLoop step took %.0f ms%s", duration, nested);
         else
-            debugLog("RunLoop step took %.0f ms (%s)", duration, m_kind);
+            debugLog("RunLoop step took %.0f ms (%s)%s", duration, m_kind, nested);
     }
 
     // Names the outermost running step
@@ -197,9 +203,21 @@ public:
         }
     }
 
-    // A nested event loop's steps are steps of their own
-    static EngineStep* enterNestedEventLoop() { return std::exchange(s_current, nullptr); }
-    static void leaveNestedEventLoop(EngineStep* outer) { s_current = outer; }
+    // A nested event loop's steps are steps of their own, its time is not the outer step's
+    struct NestedEventLoop {
+        EngineStep* outer;
+        WTF::MonotonicTime start;
+    };
+    static NestedEventLoop enterNestedEventLoop() { return { std::exchange(s_current, nullptr), WTF::MonotonicTime::now() }; }
+    static void leaveNestedEventLoop(const NestedEventLoop& loop)
+    {
+        s_current = loop.outer;
+        auto* step = loop.outer;
+        while (step && step->m_outer)
+            step = step->m_outer;
+        if (step)
+            step->m_nested += WTF::MonotonicTime::now() - loop.start;
+    }
 
     static constexpr const char* runLoopKind = "RunLoop";
 
@@ -209,6 +227,7 @@ private:
     const char* m_kind;
     bool m_named;
     WTF::MonotonicTime m_start;
+    Seconds m_nested;
 };
 
 EngineStep* EngineStep::s_current;
@@ -693,7 +712,7 @@ void runNestedEventLoop(const Function<bool()>& done, const Function<bool()>& on
     // A JS entry records the caller's frame here; at the waiting script's frames walks stop
     auto* topCallFrame = std::exchange(vm.topCallFrame, nullptr);
     ++s_nestedEventLoops;
-    auto* outerStep = EngineStep::enterNestedEventLoop();
+    auto outerStep = EngineStep::enterNestedEventLoop();
     // Called from a timer: WebCore's timers may fire again
     WebCore::TimerBase::fireTimersInNestedEventLoop();
     pthread_t self = pthread_self();

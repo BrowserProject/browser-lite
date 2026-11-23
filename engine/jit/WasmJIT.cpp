@@ -189,7 +189,7 @@ CallTarget* cachedCallTarget(VM& vm, ExecutableBase* executable, bool isConstruc
     return &target;
 }
 
-// More own properties of a get_by_id than the interpreter's cache holds (it keeps one structure):
+// More own properties of a get_by_id than the interpreter's cache holds (two structures, patch 0179):
 // the structures and offsets it had before, valid until the next GC. And how often the misses of
 // a get_by_id or get_length looked for a getter and found none (getByIdFromCompiledCode).
 struct PropertyCache {
@@ -1198,7 +1198,7 @@ UGPRPair getByValFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
 bool interpreterCacheHas(const GetByIdModeMetadata& metadata, StructureID structureID)
 {
     switch (metadata.mode) {
-    case GetByIdMode::Default: return metadata.defaultMode.structureID == structureID;
+    case GetByIdMode::Default: return metadata.defaultMode.structureID == structureID || metadata.defaultMode.secondStructureID == structureID;
     case GetByIdMode::ProtoLoad: return metadata.protoLoadMode.structureID == structureID;
     case GetByIdMode::Unset: return metadata.unsetMode.structureID == structureID;
     case GetByIdMode::ArrayLength: return true;
@@ -3093,6 +3093,19 @@ void Compiler::emitGetByIdFunction()
             m_body->op(Op::I32And);
             m_body->ifThen();
             loadCached(OBJECT_OFFSETOF(GetByIdModeMetadata, defaultMode.cachedOffset));
+            m_body->localSet(m_t2);
+            loadProperty(m_d, m_t2);
+            storeTagAndPayload(dst, m_a, m_b);
+            fastPathDone();
+            m_body->end();
+
+            // The site's second structure, like the interpreter's fast path (patch 0179)
+            mode(GetByIdMode::Default);
+            structureIs(OBJECT_OFFSETOF(GetByIdModeMetadata, defaultMode.secondStructureID));
+            m_body->op(Op::I32And);
+            m_body->ifThen();
+            m_body->localGet(cache);
+            m_body->i32Load16S(OBJECT_OFFSETOF(GetByIdModeMetadata, secondCachedOffset));
             m_body->localSet(m_t2);
             loadProperty(m_d, m_t2);
             storeTagAndPayload(dst, m_a, m_b);
