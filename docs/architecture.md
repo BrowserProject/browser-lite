@@ -353,7 +353,14 @@ back to it, is in the debug log as `RunLoop step took N ms`, with its kind when 
 cycle: `(navigation)` (a navigation of the host such as Back), `(priority task)` (another call
 of the host or a compositor's answer), `(task)` (#639). The steps of a nested event loop inside a
 step (a dialog, a frame's script paused for the user) are steps of their own and not part of its
-time: the line names them apart, `, N ms in a nested event loop` (#648). A view without a rendering update for two stall checks (2 s
+time: the line names them apart, `, N ms in a nested event loop` (#648). Work runs in the order
+it was queued (patch 0184, #652): a RunLoop cycle runs the functions that wait at its start before
+the timers due then, a function carries the time it was dispatched (the next step of delivering a
+message, dispatched by a function, that function's), and a task of the page's event loop the time
+it was queued (or that of the function that delivers it), by which WebCore's timer heap orders the
+event loop against the other timers. So a timer that came due during a long task runs after the
+messages of the window, of ports and of workers that were posted before its deadline, like in
+Chrome. A view without a rendering update for two stall checks (2 s
 apart, `WebView.cpp`) logs where it and its compositor stand (`stallState`), with the
 compositor's phase and how long it lasts, since the scene started if it never ran (#402). Paint holding like Chrome and Safari (`WebView::holdPaintForNewPage`, #568): from the commit of a
 new page (not after the initial empty document, not for a page from the back/forward cache) the

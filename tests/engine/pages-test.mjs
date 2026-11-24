@@ -110,6 +110,10 @@
 //                  what the pseudo-element inherits, after the animation ended, with an !important
 //                  rule and a class change between frames; a frame of 200 pulsing ::after costs a
 //                  fraction of restyling their elements
+//   task-order.html  a timer that came due during a long task runs after the messages posted before
+//                  its deadline (patch 0184), like in Chrome: to the window, also behind other
+//                  tasks of the event loop, of a MessagePort, a worker, a worker's MessagePort, a
+//                  frame and a frame's MessagePort
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -159,6 +163,7 @@ const CASES = [
     check: 'check-frame-restyles.mjs',
   },
   { name: 'pseudo-animations', size: [400, 600], wait: 'PSEUDOANIM done' },
+  { name: 'task-order', wait: 'TASKORDER done' },
   { name: 'select-styles', size: [400, 220], check: 'check-select-styles.mjs' },
   {
     name: 'form-controls',

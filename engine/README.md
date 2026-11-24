@@ -56,7 +56,9 @@ which WebKit dispatched all in one task, so a carousel's listeners that lay the 
 engine thread for many seconds, or the form controls without author styles, which took the 16px
 of the standard font, Adwaita's room and its borders of 1.6:1 contrast instead of Chrome's
 13.333px, size and #767676, or the host's reduced motion and contrast preferences, which the
-Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
+Adwaita theme reads only from GTK's settings, or a timer that came due during a long task, which
+ran before the messages of ports and workers posted before its deadline) comes as patches from
+`patches/`.
 
 ## Folders
 

@@ -1,0 +1,315 @@
+diff --git a/Source/WTF/wtf/RunLoop.cpp b/Source/WTF/wtf/RunLoop.cpp
+index 6c4a276b28..bb4b9c0a29 100644
+--- a/Source/WTF/wtf/RunLoop.cpp
++++ b/Source/WTF/wtf/RunLoop.cpp
+@@ -138,6 +138,50 @@ extern "C" bool bl_wtf_input_waiting()
+ {
+     return s_shouldYieldForInput && s_shouldYieldForInput();
+ }
++
++// browser-lite: work goes in the order in which it was queued, like in Chrome and the HTML
++// standard: a timer that came due during a long task runs after what was posted before its
++// deadline. A function carries its queue time: when it was dispatched, or for a function that another
++// function of this thread dispatches (the next step of delivering what was posted, such as a
++// message of a MessagePort that a worker posted), the time of that function. Only one step
++// inherits, so a function that keeps dispatching itself gets newer times. What a function queues
++// in WebCore's event loop takes its time too (bl_wtf_function_queue_time), so the event loop
++// orders it against the timers by when it was posted. A cycle runs the functions before the
++// timers (RunLoopGeneric.cpp).
++struct FunctionQueueTime {
++    MonotonicTime time;
++    bool inherited { false };
++};
++static thread_local std::optional<FunctionQueueTime> s_runningFunction;
++static thread_local bool s_dispatchedInheritedTime;
++
++static Function<void()> withQueueTime(const RunLoop& runLoop, Function<void()>&& function)
++{
++    FunctionQueueTime queued { MonotonicTime::now() };
++    if (s_runningFunction && !s_runningFunction->inherited && runLoop.isCurrent()) {
++        queued = { s_runningFunction->time, true };
++        s_dispatchedInheritedTime = true;
++    }
++    return [queued, function = WTF::move(function)]() mutable {
++        auto outer = std::exchange(s_runningFunction, queued);
++        function();
++        s_runningFunction = outer;
++    };
++}
++
++// Seconds of the MonotonicTime when the running function was queued, 0 outside of a function
++extern "C" double bl_wtf_function_queue_time();
++extern "C" double bl_wtf_function_queue_time()
++{
++    return s_runningFunction ? s_runningFunction->time.secondsSinceEpoch().value() : 0;
++}
++
++// Whether a function dispatched one with an inherited time since the last call
++extern "C" bool bl_wtf_take_inherited_dispatch();
++extern "C" bool bl_wtf_take_inherited_dispatch()
++{
++    return std::exchange(s_dispatchedInheritedTime, false);
++}
+ #endif
+ 
+ void RunLoop::performWork()
+@@ -183,6 +227,9 @@ void RunLoop::performWork()
+ void RunLoop::dispatch(Function<void()>&& function)
+ {
+     RELEASE_ASSERT(function);
++#if OS(EMSCRIPTEN)
++    function = withQueueTime(*this, WTF::move(function));
++#endif
+     bool needsWakeup = false;
+ 
+     {
+diff --git a/Source/WTF/wtf/generic/RunLoopGeneric.cpp b/Source/WTF/wtf/generic/RunLoopGeneric.cpp
+index 4d64d6c098..c6cd63dd5e 100644
+--- a/Source/WTF/wtf/generic/RunLoopGeneric.cpp
++++ b/Source/WTF/wtf/generic/RunLoopGeneric.cpp
+@@ -173,6 +173,11 @@ inline bool RunLoop::populateTasks(RunMode runMode, Status& statusOfThisLoop, De
+     return true;
+ }
+ 
++#if OS(EMSCRIPTEN)
++extern "C" bool bl_wtf_take_inherited_dispatch();
++extern "C" bool bl_wtf_input_waiting();
++#endif
++
+ void RunLoop::runImpl(RunMode runMode)
+ {
+     ASSERT(this == &RunLoop::currentSingleton());
+@@ -214,6 +219,16 @@ void RunLoop::runImpl(RunMode runMode)
+         if (!populateTasks(runMode, statusOfThisLoop, firedTimers))
+             return;
+ 
++#if OS(EMSCRIPTEN)
++        // browser-lite: the functions waiting at the start of the cycle run before the timers
++        // that came due by then, so what a long task posted is queued before a timer that came
++        // due during it runs (RunLoop.cpp). The next steps of its delivery, dispatched with its
++        // time, run in the same cycle, unless input waits.
++        performWork();
++        if (bl_wtf_take_inherited_dispatch() && !bl_wtf_input_waiting())
++            performWork();
++#endif
++
+         // Dispatch scheduled timers.
+         while (!firedTimers.isEmpty()) {
+             auto task = firedTimers.takeFirst();
+@@ -228,7 +243,9 @@ void RunLoop::runImpl(RunMode runMode)
+                 scheduleWithLock(task.get());
+             }
+         }
++#if !OS(EMSCRIPTEN)
+         performWork();
++#endif
+     }
+ }
+ 
+diff --git a/Source/WebCore/dom/EventLoop.cpp b/Source/WebCore/dom/EventLoop.cpp
+index 4519d31a3e..763c64a1eb 100644
+--- a/Source/WebCore/dom/EventLoop.cpp
++++ b/Source/WebCore/dom/EventLoop.cpp
+@@ -26,6 +26,7 @@
+ #include "config.h"
+ #include "EventLoop.h"
+ 
++#include "CommonVM.h"
+ #include "Microtasks.h"
+ #include "ScriptExecutionContextInlines.h"
+ #include <JavaScriptCore/JSGlobalObject.h>
+@@ -195,13 +196,86 @@ EventLoopTimerHandle& EventLoopTimerHandle::operator=(std::nullptr_t)
+ EventLoop::EventLoop() = default;
+ EventLoop::~EventLoop() = default;
+ 
++#if OS(EMSCRIPTEN)
++extern "C" double bl_wtf_function_queue_time();
++
++// browser-lite: a task with the time it was queued: now, or when a RunLoop function delivers what
++// was posted earlier (a message of a MessagePort or a worker) that function's queue time
++// (RunLoop.cpp). The event loop runs when its oldest task was queued
++// (WindowEventLoop::scheduleToRun), so WebCore's timers order its tasks against the timers by
++// that time: a timer that came due during a long task runs after the messages that were posted
++// before its deadline, also when they wait behind other tasks of the event loop, as in Chrome.
++class EventLoopTaskWithQueueTime final : public EventLoopTask {
++    WTF_MAKE_TZONE_ALLOCATED(EventLoopTaskWithQueueTime);
++public:
++    EventLoopTaskWithQueueTime(std::unique_ptr<EventLoopTask>&& task, MonotonicTime queueTime)
++        : EventLoopTask(task->taskSource(), *task->group())
++        , m_task(WTF::move(task))
++        , m_queueTime(queueTime)
++    {
++    }
++
++    void execute() final { m_task->execute(); }
++    MonotonicTime queueTime() const { return m_queueTime; }
++
++private:
++    std::unique_ptr<EventLoopTask> m_task;
++    MonotonicTime m_queueTime;
++};
++
++WTF_MAKE_TZONE_ALLOCATED_IMPL(EventLoopTaskWithQueueTime);
++
++static MonotonicTime queueTime(const std::unique_ptr<EventLoopTask>& task)
++{
++    return static_cast<const EventLoopTaskWithQueueTime&>(*task).queueTime();
++}
++
++// Of the tasks that can run (those of a suspended document wait for it)
++static MonotonicTime oldestQueueTime(const EventLoop::TaskVector& tasks)
++{
++    auto oldest = MonotonicTime::now();
++    for (auto& task : tasks) {
++        auto* group = task->group();
++        if (group && !group->isSuspended() && !group->isStoppedPermanently())
++            oldest = std::min(oldest, queueTime(task));
++    }
++    return oldest;
++}
++
++// When the event loop that schedules itself next runs (WindowEventLoop::scheduleToRun)
++static thread_local MonotonicTime s_timeToRun;
++
++MonotonicTime eventLoopTimeToRun();
++MonotonicTime eventLoopTimeToRun()
++{
++    return s_timeToRun;
++}
++#endif
++
+ void EventLoop::queueTask(std::unique_ptr<EventLoopTask>&& task)
+ {
+     ASSERT(task->taskSource() != TaskSource::Microtask);
+     ASSERT(task->group());
+     ASSERT(isContextThread());
++#if OS(EMSCRIPTEN)
++    // Delivering what was posted earlier keeps the time it was posted; what a script queues (also
++    // one that a RunLoop function runs, such as a script of the parser) is queued now
++    auto* vm = isMainThread() ? commonVMOrNull() : nullptr;
++    double functionQueueTime = vm && !vm->entryScope ? bl_wtf_function_queue_time() : 0;
++    auto time = functionQueueTime ? MonotonicTime::fromRawSeconds(functionQueueTime) : MonotonicTime::now();
++    bool earliest = time < oldestQueueTime(m_tasks);
++    m_tasks.append(makeUnique<EventLoopTaskWithQueueTime>(WTF::move(task), time));
++    // A task queued earlier than those the scheduled run waits for moves the run earlier
++    if (functionQueueTime && earliest && microtaskQueue().isScheduledToRun()) {
++        s_timeToRun = time;
++        scheduleToRun();
++        return;
++    }
++    scheduleToRunIfNeeded();
++#else
+     scheduleToRunIfNeeded();
+     m_tasks.append(WTF::move(task));
++#endif
+ }
+ 
+ EventLoopTimerHandle EventLoop::scheduleTask(Seconds timeout, TimerAlignment* alignment, HasReachedMaxNestingLevel hasReachedMaxNestingLevel, std::unique_ptr<EventLoopTask>&& action)
+@@ -315,6 +389,9 @@ void EventLoop::scheduleToRunIfNeeded()
+     if (microtaskQueue().isScheduledToRun())
+         return;
+     microtaskQueue().setIsScheduledToRun(true);
++#if OS(EMSCRIPTEN)
++    s_timeToRun = oldestQueueTime(m_tasks);
++#endif
+     scheduleToRun();
+ }
+ 
+@@ -364,8 +441,17 @@ void EventLoop::run(JSC::VM& vm, std::optional<ApproximateTime> deadline)
+             remainingTasks.append(WTF::move(task));
+         m_tasks = WTF::move(remainingTasks);
+ 
+-        if (!m_tasks.isEmpty() && hasReachedDeadline)
++        if (!m_tasks.isEmpty() && hasReachedDeadline) {
++#if OS(EMSCRIPTEN)
++            // The tasks left keep their place among the timers: the next run is due when the
++            // oldest of them was queued, also if a task queued meanwhile scheduled a later one
++            microtaskQueue().setIsScheduledToRun(true);
++            s_timeToRun = oldestQueueTime(m_tasks);
++            scheduleToRun();
++#else
+             scheduleToRunIfNeeded();
++#endif
++        }
+     }
+ 
+     // FIXME: Remove this once everything is integrated with the event loop.
+diff --git a/Source/WebCore/dom/MessagePort.cpp b/Source/WebCore/dom/MessagePort.cpp
+index edf2b61630..ba6d23ec6e 100644
+--- a/Source/WebCore/dom/MessagePort.cpp
++++ b/Source/WebCore/dom/MessagePort.cpp
+@@ -208,9 +208,21 @@ ExceptionOr<void> MessagePort::postMessage(JSC::JSGlobalObject& globalObject, JS
+         partner->m_localQueue.append(WTF::move(message));
+         ++partner->m_newLocalMessages;
+         if (partner->isStarted()) {
++#if OS(EMSCRIPTEN)
++            // browser-lite: this task, queued now, is the message's task and delivers it, like
++            // the port message queue of HTML. dispatchMessages() would queue another task once
++            // this one runs, after the timers that came due since (EventLoop.cpp).
++            queueTaskKeepingObjectAlive(*partner, TaskSource::PostedMessageQueue, [](auto& port) mutable {
++                if (!port.m_newLocalMessages)
++                    return;
++                --port.m_newLocalMessages;
++                port.drainOneLocalMessage();
++            });
++#else
+             queueTaskKeepingObjectAlive(*partner, TaskSource::PostedMessageQueue, [](auto& port) mutable {
+                 port.dispatchMessages();
+             });
++#endif
+         }
+         return { };
+     }
+diff --git a/Source/WebCore/dom/WindowEventLoop.cpp b/Source/WebCore/dom/WindowEventLoop.cpp
+index 2627207099..f773de0023 100644
+--- a/Source/WebCore/dom/WindowEventLoop.cpp
++++ b/Source/WebCore/dom/WindowEventLoop.cpp
+@@ -109,9 +109,19 @@ WindowEventLoop::~WindowEventLoop()
+     RELEASE_ASSERT(didRemove);
+ }
+ 
++#if OS(EMSCRIPTEN)
++MonotonicTime eventLoopTimeToRun();
++#endif
++
+ void WindowEventLoop::scheduleToRun()
+ {
++#if OS(EMSCRIPTEN)
++    // browser-lite: due when the oldest waiting task was queued (EventLoop.cpp), which orders the
++    // tasks against WebCore's other timers by that time
++    m_timer.startOneShot(std::min(0_s, eventLoopTimeToRun() - MonotonicTime::now()));
++#else
+     m_timer.startOneShot(0_s);
++#endif
+ }
+ 
+ bool WindowEventLoop::isContextThread() const
+diff --git a/Source/WebCore/platform/ThreadTimers.cpp b/Source/WebCore/platform/ThreadTimers.cpp
+index 08ef6a3e60..1183672951 100644
+--- a/Source/WebCore/platform/ThreadTimers.cpp
++++ b/Source/WebCore/platform/ThreadTimers.cpp
+@@ -111,6 +111,9 @@ void ThreadTimers::sharedTimerFiredInternal()
+ 
+     auto fireTime = MonotonicTime::now();
+     auto timeToQuit = ApproximateTime::now() + maxDurationOfFiringTimers;
++#if OS(EMSCRIPTEN)
++    auto firstInsertionOfPass = m_currentHeapInsertionOrder;
++#endif
+ 
+     while (!m_timerHeap.isEmpty()) {
+         Ref item = m_timerHeap.first();
+@@ -123,6 +126,14 @@ void ThreadTimers::sharedTimerFiredInternal()
+         if (item->time > fireTime)
+             break;
+ 
++#if OS(EMSCRIPTEN)
++        // browser-lite: a timer scheduled during this pass for a time that has passed waits for
++        // the next pass, like one started for now: the event loop keeps the time of its oldest
++        // task when a pass of it stops for input (EventLoop.cpp), which runs first
++        if (item->insertionOrder - firstInsertionOfPass < m_currentHeapInsertionOrder - firstInsertionOfPass)
++            break;
++#endif
++
+         auto& timer = item->timer();
+         Seconds interval = timer.repeatInterval();
+         timer.setNextFireTime(interval ? fireTime + interval : MonotonicTime { });

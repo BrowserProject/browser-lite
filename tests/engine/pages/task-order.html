@@ -1,0 +1,222 @@
+<!doctype html>
+<title>Task order</title>
+<!-- A timer that came due during a long task runs after the tasks that were queued before its
+     deadline, like in Chrome and the HTML standard (the timer's task is queued once it is due):
+     a message to the window, also one that waits behind other tasks of the event loop, a
+     message of a MessagePort, of a worker, of a worker's MessagePort, of a frame and of a frame's
+     MessagePort, each posted while a long task ran and before the deadline of a timer that came
+     due in that task (patch 0184). Output "TASKORDER name=ok" or
+     "TASKORDER name=<order>", at the end "TASKORDER done=ok" when every order is right. -->
+<body>
+<script>
+const busy = (ms) => {
+  const end = performance.now() + ms;
+  while (performance.now() < end);
+};
+// The timer's deadline lies in the middle of the long task, the message is posted before it
+const DEADLINE = 300;
+const BEFORE = 100;
+const LONG = 600;
+
+// Resolves with the order of the names once all of them came
+function collect(names) {
+  const order = [];
+  let resolve;
+  const finished = new Promise((r) => {
+    resolve = r;
+  });
+  const add = (name) => {
+    order.push(name);
+    if (names.every((n) => order.includes(n))) resolve(order);
+  };
+  return { add, finished };
+}
+
+// A message the long task posts to the window, simply behind it
+function windowMessage() {
+  const { add, finished } = collect(['message', 'timer']);
+  const listener = (event) => {
+    if (event.data === 'window-message') add('message');
+  };
+  addEventListener('message', listener);
+  setTimeout(() => {
+    setTimeout(() => add('timer'), DEADLINE);
+    busy(BEFORE);
+    postMessage('window-message', '*');
+    busy(LONG);
+  }, 0);
+  return finished.finally(() => removeEventListener('message', listener));
+}
+
+// The long task is a task of the event loop (a message) and others wait behind it: the message
+// it posts comes after them and still before the timer (a pass of the event loop ends after its
+// time budget and the rest waits for the next pass)
+function eventLoopBacklog() {
+  const { add, finished } = collect(['long', 'other', 'message', 'timer']);
+  const listener = (event) => {
+    if (event.data === 'backlog-long') {
+      add('long');
+      setTimeout(() => add('timer'), DEADLINE);
+      busy(BEFORE);
+      postMessage('backlog-message', '*');
+      busy(LONG);
+    } else if (event.data === 'backlog-other') {
+      busy(100);
+      add('other');
+    } else if (event.data === 'backlog-message') add('message');
+  };
+  addEventListener('message', listener);
+  postMessage('backlog-long', '*');
+  postMessage('backlog-other', '*');
+  return finished.finally(() => removeEventListener('message', listener));
+}
+
+// A message of a MessagePort whose other end is in the same page
+function portMessage() {
+  const { add, finished } = collect(['message', 'timer']);
+  const channel = new MessageChannel();
+  channel.port2.onmessage = () => add('message');
+  setTimeout(() => {
+    setTimeout(() => add('timer'), DEADLINE);
+    busy(BEFORE);
+    channel.port1.postMessage('port');
+    busy(LONG);
+  }, 0);
+  return finished.finally(() => channel.port1.close());
+}
+
+// A worker posts while the page runs its long task
+async function workerMessage() {
+  const source = `onmessage = (event) => setTimeout(() => postMessage('worker'), event.data);`;
+  const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+  // Started and answering first
+  await new Promise((resolve) => {
+    worker.onmessage = resolve;
+    worker.postMessage(0);
+  });
+  const { add, finished } = collect(['message', 'timer']);
+  worker.onmessage = () => add('message');
+  setTimeout(() => {
+    setTimeout(() => add('timer'), DEADLINE);
+    worker.postMessage(BEFORE);
+    busy(LONG);
+  }, 0);
+  return finished.finally(() => worker.terminate());
+}
+
+// A worker posts on a MessagePort while the page runs its long task: delivering it takes two
+// steps on the page's thread. The worker learns when to post from a worker message, as a message
+// of the port to the worker needs the page's thread (WebKit keeps the ports' registry there).
+async function workerPortMessage() {
+  const source = `let port;
+  onmessage = (event) => {
+    if (event.ports.length) {
+      port = event.ports[0];
+      port.postMessage('ready');
+    } else setTimeout(() => port.postMessage('worker-port'), event.data);
+  };`;
+  const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+  const channel = new MessageChannel();
+  await new Promise((resolve) => {
+    channel.port1.onmessage = resolve;
+    worker.postMessage(0, [channel.port2]);
+  });
+  const { add, finished } = collect(['message', 'timer']);
+  channel.port1.onmessage = () => add('message');
+  setTimeout(() => {
+    setTimeout(() => add('timer'), DEADLINE);
+    worker.postMessage(BEFORE);
+    busy(LONG);
+  }, 0);
+  return finished.finally(() => worker.terminate());
+}
+
+// A frame of the same origin posts to its parent in the middle of its own long task, like
+// reCAPTCHA's anchor frame answers the page that waits for it with a timeout
+async function frameMessage() {
+  const frame = document.body.appendChild(document.createElement('iframe'));
+  await new Promise((resolve) => {
+    frame.onload = resolve;
+    frame.srcdoc = `<script>
+      const busy = ${busy};
+      onmessage = () => {
+        busy(${BEFORE});
+        parent.postMessage('frame', '*');
+        busy(${LONG});
+      };
+    <\/script>`;
+  });
+  const { add, finished } = collect(['message', 'timer']);
+  const listener = (event) => {
+    if (event.data === 'frame') add('message');
+  };
+  addEventListener('message', listener);
+  setTimeout(() => add('timer'), DEADLINE);
+  frame.contentWindow.postMessage('run', '*');
+  return finished.finally(() => {
+    removeEventListener('message', listener);
+    frame.remove();
+  });
+}
+
+// The same frame answers on a MessagePort that its parent sent it, like reCAPTCHA's anchor frame
+async function framePortMessage() {
+  const frame = document.body.appendChild(document.createElement('iframe'));
+  await new Promise((resolve) => {
+    frame.onload = resolve;
+    frame.srcdoc = `<script>
+      const busy = ${busy};
+      onmessage = (event) => {
+        const port = event.ports[0];
+        port.onmessage = () => {
+          busy(${BEFORE});
+          port.postMessage('frame-port');
+          busy(${LONG});
+        };
+      };
+    <\/script>`;
+  });
+  const channel = new MessageChannel();
+  frame.contentWindow.postMessage('port', '*', [channel.port2]);
+  const { add, finished } = collect(['message', 'timer']);
+  channel.port1.onmessage = () => add('message');
+  setTimeout(() => add('timer'), DEADLINE);
+  channel.port1.postMessage('run');
+  return finished.finally(() => frame.remove());
+}
+
+const EXPECTED = {
+  windowMessage: 'message,timer',
+  eventLoopBacklog: 'long,other,message,timer',
+  portMessage: 'message,timer',
+  workerMessage: 'message,timer',
+  workerPortMessage: 'message,timer',
+  frameMessage: 'message,timer',
+  framePortMessage: 'message,timer',
+};
+
+(async () => {
+  let bad = 0;
+  for (const [name, run] of Object.entries({
+    windowMessage,
+    eventLoopBacklog,
+    portMessage,
+    workerMessage,
+    workerPortMessage,
+    frameMessage,
+    framePortMessage,
+  })) {
+    try {
+      const order = (await run()).join(',');
+      const ok = order === EXPECTED[name];
+      console.log(`TASKORDER ${name}=${ok ? 'ok' : order}`);
+      if (!ok) bad++;
+    } catch (e) {
+      console.log(`TASKORDER ${name}=ERROR ${e.name}: ${e.message}`);
+      bad++;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  console.log(`TASKORDER done=${bad ? `${bad} errors` : 'ok'}`);
+})();
+</script>

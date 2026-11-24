@@ -21,6 +21,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   its `complete` message). A script stopped in a promise reaction or a `FinalizationRegistry`
   callback (the user left the page, the watchdog) ends alone (#627: before, leaving hCaptcha's
   demo while its `hsw.js` ran stopped every promise reaction of every view until a restart).
+  A timer that came due during a long task runs after the messages of the window, of ports and
+  of workers that were posted before its deadline, like in Chrome (#652: before, a port's or a
+  worker's message, and a window message behind other tasks of the event loop, came after it,
+  so reCAPTCHA's page could time out on an answer of its anchor frame posted in time).
   `console.log` and the others run page code only for their first argument, like Safari (#629:
   before, the first argument's `toString` ran twice and every other argument's once, a count
   that scripts read as an open DevTools panel); the engine's log shows the other arguments
@@ -1067,7 +1071,27 @@ browser (Safari keeps Cmd+L, T and W for itself).
    invisible widget under 5 s, Moto G71 under 7 s) are not reached; the layout of a long task
    still goes on without a lazy font 300 ms after its first one even when the file is there a few
    ms later, because the arrivals are reported to the engine thread as tasks; fetching a canvas
-   text's fonts side by side would need the fallback's choice ahead of its reads. LinkedIn Learning
+   text's fonts side by side would need the fallback's choice ahead of its reads. reCAPTCHA v2
+   (google.com/recaptcha/api2/demo, 2026-11-24, local, Chromium host, a cold engine start per
+   run): the page waits 15 s for the answers of its anchor frame on a MessagePort, the anchor
+   5 s for its worker (`webworker.js`, which imports the 860 KB `recaptcha__en.js`) before it
+   computes on the engine thread itself. The invisible demo gives the token or the challenge
+   after one click in every run at a load of 8 to 33 (26 runs each with and without #652; median
+   4.0 s after the click for both in 6 interleaved pairs at a load of 12 to 16), the checkbox in phone emulation (a fourth of the CPU, load 9 to 19) opens the
+   challenge in 13 of 14 runs within 10 s of the tap (median 5.9 s). Open: at a load of 35 to 50
+   the invisible demo fails in 7 of 8 runs ("reCAPTCHA Timeout", 4 of 4 before #652, plain
+   Chromium never): the worker's first message comes after the anchor's 5 s, as its script and
+   `importScripts` load through the busy engine thread (it starts 2.5 to 3.5 s after it was
+   created; Chrome loads worker scripts off its main thread) and the 860 KB then run 1.5 to 3 s
+   in the interpreter, so the anchor computes on the engine thread in one step of 9 to 14 s and
+   the page's 15 s pass before it answers. The same wait of up to 4.7 s for the worker came in 1
+   of 14 checkbox runs (up to 3.1 s before #652). Both scripts run mostly in the interpreter
+   (after the click LLInt itself 23 % of the engine thread, compiled code about 10 %); the JIT's
+   machine stack probe costs every new worker thread about 0.15 s (`failsWithRecursion`,
+   `engine/jit/MachineStack.cpp`). The v3 score demo (recaptcha-demo.appspot.com) answers
+   9.7 to 13.4 s after the navigation at a load of 8 to 15 (median 12.7 s, 11.9 s before #652,
+   score 0.9; Chrome 3.7 to 5 s), the same JS speed. The Moto G71 was not measured. LinkedIn
+   Learning
    (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain
    Chromium also loads, its main thread 10 % busy then): after the load the engine thread answered
    no eval for up to 10 s, about 35 s in all, then recovered. Its hashing loops now run inline
