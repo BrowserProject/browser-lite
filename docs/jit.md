@@ -54,6 +54,16 @@ never baked into the code (the GC resets inline caches).
   0.7 us in a worker of Chromium), and once the map has 4096 entries those not fired among the
   last 65536 fires go; the next pruning waits until the map doubled. Before, while more than 4096
   functions had fired within a minute, every fire went through the whole map (#632).
+  A fire counts calls and iterations, not the time they take: the large functions of an
+  obfuscated VM run a whole instruction of the VM per iteration and fired every 100 to 150 ms, so
+  their 512 fires took up to 45 s. A function whose warm-up is at its maximum (from about 2.7 KB
+  of bytecode) therefore also compiles once its time in the interpreter is 30 times the estimated
+  cost of its compile (about 0.3 us per byte of bytecode, at least 100 ms in all) (#654). That
+  time is sampled: while such a function warms up, the JIT asks the embedder for a safepoint of
+  the running script 5 ms later (`EngineLoop.cpp`, through the trap of `requestSafepointAfter`)
+  and credits the time to the interpreted function on top there, or to its caller when the
+  safepoint is the entry of a function, which ran nothing yet; the next sample follows while the
+  interpreter runs. The `jsc` shell has no embedder and counts only fires.
 - **Code size**: the fast paths of property access by id, element and keyed access, scope
   access (`resolve_scope`, `get_from_scope`, `put_to_scope`) and `Math.imul` are functions of the
   module that every site of the instruction calls with its operands' values, the metadata and
@@ -396,6 +406,34 @@ measurably faster ([status.md](status.md)); what they spend is the interpreter's
 15 %), its entry `slow_path_enter` (3 %), compiled code, the runtime and parse and bytecode
 (11.7 to 12.9 %, of code the page runs for the first time).
 
+Warm-up by time (#654, 2026-11-24). The second phase of Turnstile's challenge (from its `pat` to
+its `ci` request) had not been profiled: there the interpreter was 35 to 55 % of the engine thread
+(local, Chromium host), all of it in functions that compiled code called through the VM entry of
+JSC's generic call. The VM's large functions (19 to 78 KB of bytecode) fired every 100 to 150 ms
+and reached their 512 fires 35 to 45 s after their first; in one run a single step took 38 s. Now
+such a function compiles once its sampled time in the interpreter reaches its budget: a function
+of 10.5 KB whose loop runs 10000 long iterations (20 fires, `tests/engine/pages/jit-warmup.html`)
+compiles after 104 to 119 ms, its next call takes 92 to 106 ms instead of 221 to 254 ms (the
+first 232 to 254 ms instead of 242 to 293 ms: its rest runs in Liftoff). In one challenge under a
+CPU limit 13 of 16 large functions compiled by their time, after 9 to 393 of their 512 fires.
+peet.ws's managed widget (local, Chromium host at 1280x800, 10 interleaved runs each, load 4 to
+12): `pat` 3.8 to 12.9 s after `fo` (median 7.3) against 4.3 to 16.5 s (median 8.5), the checkbox
+20.1 to 36.7 s after the challenge's `rch` request (median 24.7) against 20.5 to 59.3 s (median
+26.6), the longest step 5.3 to 16.0 s (median 9.0) against 5.2 to 24.2 s (median 7.5): within
+the spread, but for the runs of a heavy VM. With every renderer thread at a third of a CPU (cgroup, the order
+of a Moto G71; 5 interleaved runs each) `ci` went out 14.2 to 84.8 s after `fo` (median 28.9, 4
+times with 200) against 47.5 to 97.4 s (median 54.4, 3 times with 200), `pat` and the checkbox as
+before (medians 18.0 against 17.3 s and 92.8 against 94.7 s after `rch`); a 70 % CPU quota for
+the whole browser instead made `pat` slower (median 37.5 against 22.1 s, 4 runs each), likely as
+V8's background compiles share that quota with the engine thread. Speedometer 3.1
+(NewsSite-Next and TodoMVC-React-Redux, 5 iterations, 6 interleaved runs each) 1.04 to 1.13
+(median 1.11) against 0.87 to 1.15 (median 1.05). Sampling functions from 380 bytes with a
+budget of at least 50 ms gave the checkbox a median of 23.7 against 27.2 s, but Speedometer
+stayed below 1.0 in 6 of 15 runs against 0 of 14, and was not taken; neither was a fire count of 64
+for functions from 8 KB (within the spread). A limit of the samples: a safepoint is a loop or a
+function's entry, so a function without a loop is credited to its caller, whose loop is the next
+safepoint after it returned.
+
 Hashing code (#424, `tests/jsc/jit-hash.js`, jsc shell): bit operations on uint32 values 5x and
 typed array elements 3x the time of their int32 twins before, now 1.8x and 1.3x; `Math.imul` 6.5x
 an addition before, 2x now; a host call about 20 % cheaper. In the engine, the loops of
@@ -420,7 +458,10 @@ to 2.7 s, Chromium 24 to 44 ms).
    its code. Scope access inline for the type a site had when its function compiled, element
    access inline for int32 and contiguous butterflies, array literals and getters without a call
    into C++ or a VM entry, `===` of strings made at run time in WASM (#646): a VM's dispatch 1.8 to
-   2 times as fast, Turnstile's managed widget about a quarter sooner. Next: calls between
-   functions, values in WASM locals between safepoints (a register written and read again in a
-   block is loaded from the frame each time), the warm-up of an obfuscated VM's large functions
-   now that compiled code is faster, `===` of ropes.
+   2 times as fast, Turnstile's managed widget about a quarter sooner. A large function also
+   compiles by its sampled time in the interpreter, not only by its fires (#654): the VM's large
+   functions had warmed up for up to 45 s. Next: calls between functions (`compiledCall`,
+   `slow_path_enter`, the VM entry of an interpreted callee: 10 to 13 % of the challenge's second
+   phase), values in WASM locals between safepoints (a register written and read again in a
+   block is loaded from the frame each time), `===` of ropes, and the third phase of the
+   challenge (from `ci` to the checkbox, 15 to 25 s of mostly compiled code).

@@ -759,14 +759,26 @@ void runNestedEventLoop(const Function<bool()>& done, const Function<bool()>& on
 // while urgent work waits
 extern "C" void bl_wtf_set_run_loop_yield_check(bool (*)());
 
+// The JIT's samples of interpreted code (engine/jit/WasmJIT.cpp): while a large function warms up
+// it asks for a safepoint of the running script after a few ms and takes the sample there
+extern "C" void bl_jsc_set_jit_sample_requester(void (*)(JSC::VM&, double seconds));
+extern "C" void bl_jsc_jit_sample(JSC::VM&);
+
+static void requestJITSample(JSC::VM& vm, double seconds)
+{
+    if (&vm == s_workVM.load(std::memory_order_relaxed))
+        requestSafepointAfter(WTF::Seconds(seconds));
+}
+
 // At a safepoint of the running script (patch 0149), also one that requestSafepoint or the
-// watchdog brought it to: a hidden view's script (HiddenViews.h) or a long one of a cross-site
-// frame (FramePause.h) pauses while urgent work waits. Not inside a nested event loop, whose work
-// goes on where it was.
+// watchdog brought it to: the JIT's sample, then a hidden view's script (HiddenViews.h) or a long
+// one of a cross-site frame (FramePause.h) pauses while urgent work waits. Not inside a nested
+// event loop, whose work goes on where it was.
 extern "C" void bl_jsc_set_safepoint_work(void (*)(JSC::VM&));
 
 static void atSafepoint(JSC::VM& vm)
 {
+    bl_jsc_jit_sample(vm);
     if (!urgentWorkWaiting() || s_nestedEventLoops || &vm != WebCore::commonVMOrNull())
         return;
     if (!pauseHiddenScriptForUser() && userWorkWaiting())
@@ -779,6 +791,7 @@ void initializeEngineLoop()
     installScriptWatchdog();
     bl_wtf_set_run_loop_yield_check(urgentWorkWaiting);
     bl_jsc_set_safepoint_work(atSafepoint);
+    bl_jsc_set_jit_sample_requester(requestJITSample);
     // Called while the RunLoop holds its lock, possibly from another thread:
     // only schedule here, never work directly.
     WTF::RunLoop::setWakeUpCallback([] {

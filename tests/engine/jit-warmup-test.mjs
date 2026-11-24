@@ -2,8 +2,11 @@
 // tests/engine/pages/jit-warmup.html in the engine (node) with BL_JIT=2 and reads the compiles in
 // the JIT's log. A large function whose loop ran a few thousand times and a mid-sized one called a
 // few thousand times stay interpreted, the same large function with millions of iterations and a
-// small hot function compile. Before, a large function compiled after 2000 iterations (4 fires),
-// whatever its size: React and Next.js code ran 1.5 times slower than without the JIT.
+// small hot function compile, and so does a large function whose loop runs long iterations in the
+// interpreter, although it fires seldom (its time in the interpreter counts, sampled at
+// safepoints; by its fires alone it stayed interpreted). Before, a large function compiled after
+// 2000 iterations (4 fires), whatever its size: React and Next.js code ran 1.5 times slower than
+// without the JIT.
 //   node tests/engine/jit-warmup-test.mjs [engine-dir]
 import { readFileSync } from 'node:fs';
 import { enginePath, runEngine } from './engine-node.mjs';
@@ -11,7 +14,7 @@ import { enginePath, runEngine } from './engine-node.mjs';
 process.env.BL_JIT = '2';
 const compiled = new Set();
 const COLD = ['bigOnce', 'warmMid'];
-const HOT = ['bigHot', 'hot', 'driveHot'];
+const HOT = ['bigHot', 'hot', 'driveHot', 'vmLoop'];
 
 function expected() {
   let s = 0;
@@ -22,7 +25,13 @@ function expected() {
   for (let i = 0; i < 3000000; i++) big = (big + i) | 0;
   let drive = 0;
   for (let i = 0; i < 500000; i++) drive = ((drive + i) * 3 + 1) | 0;
-  return [s, s, s, mid, big, drive].join(',');
+  let vm = 0;
+  for (let i = 0; i < 10000; i++) {
+    let v = i;
+    for (let k = 0; k < 200; k++) v = ((v * 3 + 1) | 0) ^ 7;
+    vm = (vm + v) | 0;
+  }
+  return [s, s, s, mid, big, drive, vm].join(',');
 }
 
 const timer = setTimeout(() => {

@@ -10,6 +10,10 @@ const bigOnce = eval('(function bigOnce(n) { let s = 0; for (let i = 0; i < n; i
 const warmMid = eval('(function warmMid(n) { let s = n; ' + filler.repeat(30) + 'return (s + 1) | 0; })');
 // The same large function with a loop of millions of iterations, and a small hot function
 const bigHot = eval('(function bigHot(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i) | 0; ' + filler.repeat(300) + 'return s; })');
+// A large function whose loop runs long iterations, like an obfuscated VM's dispatch that runs a
+// whole instruction per iteration: it fires seldom (20 times here, 512 before it compiles by its
+// fires) but runs a few hundred ms in the interpreter, which compiles it
+const vmLoop = eval('(function vmLoop(n) { let t = 0; for (let i = 0; i < n; i++) { let s = i; ' + 's = (s * 3 + 1) | 0; s = (s ^ 7) | 0; '.repeat(200) + 't = (t + s) | 0; } return t; })');
 function hot(a) { return (a * 3 + 1) | 0; }
 function driveHot(n) { let s = 0; for (let i = 0; i < n; i++) s = hot(s + i); return s; }
 
@@ -19,6 +23,6 @@ for (let round = 0; round < 3; round++)
 let mid = 0;
 for (let i = 0; i < 3000; i++)
   mid = (mid + warmMid(i)) | 0;
-results.push(mid, bigHot(3000000), driveHot(500000));
+results.push(mid, bigHot(3000000), driveHot(500000), vmLoop(10000));
 console.log('JIT-WARMUP done ' + results.join(','));
 </script>

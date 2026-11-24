@@ -1026,6 +1026,22 @@ browser (Safari keeps Cmd+L, T and W for itself).
    `pat`, checkbox after 113 s). Open: the Moto's criterion (first phase within 20 s in 3 of 3,
    checkbox within 90 s, no step over 15 s) needs the engine's JS about 2.5 times faster there,
    first the code size of compiled large functions (phase 4 of [jit.md](jit.md)).
+   Cloudflare limits the challenge's `ci` request too (2026-11-24, 14 local runs and the Moto):
+   sent at most 66 s after `fo` it got 200, 76 s or more after it 400, so a slow second phase
+   (`pat` to `ci`, 30 to 94 s on the Moto with single steps of 14 to 42 s) leaves only the
+   widget's stale restart. That phase is another message of the challenge's worker than the
+   first; its engine thread was 35 to 55 % interpreter, the VM's large functions (19 to 78 KB of
+   bytecode) firing every 100 to 150 ms and compiling only 35 to 45 s after their first fire. They
+   now also compile by their sampled time in the interpreter (#654, [jit.md](jit.md#measured)):
+   with every renderer thread at a third of a CPU `ci` went out after 28.9 s (median of 5, 4 of 5
+   with 200) instead of 54.4 s (3 of 5), on a desktop host the checkbox came 24.7 s after `rch`
+   (median of 10, 8 within 30 s) against 26.6 s (8 of 10), at a load of 4 to 12, not 15 to 25.
+   Still open: on the Moto through the public demo (the build before #654, which needs a deploy)
+   the checkbox came 98 to 143 s after the load started, once from the stale restart; locally
+   a third phase (from `ci` to the checkbox) takes 15 to 25 s of mostly compiled code, and calls
+   between functions are 10 to 13 % of the second phase (`compiledCall`, `slow_path_enter`, the
+   VM entry of an interpreted callee). On a Firefox host (headed, load 6 to 13) the checkbox came
+   31.4, 40.2 and 45.3 s after `rch` (the engine before: 42.4 and 38.5 s), within 45 s in 2 of 3.
    Hosts without WebGL 2 (headless
    Firefox, a blocklisted GPU; 2026-11-20, #635): the engine worker owned the view canvases there,
    and every read of one by the browser while page script ran (a screenshot, the measurement's

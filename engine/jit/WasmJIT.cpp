@@ -70,6 +70,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
+#include <wtf/MonotonicTime.h>
 #include <wtf/NeverDestroyed.h>
 
 namespace JSC::LLInt {
@@ -238,11 +239,39 @@ HashSet<const CodeBlock*>& compiledCodeBlocks() WTF_REQUIRES_LOCK(compiledCodeBl
 // scope, element and property access in functions of the module it is 8 to 20 times, and the
 // large functions of an obfuscated VM (Turnstile's challenge, 4 to 12 KB) ran interpreted for most
 // of a minute at a fire every 30 to 50 ms (#630).
+constexpr unsigned maximumWarmUpFires = 512;
+
 unsigned warmUpFires(CodeBlock* codeBlock)
 {
     size_t size = codeBlock->instructions().size();
-    return static_cast<unsigned>(std::min<size_t>(64 + size / 6, 512));
+    return static_cast<unsigned>(std::min<size_t>(64 + size / 6, maximumWarmUpFires));
 }
+
+// The fires count calls and loop iterations, not the time they take. An obfuscated VM's large
+// functions (Turnstile's challenge: 19 to 78 KB of bytecode) fire every 100 to 150 ms, as one of
+// their iterations runs a whole instruction of the VM: their 512 fires took 35 to 45 s, most of a
+// step of 38 s in which the interpreter was 35 to 55 % of the engine thread. So for the functions
+// whose warm-up is at its maximum (from about 2.7 KB of bytecode) the time they run in the
+// interpreter counts too, sampled at the safepoints of the running script (bl_jsc_jit_sample):
+// such a function compiles once that time is 30 times the estimated cost of its compile (Liftoff
+// compiles about 30 MB of WASM per second on a desktop, the module is about 8 times the bytecode:
+// some 0.3 us per byte; a phone is slower at both alike), and at least 100 ms. Like the fires,
+// by UnlinkedCodeBlock.
+bool warmsUpByTime(CodeBlock* codeBlock)
+{
+    return warmUpFires(codeBlock) == maximumWarmUpFires;
+}
+
+Seconds interpretedTimeBeforeCompile(CodeBlock* codeBlock)
+{
+    return std::max(100_ms, Seconds::fromMicroseconds(9) * static_cast<double>(codeBlock->instructions().size()));
+}
+
+// The interval of the samples while such a function warms up. A sample is a safepoint the
+// embedder brings the script to (an atomic flag that the interpreter and compiled code check at
+// loops and function entries), so this costs a few safepoints per 10 ms of interpreted code that
+// warms up, nothing otherwise.
+constexpr Seconds sampleInterval = 5_ms;
 
 // How often the counter fired for the code of CodeBlocks not compiled yet. By UnlinkedCodeBlock,
 // like the counter: a full GC throws away a CodeBlock that is not compiled and older than 5 s, and
@@ -254,6 +283,8 @@ struct WarmUp {
     unsigned fires { 0 };
     // The thread's fire count at this entry's last fire
     uint64_t lastFire { 0 };
+    // The time its code ran in the interpreter, by samples (interpretedTimeBeforeCompile)
+    Seconds interpreted;
 };
 
 // The entries of this thread's VM. Their age counts in fires of the whole thread, not in time: a
@@ -263,6 +294,10 @@ struct WarmUps {
     HashMap<UnlinkedCodeBlock*, WarmUp> map;
     uint64_t fires { 0 };
     size_t pruneAt { 0 };
+    // The sample asked for (bl_jsc_jit_sample), when it was asked for
+    MonotonicTime sampleRequested;
+    bool samplePending { false };
+    unsigned sampleChecks { 0 };
 };
 WarmUps& warmUps()
 {
@@ -292,6 +327,27 @@ WarmUp& warmUpOf(CodeBlock* codeBlock)
     auto& entry = state.map.add(codeBlock->unlinkedCodeBlock(), WarmUp { }).iterator->value;
     entry.lastFire = now;
     return entry;
+}
+
+// Set by the embedder (engine/src/EngineLoop.cpp): brings the running script of the VM to a
+// safepoint after the delay, where the embedder calls bl_jsc_jit_sample. Without one (the jsc
+// shell) only the fires count.
+void (*sampleRequester)(VM&, double seconds);
+
+void requestSample(VM& vm, WarmUps& state)
+{
+    if (!sampleRequester)
+        return;
+    // A request whose safepoint never came (the script had ended) is renewed; the clock only at
+    // every 8th fire while one waits
+    if (state.samplePending && (++state.sampleChecks & 7))
+        return;
+    auto now = MonotonicTime::now();
+    if (state.samplePending && now - state.sampleRequested < sampleInterval * 10)
+        return;
+    state.samplePending = true;
+    state.sampleRequested = now;
+    sampleRequester(vm, sampleInterval.seconds());
 }
 
 uint32_t compiledFunction(CodeBlock* codeBlock)
@@ -6599,9 +6655,20 @@ void wasmJITTierUp(CodeBlock* codeBlock)
     if (enabled() && !otherVM && !compiledCode().contains(codeBlock)) {
         // Not yet hot enough: the interpreter's counter once more
         auto& entry = warmUpOf(codeBlock);
-        if (entry.fires < warmUpFires(codeBlock) && ++entry.fires < warmUpFires(codeBlock)) {
-            codeBlock->unlinkedCodeBlock()->llintExecuteCounter().setNewThreshold(Options::thresholdForJITAfterWarmUp(), codeBlock);
-            return;
+        unsigned fires = warmUpFires(codeBlock);
+        if (entry.fires < fires)
+            ++entry.fires;
+        unsigned fired = entry.fires;
+        Seconds interpreted = entry.interpreted;
+        if (entry.fires < fires) {
+            if (!warmsUpByTime(codeBlock) || entry.interpreted < interpretedTimeBeforeCompile(codeBlock)) {
+                if (warmsUpByTime(codeBlock))
+                    requestSample(codeBlock->vm(), warmUps());
+                codeBlock->unlinkedCodeBlock()->llintExecuteCounter().setNewThreshold(Options::thresholdForJITAfterWarmUp(), codeBlock);
+                return;
+            }
+            // Warm by its time: the next CodeBlock of this code compiles at its first fire too
+            entry.fires = fires;
         }
         if (!table)
             table = makeUnique<CallTargets>(codeBlock->vm());
@@ -6620,7 +6687,7 @@ void wasmJITTierUp(CodeBlock* codeBlock)
         }
         if (level() >= 2) {
             if (bytes)
-                dataLogLn("[jit] ", *codeBlock, ": ", bytes->size(), " bytes, ", compiler.branchHints(), " branch hints, function ", compiled.function);
+                dataLogLn("[jit] ", *codeBlock, ": ", bytes->size(), " bytes, ", compiler.branchHints(), " branch hints, function ", compiled.function, ", warm after ", fired, " fires and ", static_cast<int>(interpreted.milliseconds()), " ms interpreted");
             else
                 dataLogLn("[jit] ", *codeBlock, ": not compiled (", compiler.tooLarge() ? "too large" : opcodeNames[compiler.unsupported()], ")");
         }
@@ -6695,3 +6762,44 @@ bool wasmJITHasCompiledCode(const CodeBlock* codeBlock)
 }
 
 } // namespace JSC::LLInt
+
+// The embedder's side of the samples (engine/src/EngineLoop.cpp), declared there: it sets the
+// function that brings the running script to a safepoint after a delay, and calls
+// bl_jsc_jit_sample at its safepoints
+extern "C" void bl_jsc_set_jit_sample_requester(void (*)(JSC::VM&, double seconds));
+extern "C" void bl_jsc_jit_sample(JSC::VM&);
+
+extern "C" void bl_jsc_set_jit_sample_requester(void (*requester)(JSC::VM&, double seconds))
+{
+    JSC::LLInt::sampleRequester = requester;
+}
+
+// A sample (requestSample): the time since the request counts for the code of the top frame when
+// the interpreter runs it and it warms up, and the next sample is asked for while the interpreter
+// runs. A safepoint that came for other work before half the interval is no sample; the request's
+// own safepoint follows.
+extern "C" void bl_jsc_jit_sample(JSC::VM& vm)
+{
+    using namespace JSC::LLInt;
+    auto& state = warmUps();
+    if (!state.samplePending)
+        return;
+    Seconds elapsed = MonotonicTime::now() - state.sampleRequested;
+    if (elapsed < sampleInterval / 2)
+        return;
+    state.samplePending = false;
+    JSC::CallFrame* frame = vm.topCallFrame;
+    // At a function's entry (the safepoint of its stack check, bytecode offset 0) its frame ran
+    // nothing yet: the time was its caller's, unless that is beyond a VM entry. Credited to the
+    // callee, the handlers of an obfuscated VM took the samples of its dispatch loop.
+    if (frame && frame->codeBlock() && !frame->callSiteIndex().bits())
+        frame = frame->callerFrameOrEntryFrame() == vm.topEntryFrame ? nullptr : frame->callerFrame();
+    JSC::CodeBlock* codeBlock = frame ? frame->codeBlock() : nullptr;
+    if (!codeBlock || &codeBlock->vm() != &vm || compiledCode().contains(codeBlock) || !warmsUpByTime(codeBlock))
+        return;
+    auto it = state.map.find(codeBlock->unlinkedCodeBlock());
+    if (it == state.map.end())
+        return;
+    it->value.interpreted += std::min(elapsed, sampleInterval * 4);
+    requestSample(vm, state);
+}
