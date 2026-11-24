@@ -186,6 +186,7 @@ const blTest = {
   pagePixel: (x, y) => browser.debug.pagePixel(active, x, y),
   pageRow: (y) => browser.debug.pageRow(active, y),
   memory: (report) => browser.debug.memory(report),
+  memoryUsed: () => browser.debug.memoryUsed(),
   memoryPressure: () => browser.debug.memoryPressure(),
   memoryLimit: (megabytes) => browser.debug.memoryLimit(megabytes),
   crash: (kind) => browser.debug.crash(kind),

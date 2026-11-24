@@ -70,7 +70,7 @@ static constexpr Seconds firstFrameWait = 5_s;
 static constexpr Seconds checkInterval = 250_ms;
 
 static bool s_waiting;
-static MonotonicTime s_lastInput;
+static MonotonicTime s_lastInput = -MonotonicTime::infinity();
 // NaN until the first time: no comparison holds
 static MonotonicTime s_lastTyping = MonotonicTime::nan();
 static MonotonicTime s_navigationStart = MonotonicTime::nan();
@@ -178,6 +178,11 @@ bool hiddenViewsWaitForUser()
 bool userJustWorked()
 {
     return MonotonicTime::now() < s_lastInput + quietTime;
+}
+
+Seconds sinceUserWorked()
+{
+    return MonotonicTime::now() - s_lastInput;
 }
 
 bool userNeedsEngineThread()

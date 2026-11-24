@@ -6,7 +6,9 @@
 //   (caches, decoded images, back/forward cache) above BL_MEMORY_RELEASE_MB
 //   (192 MB, from the core 512 MB on hosts with 8 GB of memory or more; above
 //   BL_MEMORY_PRESSURE_MB when that is lower) at every growth of malloc by
-//   32 MB, so free space is reused first. The
+//   32 MB, so free space is reused first. Within 3 s of input it waits (unless
+//   memory is short), so it does not block the page's answer to a tap or back.
+//   The
 //   compiled JS of the pages (bytecode and JIT code) and the page left last
 //   (kept in the back/forward cache) go too only once memory is short (see
 //   limitIsNear): rebuilding the code blocked the pages for seconds, the GC
@@ -18,7 +20,11 @@
 //   does not need
 // - at every growth of malloc by 32 MB, once the malloc area ends above
 //   reserveFrom, grows the memory ahead so that a reserve stays free above the
-//   malloc area; when that fails, the current size is the limit
+//   malloc area; when that fails, the current size is the limit. Not where the
+//   memory reserved its full 4 GB in a 64 bit address space
+//   (engine/js/engine-memory.js sets BL_MEMORY_RESERVE=0): no growth fails
+//   there before the host's memory runs out, and the untouched reserve made the
+//   memory of every heavy page about 130 MB bigger
 // - then reports "memory-pressure" {footprint, limit, level}: "critical" once
 //   memory is short, else "moderate" above BL_MEMORY_PRESSURE_MB (fragmentation
 //   and big blocks make 4 GB scarce even when little is in use; on iPhone and
@@ -76,7 +82,7 @@ static constexpr uint64_t memoryReserve = 128 << 20;
 // browser runs out (in i386 Chromium the engine reached 977 to 1015 MB, a
 // second memory 640 MB), and ordinary pages keep the memory size they have
 // without the reserve (CNN about 300 MB of malloc area): Emscripten grows the
-// memory only by 20 %, at most 96 MB, beyond what malloc asks for, so the
+// memory at most 16 MB beyond what malloc asks for (engine.cmake), so the
 // reserve would make it about 128 MB bigger. The first check above this still
 // finds a limit from about 600 MB on in time.
 static constexpr uint64_t reserveFrom = 384 << 20;
@@ -169,15 +175,55 @@ static bool growTo(uint64_t size)
 }
 
 // Grows the memory so that the reserve is free above the malloc area. When it
-// cannot grow that far, the limit is reached.
+// cannot grow that far, the limit is reached. Not where the memory can grow to
+// its maximum (BL_MEMORY_RESERVE=0), unless a test limit stands in for a 32 bit
+// browser.
 static void keepReserve()
 {
     uint64_t end = mallocEnd();
+    uint64_t testLimit = s_testLimit.load();
+    if (!engineConfig().memoryReserve && !testLimit)
+        return;
     if (s_limit || end < reserveFrom || growTo(end + memoryReserve))
         return;
-    uint64_t testLimit = s_testLimit.load();
     s_limit = testLimit ? testLimit : emscripten_get_heap_size();
     debugLog("Memory limit %llu MB (malloc area %llu MB)", mb(s_limit), mb(malloc_footprint()));
+}
+
+// A release blocks the engine thread for its full collection (0.1 to 0.6 s on a phone). Due right
+// after input it would land in the page's answer to it (a tap that opens an article, back), so it
+// waits until no input came for this long, unless memory is short. The page's answer to the input
+// mostly frees and takes memory again before the release would have freed it.
+static constexpr Seconds releaseQuietTime = 3_s;
+// Under steady input (a long scroll) a release waits no longer than this
+static constexpr Seconds releaseLongestWait = 10_s;
+
+static MonotonicTime s_releaseWaitsSince = MonotonicTime::nan();
+
+// Its work item ends with checkMemory, which releases then
+static void releaseTimerFired() { }
+
+static RunLoop::Timer& releaseTimer()
+{
+    static NeverDestroyed<RunLoop::Timer> timer(RunLoop::mainSingleton(), "MemoryRelease"_s, releaseTimerFired);
+    return timer;
+}
+
+static bool releaseWaitsForUser()
+{
+    auto now = MonotonicTime::now();
+    if (s_releaseWaitsSince.isNaN())
+        s_releaseWaitsSince = now;
+    auto quiet = releaseQuietTime - sinceUserWorked();
+    if (quiet <= 0_s || now - s_releaseWaitsSince >= releaseLongestWait) {
+        if (s_releaseWaitsSince != now)
+            debugLog("Memory release waited %.0f ms for the user", (now - s_releaseWaitsSince).milliseconds());
+        s_releaseWaitsSince = MonotonicTime::nan();
+        return false;
+    }
+    if (!releaseTimer().isActive())
+        releaseTimer().startOneShot(quiet);
+    return true;
 }
 
 void checkMemory(ReleaseCaches release)
@@ -188,6 +234,12 @@ void checkMemory(ReleaseCaches release)
     if (!releaseDue && !checkDue)
         return;
     bool budgetExceeded = overBudget(footprint);
+    // Memory is short there, or may be (the area full above the budget is measured after a release)
+    if (releaseDue && !budgetExceeded && !limitIsNear() && releaseWaitsForUser()) {
+        releaseDue = false;
+        if (!checkDue)
+            return;
+    }
     // Full above the budget, measured after the release that keeps the JS code
     // and the page left last; then they go too, and memory is short only if
     // the area is still full without them

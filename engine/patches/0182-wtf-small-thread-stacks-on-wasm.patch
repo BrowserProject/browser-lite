@@ -1,0 +1,18 @@
+diff --git a/Source/WTF/wtf/Threading.cpp b/Source/WTF/wtf/Threading.cpp
+index 830f8b7f89..9faddde5dc 100644
+--- a/Source/WTF/wtf/Threading.cpp
++++ b/Source/WTF/wtf/Threading.cpp
+@@ -106,6 +106,13 @@ static std::optional<size_t> NODELETE stackSize(ThreadType threadType)
+ #elif OS(DARWIN) && (ASAN_ENABLED || ASSERT_ENABLED)
+     if (threadType == ThreadType::Compiler)
+         return 1 * MB; // ASan / Debug build needs more stack space.
++#elif OS(EMSCRIPTEN)
++    // browser-lite: a thread's stack is a block of the WebAssembly memory, which never shrinks,
++    // and holds only what the code puts in memory (not the locals of the WebAssembly functions).
++    // Threads that run JS (workers, audio worklets) keep the default of the build; the others
++    // used at most about 100 KB, so they get the 1 MB WebKit gives every thread on musl.
++    if (threadType != ThreadType::JavaScript && threadType != ThreadType::Audio)
++        return 1 * MB;
+ #elif OS(WINDOWS)
+     // WebGL conformance tests need more stack space <https://webkit.org/b/261297>
+     if (threadType == ThreadType::Graphics)

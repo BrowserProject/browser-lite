@@ -77,6 +77,9 @@ struct EngineConfig {
     // BL_MEMORY_RELEASE_MB: for phones; the core sets 512 on hosts with 8 GB of memory or more
     size_t memoryReleaseMB { 192 };
     size_t memoryPressureMB { 3072 }; // BL_MEMORY_PRESSURE_MB
+    // BL_MEMORY_RESERVE: 0 where the WASM memory can grow to its maximum (engine/js/engine-memory.js),
+    // so MemoryWatch.cpp grows no reserve ahead to find a limit
+    bool memoryReserve { true };
     uint64_t indexedDBQuotaMB { 256 }; // BL_INDEXEDDB_QUOTA_MB
     uint64_t databaseMaxMB { 512 }; // BL_DATABASE_MAX_MB
     uint64_t httpCacheMB { 400 }; // BL_HTTP_CACHE_MB

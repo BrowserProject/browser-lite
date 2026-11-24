@@ -4,7 +4,8 @@
 // beyond the limit the page gets a RangeError and the engine keeps running. Without the limit the
 // memory grows on without an event. On an iPhone host the core sets a budget of 512 MB: iOS ends
 // the whole page before a growth fails (#358). Near the limit, or above the budget with the malloc
-// area full after the release (the page holds what it allocated), the level is 'critical'.
+// area full after the release (the page holds what it allocated), the level is 'critical'. On a
+// 64 bit host the memory grows with malloc, without the reserve that finds the limit.
 //
 //   node tests/core/memory-test.mjs [engine-dir]
 import {
@@ -132,6 +133,30 @@ check(
     simulated.level === 'critical',
   JSON.stringify(simulated),
 );
+
+// A 64 bit host, where the memory reserved its full 4 GB: no reserve grows ahead of the malloc
+// area (BL_MEMORY_RESERVE=0 from engine/js/engine-memory.js). Before, every page above 384 MB of
+// malloc area had about 128 MB of untouched memory above it.
+{
+  const fresh = await browser.newPage();
+  const freshResults = collect(fresh);
+  check('64 bit host: page starts', await openHost(fresh, stack.app({ url: siteURL })));
+  check('64 bit host: page loaded', (await freshResults.wait('loaded')) === '1');
+  let freshResult = 'ok';
+  for (let step = 1; step <= 28 && freshResult === 'ok'; step++) {
+    await fresh.evaluate((mb) => window.blTest.eval(`allocate(${mb})`), STEP_MB);
+    freshResult = await freshResults.wait(`allocated${step}`, 20000);
+  }
+  await fresh.waitForTimeout(500);
+  const sizeMB = Math.round((await fresh.evaluate(() => window.blTest.memory())) / MB);
+  const usedMB = Math.round((await fresh.evaluate(() => window.blTest.memoryUsed())) / MB);
+  check(
+    '64 bit host: the memory grows with malloc, without a reserve ahead',
+    freshResult === 'ok' && usedMB > 450 && sizeMB - usedMB < 96,
+    `memory ${sizeMB} MB, malloc in use ${usedMB} MB`,
+  );
+  await fresh.close();
+}
 
 // iPhone host: memory-pressure from 512 MB of footprint on, without a limit and without a switch
 const IPHONE_UA =

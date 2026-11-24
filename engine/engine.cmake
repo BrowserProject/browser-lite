@@ -223,6 +223,9 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-sDEFAULT_PTHREAD_STACK_SIZE=4MB"
     "SHELL:-sINITIAL_MEMORY=256MB"
     "SHELL:-sALLOW_MEMORY_GROWTH=1"
+    # A growth adds at most 16 MB beyond what was asked for (default 20 %, up to 96 MB): the memory
+    # never shrinks, and above 384 MB of malloc area MemoryWatch.cpp grows it ahead anyway
+    "SHELL:-sMEMORY_GROWTH_GEOMETRIC_CAP=16MB"
     "SHELL:-sMAXIMUM_MEMORY=4GB"
     # The JIT adds its functions to the table (engine/jit)
     "SHELL:-sALLOW_TABLE_GROWTH=1"
@@ -366,6 +369,9 @@ target_link_options(BrowserLiteWTFTests PRIVATE
     "SHELL:-pthread"
     "SHELL:-sPTHREAD_POOL_SIZE=2"
     "SHELL:-sALLOW_MEMORY_GROWTH=1"
+    # A growth adds at most 16 MB beyond what was asked for (default 20 %, up to 96 MB): the memory
+    # never shrinks, and above 384 MB of malloc area MemoryWatch.cpp grows it ahead anyway
+    "SHELL:-sMEMORY_GROWTH_GEOMETRIC_CAP=16MB"
     "SHELL:-sENVIRONMENT=node"
     "SHELL:--profiling-funcs"
 )

@@ -77,7 +77,8 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
   - `engine-pre.js`: module hooks of the engine (canvases, file writes, crash reason, shutdown,
     after which the ended workers no longer hold the module and its memory)
   - `engine-memory.js` (`--js-library`): the engine's memory, with a maximum of 2 or 1 GB when
-    4 GB of address space are not free (iOS Safari has room for three such memories per process)
+    4 GB of address space are not free (iOS Safari has room for three such memories per process);
+    with the full 4 GB in a 64 bit address space it sets `BL_MEMORY_RESERVE=0`
   - `deferred.js`: loads the chunks `engine.deferred-<n>.wasm` into every thread (`Module.blSetDeferred`)
   - `workers.js`: loaded web workers for new threads, a reserve refilled in the background; a
     worker whose `engine.js` did not load is replaced, its thread moves to the replacement
@@ -95,8 +96,9 @@ Adwaita theme reads only from GTK's settings) comes as patches from `patches/`.
     `MemoryWatch.cpp` (releases caches above `BL_MEMORY_RELEASE_MB`, 192 MB or from the core 512 MB
     on hosts with 8 GB or more, the pages' compiled JS and the page left last in the
     back/forward cache only when memory is short (patch 0088), JSC's code cache at every release
-    and when a view leaves its page (patch 0102), a full GC soon after views closed, finds the
-    memory limit, memory pressure
+    and when a view leaves its page (patch 0102), a full GC soon after views closed, a release
+    due within 3 s of input waits until the user paused, finds the memory limit where it can be
+    reached (`BL_MEMORY_RESERVE`), memory pressure
     `moderate` above the budget and `critical` when memory is still short after the release of the JS code),
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
   - Views: `WebView.cpp` (also Copy image and Save as of the context menu, the menu of the menu key and Shift+F10, the word selection of a long press, paint holding: the page

@@ -389,6 +389,21 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   the end and in 7 of 14 loads 15 to 88 MB more WASM memory). The Moto G71 reports 4 GB and
   keeps 192 MB. Still open: above 512 MB a desktop releases at every growth by 32 MB again, and a
   phone that reports 8 GB takes the desktop threshold.
+  Phones on SPAs (#651): a Moto G71 reached 746 and 763 MB of WASM memory on 20min.ch and
+  blick.ch (home, an article, Back) and released for 318 to 590 ms right in a tap or Back. Of that
+  memory about 150 MB were never used: above 384 MB of malloc area the engine grew a reserve of
+  128 MB ahead to find a 32 bit browser's limit, and Emscripten grew by 20 % (up to 96 MB) more
+  than asked. Now the reserve is only grown where the memory could not reserve its full 4 GB in a
+  64 bit address space, a growth adds at most 16 MB, JS heap blocks are 16 KB instead of 64 KB
+  and threads without JS have 1 MB stacks, and a release due within 3 s of input or a host
+  navigation waits until the user paused 3 s. Measured 2026-11-24, the same flow (consent, 25 s
+  home, tap the first article, 25 s, Back, 25 s): Moto G71 through the tunnel 544 and 545 MB on
+  20min.ch, 466 and 466 MB on blick.ch, the old engine in the same session 643 and 637 MB with a
+  377 ms release 0.1 s before the tap; locally (Chromium at 4x CPU throttling, 412 x 839,
+  deviceMemory 4, 2 interleaved runs) 586 and 589 instead of 765 and 765 MB on 20min.ch, 517
+  and 535 instead of 760 and 788 MB on blick.ch. No release over 200 ms within 3 s of a tap or
+  Back in any run; a release the input made due came 3 s after it (one after Back waited 717 ms).
+  The releases themselves still take 0.3 to 0.55 s on the phone, now while the user reads.
   Closing tabs whose tiles still paint no longer crashes the
   engine (#514, patch 0113): their painting jobs ran after the view's layer tree host was freed
   and called into it ("table index is out of bounds", "function signature mismatch" or "null
@@ -1539,10 +1554,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
   for the engine thread; 8 threads on `about:blank`, 16 on spiegel.de; almost untouched, so they
   count in the area but hardly in what iOS counts), JSC's 64 KB marked blocks in 2 MB slabs
   (about 90 MB for 35 MB of live JS heap; after scrolling 120 MB for 77 MB), and about 90 MB of
-  small blocks of DOM, style and layout. Marked blocks of 16 KB as on other platforms (the block
-  size follows `CeilingOnPageSize`, 64 KB for an unknown CPU) would hold the same live cells in
-  about 15 % less (counted by 16 KB quarter with a live cell), not yet done as it rebuilds all of
-  JSC and WebCore.
+  small blocks of DOM, style and layout. Since #651 marked blocks are 16 KB as on other platforms
+  (patch 0183, in slabs of 512 KB; the block size followed `CeilingOnPageSize`, 64 KB for an
+  unknown CPU) and threads that run no JS get 1 MB stacks (patch 0182).
   What iOS ends is the footprint of the whole Safari page, and most of it is outside the engine
   memory (2026-11-12, iPhone 16 with iOS 18, BrowserStack; a page fills memory with
   incompressible data until iOS ends it, so the room left is what the page did not use): a plain

@@ -70,6 +70,8 @@ async function backAfterRelease(label, env, names, heldMB = 0) {
     }
     await tab.waitForTimeout(500);
   }
+  // A release due within 3 s of a navigation of the host waits until it lies that far back
+  await tab.waitForTimeout(3500);
   const released = () => results.logs.filter((line) => line.includes('Memory released')).length;
   const before = released();
   for (let i = 0; i < 6 && released() === before; i++) {

@@ -1,6 +1,8 @@
 // Hidden views wait while the user works in a visible one (HiddenViews.cpp).
 #pragma once
 
+#include <wtf/Seconds.h>
+
 namespace WebCore {
 class Page;
 }
@@ -31,6 +33,10 @@ bool hiddenViewsWaitForUser();
 // Whether input to a visible view (or a view shown) came within the last moment, without the
 // longer holds of typing and navigation
 bool userJustWorked();
+
+// Time since the last input to a visible view, a navigation of the host or a view shown; infinite
+// before the first
+Seconds sinceUserWorked();
 
 // Whether the user waits for the engine thread: urgent work waits (input, a call of the host, the
 // compositor's answer) or hidden views wait for the user

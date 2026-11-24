@@ -1,0 +1,48 @@
+diff --git a/Source/JavaScriptCore/heap/BlockDirectory.cpp b/Source/JavaScriptCore/heap/BlockDirectory.cpp
+index c069adcb5b..b59e7139a7 100644
+--- a/Source/JavaScriptCore/heap/BlockDirectory.cpp
++++ b/Source/JavaScriptCore/heap/BlockDirectory.cpp
+@@ -69,7 +69,7 @@ void BlockDirectory::updatePercentageOfPagedOutPages(SimpleStats& stats)
+     // FIXME: We should figure out a solution for Windows and PlayStation.
+     // QNX doesn't have mincore(), though the information can be had. But since all mapped
+     // pages are resident, does it matter?
+-#if OS(UNIX) && !PLATFORM(PLAYSTATION) && !OS(QNX) && !OS(HAIKU)
++#if OS(UNIX) && !PLATFORM(PLAYSTATION) && !OS(QNX) && !OS(HAIKU) && !OS(EMSCRIPTEN)
+     size_t pageSize = WTF::pageSize();
+     ASSERT(!(MarkedBlock::blockSize % pageSize));
+     auto numberOfPagesInMarkedBlock = MarkedBlock::blockSize / pageSize;
+diff --git a/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.cpp b/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.cpp
+index 472dd6dcc4..6ecd341666 100644
+--- a/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.cpp
++++ b/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.cpp
+@@ -39,8 +39,8 @@
+ namespace JSC {
+ 
+ #if OS(EMSCRIPTEN)
+-// browser-lite: malloc cannot put a 64 KB block with 64 KB alignment into a
+-// freed 64 KB gap (dlmalloc asks for twice the size, mimalloc takes such
++// browser-lite: malloc cannot put a block with the alignment of its size into a
++// freed gap of that size (dlmalloc asks for twice the size, mimalloc takes such
+ // alignments from the allocator below it), so a JS heap that shrank and grew
+ // again left gaps behind and took new memory each time. MarkedBlocks come from
+ // slabs instead: plain malloc blocks of one size with room to align, so a
+diff --git a/Source/JavaScriptCore/heap/MarkedBlock.h b/Source/JavaScriptCore/heap/MarkedBlock.h
+index da473e2213..9a7eeb2619 100644
+--- a/Source/JavaScriptCore/heap/MarkedBlock.h
++++ b/Source/JavaScriptCore/heap/MarkedBlock.h
+@@ -77,7 +77,15 @@ public:
+     static constexpr size_t atomSize = 16; // bytes
+ 
+     // Block size must be at least as large as the system page size.
++#if OS(EMSCRIPTEN)
++    // browser-lite: CeilingOnPageSize is the WebAssembly page of 64 KB, which says nothing about
++    // how memory is handed out (blocks come from malloc, nothing is decommitted or protected).
++    // Blocks of 16 KB like on other systems: a block that keeps a few live cells keeps a quarter
++    // of the memory.
++    static constexpr size_t blockSize = 16 * KB;
++#else
+     static constexpr size_t blockSize = std::max(16 * KB, CeilingOnPageSize);
++#endif
+     static_assert(hasOneBitSet(blockSize)); // blockSize must be a power of two.
+     static_assert((WeakBlock::blockSize * 16) == 16 * KB);
+ 

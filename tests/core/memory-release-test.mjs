@@ -5,10 +5,13 @@
 // malloc grew by) does the release take the code too, and the first calls after it cost as much as the very first ones. The code of pages
 // and frames that are gone goes: a view that leaves its page and every release drop JSC's code
 // cache, which held the bytecode and the sources of every script evaluated (patch 0102). The
-// threshold comes from the host: 512 MB with 8 GB of memory or more, else 192 MB.
+// threshold comes from the host: 512 MB with 8 GB of memory or more, else 192 MB. A release due
+// within 3 s of input (or of a navigation of the host) waits until no input came for that long,
+// so it does not block the page's answer to a tap or back.
 //
 //   node tests/core/memory-release-test.mjs [engine-dir]
 import {
+  canvasOrigin,
   check,
   collect,
   finish,
@@ -41,6 +44,9 @@ window.allocate = (name, mb) => {
   keep.push(new Uint8Array(mb << 20).fill(1));
   console.log('RESULT ' + name + '=ok');
 };
+// Every press allocates like the answer of a page to a tap
+let taps = 0;
+addEventListener('pointerdown', () => allocate('tap' + ++taps, 48));
 window.drop = (name) => {
   keep.length = 0;
   console.log('RESULT ' + name + '=ok');
@@ -81,6 +87,10 @@ const { url: siteURL } = await serve((req, res) => {
 const stack = await startStack();
 const browser = await launch();
 
+// A release due within 3 s of input or of a navigation of the host (the load of the page) waits
+const QUIET_MS = 3000;
+const quiet = (page) => page.waitForTimeout(QUIET_MS + 500);
+
 // Times of the first calls, the next ones and the first ones after an automatic release
 async function measure(label, env) {
   const page = await browser.newPage();
@@ -95,6 +105,7 @@ async function measure(label, env) {
     return parseFloat(await results.wait(name));
   };
   const warm = Math.min(await run('warm1'), await run('warm2'));
+  await quiet(page);
   const released = () => results.logs.filter((line) => line.includes('Memory released')).length;
   const before = released();
   for (let i = 0; i < 4 && released() === before; i++) {
@@ -189,6 +200,7 @@ check(
   // Frames that came and went in a page that stays: the release takes their code
   await load(page, siteURL);
   await results.wait('cold');
+  await quiet(page);
   const released = () => results.logs.filter((line) => line.includes('Memory released')).length;
   // Grows malloc until it releases, the arrays (which count to the JS heap) go again
   const growUntilRelease = async (name) => {
@@ -240,6 +252,7 @@ async function releasesWhileGrowing(label, deviceMemory) {
   const results = collect(page);
   check(`${label}: host page starts`, await openHost(page, stack.app({ url: siteURL, log: '1' })));
   await results.wait('cold');
+  await quiet(page);
   const reported = await page.evaluate(() => navigator.deviceMemory);
   // 5 x 48 MB above the page: about 300 MB of malloc area, between the two thresholds
   for (let i = 0; i < 5; i++) {
@@ -267,6 +280,60 @@ check(
   phone.reported === 4 && phone.lines.length > 0,
   `engine memory ${phone.memoryMB} MB, ${phone.lines.length} releases`,
 );
+
+// The release a tap makes due waits until no input came for 3 s (a phone took 0.3 to 0.6 s for one
+// inside a tap or back); without input it comes right away
+{
+  const page = await browser.newPage();
+  const results = collect(page);
+  const releases = [];
+  page.on('console', (message) => {
+    if (message.text().includes('Memory released')) releases.push(Date.now());
+  });
+  check(
+    'input: host page starts',
+    await openHost(
+      page,
+      stack.app({
+        url: siteURL,
+        log: '1',
+        env: 'BL_MEMORY_RELEASE_MB=64,BL_MEMORY_PRESSURE_MB=4096',
+      }),
+    ),
+  );
+  await results.wait('cold');
+  await quiet(page);
+  // Without input: the release follows the growth
+  let before = releases.length;
+  let start = Date.now();
+  await page.evaluate(() => window.blTest.eval(`allocate('quiet', 48)`));
+  await results.wait('quiet');
+  for (let i = 0; i < 50 && releases.length === before; i++) await page.waitForTimeout(100);
+  const withoutInput = releases.length > before ? releases[before] - start : null;
+  check(
+    'input: without input the release comes at once',
+    withoutInput !== null && withoutInput < QUIET_MS - 1000,
+    `after ${withoutInput} ms`,
+  );
+  await quiet(page);
+  const origin = await canvasOrigin(page);
+  before = releases.length;
+  start = Date.now();
+  await page.mouse.click(origin.x + 40, origin.y + 40);
+  check('input: the press allocates', (await results.wait('tap1')) === 'ok');
+  for (let i = 0; i < 100 && releases.length === before; i++) await page.waitForTimeout(100);
+  const afterInput = releases.length > before ? releases[before] - start : null;
+  check(
+    'input: the release a press made due waits until no input came for 3 s',
+    afterInput !== null && afterInput >= QUIET_MS - 200 && afterInput < QUIET_MS + 4000,
+    `after ${afterInput} ms`,
+  );
+  check(
+    'input: the debug log says how long it waited',
+    results.logs.some((line) => /Memory release waited \d+ ms for the user/.test(line)),
+  );
+  await page.close();
+}
 
 await browser.close();
 finish();

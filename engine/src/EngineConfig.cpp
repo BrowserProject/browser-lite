@@ -181,6 +181,7 @@ void loadEngineConfig()
     config.navigationStopsScripts = flag("BL_NAVIGATION_STOPS_SCRIPTS", true);
     config.memoryReleaseMB = static_cast<size_t>(number("BL_MEMORY_RELEASE_MB", config.memoryReleaseMB));
     config.memoryPressureMB = static_cast<size_t>(number("BL_MEMORY_PRESSURE_MB", config.memoryPressureMB));
+    config.memoryReserve = flag("BL_MEMORY_RESERVE", true);
     config.indexedDBQuotaMB = number("BL_INDEXEDDB_QUOTA_MB", config.indexedDBQuotaMB);
     config.databaseMaxMB = number("BL_DATABASE_MAX_MB", config.databaseMaxMB);
     config.httpCacheMB = number("BL_HTTP_CACHE_MB", config.httpCacheMB);

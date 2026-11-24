@@ -1016,8 +1016,19 @@ collection, and without allocations its timer waits longer the less the last ful
 was closed or left, its worker ended) is kept only by references, no longer by its abort
 listeners, as nothing can abort it any more (patch 0128, like Chrome): a timeout, an
 `AbortSignal.any` or a Request's signal with a listener whose closure held its controller or
-document kept that whole page for good (`tests/core/abort-signal-gc-test.mjs`). Once the malloc area ends above 384 MB it grows the
-memory ahead so that 128 MB stay free above it; when that fails, the current size is the limit.
+document kept that whole page for good (`tests/core/abort-signal-gc-test.mjs`). A release is a
+full GC that blocks the engine thread (0.3 to 0.6 s on a phone), so one that falls due within 3 s
+of input to a visible view or of a navigation of the host waits until no input came for 3 s (at
+most 10 s, not when memory is short): it no longer lands in the page's answer to a tap or Back
+(#651). Once the malloc area ends above 384 MB it grows the memory ahead so that 128 MB stay free
+above it; when that fails, the current size is the limit. Only where that limit can exist: a
+memory that reserved its full 4 GB in a 64 bit address space (`engine/js/engine-memory.js` probes
+a 3 GB resizable `ArrayBuffer`) never fails a growth before the host runs out, so there
+`BL_MEMORY_RESERVE=0` and the memory grows with malloc, at most 16 MB beyond what it asked for
+(`MEMORY_GROWTH_GEOMETRIC_CAP`, #651). The reserve and Emscripten's growth by 20 % (up to 96 MB)
+made a heavy page's memory about 150 MB bigger than its malloc area, and WASM memory never
+shrinks. JS heap blocks are 16 KB on WASM like on other systems (patch 0183) and threads that run
+no JS get stacks of 1 MB instead of 4 MB (patch 0182).
 From then on, or above the budget of 3 GB, it reports `memory-pressure` `{footprint, limit,
 level}` at every growth, and the host discards background views (#128, #171, #216). On iPhone
 and iPad a growth never fails, iOS ends the whole web content process instead, so the core sets
