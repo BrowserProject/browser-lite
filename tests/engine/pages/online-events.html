@@ -1,0 +1,49 @@
+<!doctype html>
+<title>Online events</title>
+<!-- Reading navigator.onLine fires no event, like in Safari and Chrome: the first read of the
+     engine used to take the state as a change and fire online at every window from inside the
+     getter (patch 0008, NetworkStateNotifierWasm.cpp). Listeners on the page and a frame count
+     online and offline events while the page, the frame and a worker read navigator.onLine.
+     Output "ONLINE name=ok" or "ONLINE name=<what came>", at the end "ONLINE done=ok". -->
+<body>
+<script>
+const seen = [];
+let reading = '';
+const listen = (target, where) => {
+  for (const type of ['online', 'offline'])
+    target.addEventListener(type, () => seen.push(`${where}:${type}${reading ? ` inside ${reading}` : ''}`));
+};
+const frame = document.body.appendChild(document.createElement('iframe')).contentWindow;
+listen(window, 'page');
+listen(frame, 'frame');
+const read = (where, navigator) => {
+  reading = where;
+  const value = navigator.onLine;
+  reading = '';
+  return value;
+};
+const workerRead = () =>
+  new Promise((resolve, reject) => {
+    const source = 'postMessage(navigator.onLine)';
+    const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+    worker.onmessage = (event) => resolve(event.data);
+    worker.onerror = (event) => reject(new Error(event.message));
+  });
+(async () => {
+  let bad = 0;
+  const report = (name, ok, detail) => {
+    console.log(`ONLINE ${name}=${ok ? 'ok' : detail}`);
+    if (!ok) bad++;
+  };
+  const values = [read('page', navigator), read('frame', frame.navigator), read('page again', navigator)];
+  try {
+    values.push(await workerRead());
+  } catch (e) {
+    report('worker', false, `ERROR ${e.name}: ${e.message}`);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  report('values', values.every((v) => v === true), values.join(','));
+  report('events', seen.length === 0, seen.join(',').replaceAll(' ', '_'));
+  console.log(`ONLINE done=${bad ? `${bad} errors` : 'ok'}`);
+})();
+</script>

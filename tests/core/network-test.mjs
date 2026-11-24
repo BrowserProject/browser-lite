@@ -669,13 +669,14 @@ check(
 }
 
 // Relay gone: the page is offline (navigator.onLine, offline event), then the transport
-// reconnects by itself and the page is online again
+// reconnects by itself and the page is online again, one event each
 await page.evaluate(() =>
   window.blTest.eval(
     'for (const type of ["offline", "online"]) addEventListener(type, () => console.log("NET " + type + " " + navigator.onLine))',
   ),
 );
 await page.waitForTimeout(500);
+const netEventsFrom = consoleLines.length;
 await stack.restartRelay();
 const wentOffline = await waitFor(
   () => consoleLines.some((line) => line.includes('NET offline false')),
@@ -687,6 +688,18 @@ const cameBack = await waitFor(
   20000,
 );
 check('relay back: online event, navigator.onLine true', cameBack);
+await page.waitForTimeout(1000);
+{
+  const events = consoleLines
+    .slice(netEventsFrom)
+    .filter((line) => /NET (offline|online) /.test(line))
+    .map((line) => line.match(/NET (\w+ \w+)/)[1]);
+  check(
+    'relay gone and back: exactly one offline and one online event',
+    events.join(',') === 'offline false,online true',
+    events.join(','),
+  );
+}
 check(
   'network events of the browser (false, then true)',
   !!(await waitEvent(page, 'network:false', 1000)) &&

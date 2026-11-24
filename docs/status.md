@@ -25,6 +25,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   of workers that were posted before its deadline, like in Chrome (#652: before, a port's or a
   worker's message, and a window message behind other tasks of the event loop, came after it,
   so reCAPTCHA's page could time out on an answer of its anchor frame posted in time).
+  Reading `navigator.onLine` fires no event, like in Safari and Chrome (#653: before, the
+  engine's first read fired `online` at every window from inside the getter, which a script
+  can count; on open.spotify.com its listeners cost 24 to 339 ms of the load).
   `console.log` and the others run page code only for their first argument, like Safari (#629:
   before, the first argument's `toString` ran twice and every other argument's once, a count
   that scripts read as an open DevTools panel); the engine's log shows the other arguments

@@ -114,6 +114,9 @@
 //                  its deadline (patch 0184), like in Chrome: to the window, also behind other
 //                  tasks of the event loop, of a MessagePort, a worker, a worker's MessagePort, a
 //                  frame and a frame's MessagePort
+//   online-events.html  reading navigator.onLine fires no online or offline event, in the page, a
+//                  frame and a worker (patch 0008): before, the engine's first read fired online at
+//                  every window from inside the getter
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -164,6 +167,7 @@ const CASES = [
   },
   { name: 'pseudo-animations', size: [400, 600], wait: 'PSEUDOANIM done' },
   { name: 'task-order', wait: 'TASKORDER done' },
+  { name: 'online-events', wait: 'ONLINE done' },
   { name: 'select-styles', size: [400, 220], check: 'check-select-styles.mjs' },
   {
     name: 'form-controls',

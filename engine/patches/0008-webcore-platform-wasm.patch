@@ -1045,10 +1045,10 @@ index 0000000000..52a8f422c9
 +} // namespace WebCore
 diff --git a/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp b/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp
 new file mode 100644
-index 0000000000..7eb45474b2
+index 0000000000..662c4c9334
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,66 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1103,8 +1103,12 @@ index 0000000000..7eb45474b2
 +    m_isOnLine = hostOnLine;
 +}
 +
++// The state when the first listener comes is the start, not a change: only a later
++// WasmPlatform::setOnLine notifies (else the first read of navigator.onLine would fire
++// online at every window from inside the getter)
 +void NetworkStateNotifier::startObserving()
 +{
++    updateStateWithoutNotifying();
 +    onLineChanged() = [] {
 +        singleton().updateState();
 +    };

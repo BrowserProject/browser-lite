@@ -794,6 +794,12 @@ dropped (#389, #520). The demo remembers the icon of each page like Chrome's fav
 for its history and suggestions, the tabs that have not loaded yet (#595) and a tab's new
 document until the engine reports its icon (#615).
 
+`navigator.onLine` and the `online` and `offline` events follow what the core reports
+(`bl_set_online`: the host's `navigator.onLine` and `transport.connected`, #158). The engine's
+`NetworkStateNotifier` (`platform/wasm/NetworkStateNotifierWasm.cpp`, patch 0008) takes the state
+without an event when its first listener comes, so only a real change of the host fires the events,
+never a read of `navigator.onLine` (#653).
+
 ## Storage
 
 The engine uses WasmFS. `/data` is the OPFS directory `<namespace>` of the host origin
