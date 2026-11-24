@@ -829,7 +829,9 @@ check('autoplay: the video in the view plays', (await result('nearplaying')) ===
 await page.waitForTimeout(3000);
 const playingHosts = async () =>
   (await players()).filter((p) => !earlier.has(p.id) && !p.paused).length;
-const hostsBefore = await playingHosts();
+// Polled: the near clip loops every 3 s and the host can read paused right at its loop point
+let hostsBefore = 0;
+await waitFor(async () => (hostsBefore = await playingHosts()) === 1, 5000, 250);
 await page.evaluate(() => window.blTest.eval('step()'));
 check(
   'autoplay: a muted video below the fold waits (paused, at the start)',
