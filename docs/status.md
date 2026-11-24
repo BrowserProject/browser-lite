@@ -1123,6 +1123,28 @@ browser (Safari keeps Cmd+L, T and W for itself).
    PerimeterX sends less work now (plain Chromium 4.4 % busy), so the gain on the page itself could
    not be measured. What is left for such scripts is compiled code itself (values in locals,
    inlining, phase 4 of [jit.md](jit.md)).
+   Walmart's press and hold (`walmart.com/blocked`, PerimeterX/HUMAN, 2026-11-24, local, Chromium
+   host, 1280x800): the button comes 5 to 9 s after the open and its fill follows the hold at the
+   pace of the challenge (plain Chromium about 8 s, the challenge sets it, 3 to 9 s here); the
+   result is "Please try again" like in plain Chromium. The engine thread's steps over 50 ms add
+   up to 12.4 to 17.5 s in the first 60 s (median 14.9 s, 10 runs at a load of 4 to 15) against
+   13.8 to 22.7 s before #655 (median 16.2 s), the longest step 3.3 to 4.4 s (median 3.6 s)
+   against 3.9 to 5.6 s (median 4.65 s). The longest is now the start of `captcha.js` (608 KB of
+   obfuscated code: string decoding in the interpreter and host calls through C++). At a load of
+   14 to 23 a second long step comes 30 to 40 s after the open: the XHR handler of HUMAN's
+   `auditor.js` (crcldu.com), a VM whose bytecode is a `Uint8Array` decrypted page by page with
+   `Math.imul` for every byte, whose handlers read operands with DataView getters and move the
+   program counter in the interpreter's closure: 6 to 8 s before, 6 to 12 s after (profiled, so
+   about twice the real time; the challenge differs per visit). Typed array elements, those host
+   functions and closure writes now run inline (#655; a copy of its decryption 1.2 to 1.3 times,
+   of its VM's instructions 1.35 to 1.75 times as fast in the `jsc` shell); in that step's profile
+   what is left is the decrypting function itself and its calls of the key function (calls
+   between compiled functions, about a quarter), property reads of `Math.imul`, the fonts of 20
+   scripts its text fingerprinting loads on demand (about 0.8 s), and the interpreter. The goal
+   (steps under 20 s in all and none over 3 s at a load up to 30) is not reached; the Moto G71
+   (steps up to 9.7 s through the public demo before) was not measured with this build. Next:
+   cheaper calls between compiled functions (or inlining small callees such as the key function)
+   and host calls without C++ (`indexOf`, `slice`, `push`).
    A Datawrapper chart (2026-11-15, `datawrapper.dwcdn.net/Rp4b3/2/`, the iframe of a watson.ch
    article, 412x860): steps of 0.7 to 1.5 s at a load of 4 (3.4 and 5.1 s at 16 to 59, 9 s on a
    Moto G71), plain Chromium at most 0.39 s. Its longest step is one microtask checkpoint of the
@@ -1139,7 +1161,10 @@ browser (Safari keeps Cmd+L, T and W for itself).
    10.1 to 2.9 s of the engine thread and all host GL queries from about 10 to 4 s. What is left
    are WebKit's own queries while it sets up a context (`GraphicsContextGLANGLE::reshape`: clear
    values, masks, framebuffer status) and its `getError` after calls such as
-   `getInternalformatParameter`, cheap with the in process ANGLE of native WebKit. The stalls of
+   `getInternalformatParameter` and `readPixels`, cheap with the in process ANGLE of native WebKit.
+   On walmart's block page (PerimeterX, 2026-11-24) they were about 8 % of the engine thread in
+   the first 60 s: `getError` 2.5 %, `getParameter` (reshape's clear values and masks, which the
+   shim's state tracker knows) 2 %, `readPixels` 1.5 %. The stalls of
    up to 10 s in twitch.tv's first 30 s stay, now mostly JS (the Kasada scripts in the interpreter
    and the JIT, see 1.). On a Motorola Moto G71 (real GPU) a context with a few queries took 89 ms
    the first time and 28 ms each after (before #449).

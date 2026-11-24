@@ -59,6 +59,11 @@ run jit-literals-gc --collectContinuously=1 "$here/jit-literals.js"
 [ "$jit" = 0 ] || run jit-scope "$here/jit-scope.js"
 # Element reads of int32 and contiguous arrays inline where the site's profile saw only those
 [ "$jit" = 0 ] || run jit-elements "$here/jit-elements.js"
+# Math.imul, charCodeAt and DataView getters at sites that read them by name, typed array
+# elements of the one type a site saw: the host functions' and the interpreter's results
+run jit-intrinsics "$here/jit-intrinsics.js"
+# ... and their speed against the inline elements of an int32 array
+[ "$jit" = 0 ] || run jit-intrinsic-speed "$here/jit-intrinsic-speed.js"
 # The warm-up's bookkeeping with thousands of warm functions costs no more than with a few hundred
 [ "$jit" = 0 ] || run jit-warmup-map "$here/jit-warmup-map.js"
 done

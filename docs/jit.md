@@ -83,7 +83,10 @@ never baked into the code (the GC resets inline caches).
   function, which dispatches on the type. A free variable of a function is such a closure
   variable or a global, so an obfuscated VM reads its state and calls its top-level functions this
   way; the call of the module's function for every one was 13 to 15 % of the engine thread in
-  Turnstile's challenge (#646). Arithmetic, bit operations,
+  Turnstile's challenge (#646). A closure variable is also written inline (with the write
+  barrier) when its write fires no watchpoint: none, or one already invalidated, which stays so;
+  an obfuscated VM's handlers move its program counter in their interpreter's closure for nearly
+  every instruction (#655). Arithmetic, bit operations,
   comparisons, equality and conditional jumps keep only their int32 path inline (and `if`, `!` and
   `&&` that of booleans and int32); doubles, ToInt32, cells and the slow path are one function of
   the module per opcode, called with the frame, the instruction and the operands' values, which
@@ -137,8 +140,9 @@ never baked into the code (the GC resets inline caches).
   and `~` also on doubles (ToInt32 inline, `i64.trunc_sat` below 2^63, so uint32 values above
   2^31 stay inline), `op_unsigned` (`x >>> 0`) and `>>>` with any result, elements of typed
   arrays (all but Float16, BigInt and resizable ones; a Uint32 above 2^31 and Float32 too, NaN
-  made pure) read and written with the conversions of the spec, and `Math.imul(a, b)` inline
-  (its host function, which JSC keeps static, taken from a Math object of the JIT's own).
+  made pure) read and written with the conversions of the spec, inline where the site's array
+  profile saw only one typed array type within bounds (an obfuscated script's bytecode in a
+  `Uint8Array`), else in the module's function (#655).
   ToBoolean (`if`, `while`, `&&`, `!`) also of strings and doubles, where the interpreter takes
   only booleans (`!`) or booleans, int32, undefined, null and objects: a string is false only
   as the VM's empty string, which every empty string is (JSC's own JITs rely on that too), a
@@ -146,6 +150,18 @@ never baked into the code (the GC resets inline caches).
   text or two atoms compare as pointers, another length is unequal and two 8-bit strings of up to
   64 characters compare in WASM (strings an obfuscated VM decodes at run time against its atoms,
   #646).
+- **Host functions at their call site**: a call whose callee a `get_by_id` of the same basic
+  block read by the name of one (`Math.imul(a, b)`, `s.charCodeAt(i)`, `view.getUint16(i, true)`
+  and the other DataView getters of numbers) checks that the callee is that host function (its
+  `NativeExecutable`'s function, which JSC keeps static: taken from a Math object, a String
+  prototype and a DataView prototype of the JIT's own, so a page that replaces one gets its own)
+  and computes the result in WASM: ToInt32 of two numbers and their product; a character of a
+  string or a substring at an int32 index within its length; the bytes of a DataView of a fixed
+  length at an int32 offset within it, in the order a boolean argument gives (big endian without
+  one). Anything else (another callee, a rope, an index beyond the end, a detached or resizable
+  buffer, arguments of other types) makes the call, so the host function throws or converts.
+  Other sites emit nothing; before, every call with two arguments called a function of the module
+  that looked for `Math.imul` (#655).
 - **Names**: the module has a name section, so CPU profiles show the compiled function as
   `js:<name>#<hash>` of its `CodeBlock` and its helpers by kind (`getByVal`, `newArray`,
   `outOfLine op_jstricteq`) instead of `wasm-function[n]`.
@@ -161,8 +177,9 @@ never baked into the code (the GC resets inline caches).
   its calls again after a loop's return (see below). That work is a second function of the module,
   which the sites call with their operands (done at every site instead, it made compiled code 20 to
   40 % larger and a large VM function slower). Everything else goes through C++: host functions
-  like the interpreter calls them, in the callee's realm (`Math.max`, `charCodeAt`, DataView
-  getters), and the general path, which fills the table, moves the frame down for missing arguments
+  like the interpreter calls them, in the callee's realm (`Math.max`, `indexOf`, `push`; those of
+  the host functions at their call site above when the fast path does not take the call), and the
+  general path, which fills the table, moves the frame down for missing arguments
   (like the interpreter's arity fixup) and leaves the rest to JSC's generic call or construct.
   Varargs (`apply`, spread) get a frame like the interpreter's and then the same call.
   `Function.prototype.call` (a builtin in JS, which obfuscated code reaches as
@@ -433,6 +450,20 @@ stayed below 1.0 in 6 of 15 runs against 0 of 14, and was not taken; neither was
 for functions from 8 KB (within the spread). A limit of the samples: a safepoint is a loop or a
 function's entry, so a function without a loop is credited to its caller, whose loop is the next
 safepoint after it returned.
+
+Bytecode VMs (#655, 2026-11-24). HUMAN's `auditor.js` on walmart's press and hold decrypts its
+bytecode (a `Uint8Array`) page by page with `Math.imul` for every byte and reads its operands with
+DataView getters; in the profile of its XHR handler (local, Chromium host, load 21) the module's
+element functions, the function that every call with two arguments called to look for
+`Math.imul` and the C++ path of host calls were about a quarter. `tests/jsc/jit-intrinsic-speed.js`
+against an int32 array's inline elements: a `Uint8Array`'s 2.3 to 2.4 times before, 1.1 to 1.3
+now; `getUint16` 7.4 to 8.1, now 1.5 to 1.8; `charCodeAt` 6.5 to 7.2, now 1.5 to 1.7. A copy of
+the decryption and of a VM loop in the jsc shell: 1.2 to 1.3 and 1.35 to 1.75 times as fast. The
+block page (10 runs each, load 4 to 15): steps over 50 ms in the first 60 s median 14.9 against
+16.2 s, the longest step median 3.6 against 4.65 s ([status](status.md)). What is left in the
+decryption is a call of the key function per byte (the call from compiled code about 25 ns, a
+third of the loop) and the property read of `Math.imul`; V8 inlining the module's call function
+(`--wasm-inlining-max-size=1500`) gave nothing measurable.
 
 Hashing code (#424, `tests/jsc/jit-hash.js`, jsc shell): bit operations on uint32 values 5x and
 typed array elements 3x the time of their int32 twins before, now 1.8x and 1.3x; `Math.imul` 6.5x
