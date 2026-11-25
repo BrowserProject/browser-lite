@@ -792,7 +792,26 @@ browser (Safari keeps Cmd+L, T and W for itself).
    Back within 40 s without a task over 20 s, the first touch during blick.ch's load under 8 s;
    on a Moto G71 20min.ch's Back under 15 s and nzz.ch's article within 7 s) is not reached; the
    Moto was not measured again. What the routes spend is the interpreter's dispatch (13 to 15 %),
-   its entry `slow_path_enter` (3 %), compiled code, the runtime and the parse above. A touch's
+   its entry `slow_path_enter` (3 %), compiled code, the runtime and the parse above. Again on
+   2026-11-25 (#656, the same setup, 10 and 6 interleaved runs each against the engine before):
+   Back's task ran 59 % under compiled code, which spent a third of the task in C++ (calls of
+   functions not compiled yet with their lazy parse and bytecode, the module's call function,
+   reads by name that missed at sites of many shapes, `===` and `!==` of two tags, object
+   literals, `in`) and 7 % in `JSON.parse` of the same 27 KB config, which 20min.ch parses about
+   1300 times; blick.ch's first touch is React's synchronous hydration, 64 % interpreted. Reads by
+   name at sites of many shapes now go through the megamorphic cache and strict equality of two
+   tags and atoms needs no C++ (a React render in the jsc shell 4 to 6 % faster, its update 15 %),
+   but the sites did not move beyond their spread: 20min.ch's longest step of Back median 22.7
+   against 23.2 s, of its load 12.7 against 11.7 s, blick.ch's longest step of the load 13.3
+   against 13.0 s (it answers the first touch after 2.2 to 14.4 s, median 2.9, depending on when
+   the touch comes). The criterion (20min.ch's Back without a step over 17 s and the first touch
+   during the load answered within 10 s at a fourth of the CPU, 20min.ch's Back under 10 s on a
+   Moto G71, hCaptcha's challenge within 7 s of the tap there) is not reached; the Moto and the
+   other sites with the same costs (coursera, duolingo, netflix, spotify, nzz.ch) were not
+   measured again: the remaining cost is spread over the interpreter's dispatch, the call of
+   compiled code (about 25 ns against 1 ns in V8), lazy parsing, the runtime and layout, none of
+   them more than 7 %, so it needs a faster call convention or tier for compiled code, not a
+   single fast path. A touch's
    move does not update `:hover` (its hit test is read-only); its press and release do. On edition.cnn.com
    (2026-11-21, local, phone emulation at a fourth of the CPU, a touch probe 4 times a second
    during the load, CPU profiles of 3 interleaved runs each) rules like

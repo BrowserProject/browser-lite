@@ -127,6 +127,18 @@ never baked into the code (the GC resets inline caches).
   `GetterSetter::callGetter`. A `get_by_id` or `get_length` whose interpreter cache missed (it takes
   only data properties) caches a getter there after the interpreter's slow path read it, and
   looks it up there first; a site whose misses found no getter 4 times stops looking (#646).
+  A `get_by_id` whose interpreter cache is full (two own properties, patch 0179, or a prototype's
+  property or an absence) and still misses reads through that cache as well: after the
+  interpreter's cache the module's `getById` function calls `megamorphicGetById`, which looks
+  the name up there in WASM (in `getById` itself it made every read by name 5 to 8 % slower),
+  and the miss in C++ fills it (`getMegamorphic`) instead of replacing the interpreter's cache at every new
+  shape. React's reads of `props`, elements and fibers of many shapes took the interpreter's slow
+  path for every read before (#656).
+- **Strict equality**: two values of different tags are strictly equal only as two numbers, so
+  `x === undefined` or `x !== null` of an object is false in the out-of-line function without a
+  call into C++; before it went to the slow path like any cell. The interpreter does the same in
+  its assembly (patch 0185), and also takes the same cell and two strings that are no ropes and
+  are the same text or two atoms without C++ (#656).
 - **Array literals** (`new_array`, `new_array_buffer`) without a call into C++, like JSC's JITs
   make them: the array's cell and its butterfly bumped from the free lists of their allocators
   (within the current interval, else the slow path, never a call between the two), the structure
@@ -450,6 +462,16 @@ stayed below 1.0 in 6 of 15 runs against 0 of 14, and was not taken; neither was
 for functions from 8 KB (within the spread). A limit of the samples: a safepoint is a loop or a
 function's entry, so a function without a loop is credited to its caller, whose loop is the next
 safepoint after it returned.
+
+Cold React renders (#656, 2026-11-25). In the profile of 20min.ch's Back at a fourth of the CPU
+59 % of the task ran under compiled code (React's work loop), which spent a third of it in C++:
+calls of functions not compiled yet with their lazy parse (7 %), the module's call function (5.6 %),
+reads by name that missed at sites of many shapes (4.8 %), `===` and `!==` (2.6 %), object literals
+and `in`. A React 19 render into a fake DOM in the jsc shell (400 components with code of their
+own, 26400 nodes) took 0.9 to 1.5 s cold against 0.17 s in V8; cold components on
+a warm React 3.05 to 3.21 s before the megamorphic reads and strict equality above, 2.94 to 3.01 s
+after, their update 1.75 to 1.83 against 1.46 to 1.54 s (V8 0.11 and 0.05 s). A call of a compiled
+function from compiled code takes about 25 ns there, 1 ns in V8.
 
 Bytecode VMs (#655, 2026-11-24). HUMAN's `auditor.js` on walmart's press and hold decrypts its
 bytecode (a `Uint8Array`) page by page with `Math.imul` for every byte and reads its operands with

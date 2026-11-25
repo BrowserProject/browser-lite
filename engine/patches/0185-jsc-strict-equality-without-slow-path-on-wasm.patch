@@ -1,0 +1,83 @@
+diff --git a/Source/JavaScriptCore/llint/LowLevelInterpreter.asm b/Source/JavaScriptCore/llint/LowLevelInterpreter.asm
+index d16072c11e..e1b0103f11 100644
+--- a/Source/JavaScriptCore/llint/LowLevelInterpreter.asm
++++ b/Source/JavaScriptCore/llint/LowLevelInterpreter.asm
+@@ -751,6 +751,7 @@ const CallSiteIndex = ArgumentCountIncludingThis + TagOffset
+ # String flags.
+ const isRopeInPointer = constexpr JSString::isRopeInPointer
+ const HashFlags8BitBuffer = constexpr StringImpl::s_hashFlag8BitBuffer
++const HashFlagsStringKindIsAtom = constexpr StringImpl::s_hashFlagStringKindIsAtom
+ 
+ # Copied from PropertyOffset.h
+ const firstOutOfLineOffset = constexpr firstOutOfLineOffset
+diff --git a/Source/JavaScriptCore/llint/LowLevelInterpreter32_64.asm b/Source/JavaScriptCore/llint/LowLevelInterpreter32_64.asm
+index 587c13b436..0e02b1b714 100644
+--- a/Source/JavaScriptCore/llint/LowLevelInterpreter32_64.asm
++++ b/Source/JavaScriptCore/llint/LowLevelInterpreter32_64.asm
+@@ -977,17 +977,48 @@ llintOpWithReturn(op_is_undefined_or_null, OpIsUndefinedOrNull, macro (size, get
+ end)
+ 
+ 
++# The operands of a strict equality, tag and payload in t2 and t0, t3 and t1: jumps to slow for
++# what needs C++, else to compare with two payloads whose equality is the result
++macro strictEqualityOperands(slow, compare)
++    # browser-lite: of two tags, equal only as two numbers (`x === undefined` of an object); the
++    # same cell, and two strings that are no ropes as the same text or two atoms, without C++
++    bineq t2, t3, .differentTags
++    bib t2, LowestTag, slow
++    bineq t2, CellTag, compare
++    bpeq t0, t1, compare
++    bbaeq JSCell::m_type[t0], ObjectType, compare
++    bbaeq JSCell::m_type[t1], ObjectType, compare
++    bbneq JSCell::m_type[t0], StringType, slow
++    bbneq JSCell::m_type[t1], StringType, slow
++    loadp JSString::m_fiber[t0], t0
++    loadp JSString::m_fiber[t1], t1
++    btpnz t0, isRopeInPointer, slow
++    btpnz t1, isRopeInPointer, slow
++    bpeq t0, t1, compare
++    btiz StringImpl::m_hashAndFlags[t0], HashFlagsStringKindIsAtom, slow
++    btiz StringImpl::m_hashAndFlags[t1], HashFlagsStringKindIsAtom, slow
++    jmp compare
++.differentTags:
++    bieq t2, Int32Tag, .firstIsNumber
++    bib t2, LowestTag, .firstIsNumber
++    jmp .unequal
++.firstIsNumber:
++    bieq t3, Int32Tag, slow
++    bib t3, LowestTag, slow
++.unequal:
++    move 0, t0
++    move 1, t1
++    jmp compare
++end
++
++
+ macro strictEqOp(opcodeName, opcodeStruct, equalityOperation)
+     llintOpWithReturn(op_%opcodeName%, opcodeStruct, macro (size, get, dispatch, return)
+         get(m_rhs, t2)
+         get(m_lhs, t0)
+         loadConstantOrVariable(size, t2, t3, t1)
+         loadConstantOrVariable2Reg(size, t0, t2, t0)
+-        bineq t2, t3, .slow
+-        bib t2, LowestTag, .slow
+-        bineq t2, CellTag, .notStringOrSymbol
+-        bbaeq JSCell::m_type[t0], ObjectType, .notStringOrSymbol
+-        bbb JSCell::m_type[t1], ObjectType, .slow
++        strictEqualityOperands(.slow, .notStringOrSymbol)
+     .notStringOrSymbol:
+         equalityOperation(t0, t1, t0)
+         return(BooleanTag, t0)
+@@ -1005,11 +1036,7 @@ macro strictEqualityJumpOp(opcodeName, opcodeStruct, equalityOperation)
+         get(m_lhs, t0)
+         loadConstantOrVariable(size, t2, t3, t1)
+         loadConstantOrVariable2Reg(size, t0, t2, t0)
+-        bineq t2, t3, .slow
+-        bib t2, LowestTag, .slow
+-        bineq t2, CellTag, .notStringOrSymbol
+-        bbaeq JSCell::m_type[t0], ObjectType, .notStringOrSymbol
+-        bbb JSCell::m_type[t1], ObjectType, .slow
++        strictEqualityOperands(.slow, .notStringOrSymbol)
+     .notStringOrSymbol:
+         equalityOperation(t0, t1, .jumpTarget)
+         dispatch()

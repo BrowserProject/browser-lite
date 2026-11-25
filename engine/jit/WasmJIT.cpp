@@ -1319,6 +1319,19 @@ bool interpreterCacheHas(const GetByIdModeMetadata& metadata, StructureID struct
     return false;
 }
 
+// Whether the interpreter's cache of a get_by_id holds all the structures it can: two own
+// properties (patch 0179), or a prototype's property or an absence
+bool interpreterCacheIsFull(const GetByIdModeMetadata& metadata)
+{
+    switch (metadata.mode) {
+    case GetByIdMode::Default: return metadata.defaultMode.structureID && metadata.defaultMode.secondStructureID;
+    case GetByIdMode::ProtoLoad: return !!metadata.protoLoadMode.structureID;
+    case GetByIdMode::Unset: return !!metadata.unsetMode.structureID;
+    case GetByIdMode::ArrayLength: return false;
+    }
+    return false;
+}
+
 // op_get_by_id and op_get_length after the inline caches missed. The interpreter's caches take
 // only data properties: a getter (a class's accessor, a typed array's `length`) is cached in the
 // megamorphic cache after the interpreter's slow path read it, and called from there in a frame
@@ -1368,8 +1381,22 @@ UGPRPair getByIdFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, 
         }
     }
     StructureID structureID = object->structureID();
-    auto result = slowPath(callFrame, pc);
     auto& metadata = pc->as<Bytecode>().metadata(codeBlock).m_modeMetadata;
+    // A site that saw more structures than the interpreter's cache holds reads through the
+    // megamorphic cache, which the helper of compiled code looks up in WASM, instead of
+    // replacing the interpreter's cache at every miss
+    if (!isGetLength && keyedReadIsCacheable(vm, object, uid) && interpreterCacheIsFull(metadata)) {
+        JSGlobalObject* globalObject = codeBlock->globalObject();
+        SlowPathFrameTracer tracer(vm, callFrame);
+        callFrame->setCurrentVPC(pc);
+        auto scope = DECLARE_THROW_SCOPE(vm);
+        JSValue result = getMegamorphic(vm, globalObject, callFrame, object, uid);
+        if (scope.exception()) [[unlikely]]
+            return encodeResult(exceptionInstructions(), callFrame);
+        callFrame->uncheckedR(bytecode.m_dst) = result;
+        return encodeResult(pc, callFrame);
+    }
+    auto result = slowPath(callFrame, pc);
     if (getters && !interpreterCacheHas(metadata, structureID) && !vm.exceptionForInspection()) {
         if (!getMegamorphic(vm, codeBlock->globalObject(), callFrame, object, uid, MegamorphicWalk::CacheGetters).asBoolean())
             ++cache->getterMisses;
@@ -1764,7 +1791,7 @@ private:
     void emitKeyedStoreFunction();
     // Functions of the module beside the compiled one: index of each, numbered in the order the
     // sites first need them (the module emits them in that order)
-    enum class Helper : uint8_t { CompiledCall, KeyedLoad, KeyedStore, SlowPathCall, GetById, GetByVal, PutByVal, ResolveScope, GetFromScope, PutToScope, OutOfLine, ToBoolean, NewArray, NewArrayBuffer };
+    enum class Helper : uint8_t { CompiledCall, KeyedLoad, KeyedStore, SlowPathCall, GetById, GetByVal, PutByVal, ResolveScope, GetFromScope, PutToScope, OutOfLine, ToBoolean, NewArray, NewArrayBuffer, MegamorphicGetById };
     // OutOfLine is one function per opcode
     uint32_t helper(Helper, OpcodeID = op_nop);
     void emitHelpers();
@@ -1778,6 +1805,7 @@ private:
     // (frame, instruction, slow path) -> the slow path's result: the call through the table once
     void emitSlowPathCallFunction();
     void emitGetByIdFunction();
+    void emitMegamorphicGetByIdFunction();
     void emitGetByValFunction();
     void getByValFastPaths(const Operand& dst, const Operand& base, const Operand& property);
     void emitPutByValFunction();
@@ -2657,10 +2685,11 @@ void Compiler::emitHelpers()
         case Helper::ToBoolean: emitToBooleanFunction(); break;
         case Helper::NewArray: emitNewArrayFunction(); break;
         case Helper::NewArrayBuffer: emitNewArrayBufferFunction(); break;
+        case Helper::MegamorphicGetById: emitMegamorphicGetByIdFunction(); break;
         }
         // Profiles show the helpers by name (wasm-function[n] otherwise)
-        static constexpr const char* names[] = { "compiledCall", "keyedLoad", "keyedStore", "slowPathCall", "getById", "getByVal", "putByVal", "resolveScope", "getFromScope", "putToScope", "outOfLine ", "toBoolean", "newArray", "newArrayBuffer" };
-        static_assert(std::size(names) == static_cast<size_t>(Helper::NewArrayBuffer) + 1);
+        static constexpr const char* names[] = { "compiledCall", "keyedLoad", "keyedStore", "slowPathCall", "getById", "getByVal", "putByVal", "resolveScope", "getFromScope", "putToScope", "outOfLine ", "toBoolean", "newArray", "newArrayBuffer", "megamorphicGetById" };
+        static_assert(std::size(names) == static_cast<size_t>(Helper::MegamorphicGetById) + 1);
         std::string name = names[static_cast<size_t>(m_helpers[i].first)];
         if (m_helpers[i].first == Helper::OutOfLine)
             name += opcodeNames[m_helpers[i].second];
@@ -3377,10 +3406,14 @@ void Compiler::emitGetById(const JSInstructionStream::Ref& instruction)
     auto bytecode = instruction->as<Bytecode>();
     m_propertyCaches.append(makeUnique<PropertyCache>());
     PropertyCache* propertyCache = m_propertyCaches.last().get();
+    UniquedStringImpl* uid = m_codeBlock->vm().propertyNames->length.impl();
+    if constexpr (std::is_same_v<Bytecode, OpGetById>)
+        uid = m_codeBlock->identifier(bytecode.m_property).impl();
     loadTag(bytecode.m_base);
     loadPayload(bytecode.m_base);
     m_body->i32Const(reinterpret_cast<uintptr_t>(&bytecode.metadata(m_codeBlock).m_modeMetadata));
     registerAddress(bytecode.m_dst);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(uid));
     m_body->call(helper(Helper::GetById));
     m_body->localSet(m_next);
     m_body->localGet(m_next);
@@ -3395,12 +3428,14 @@ void Compiler::emitGetById(const JSInstructionStream::Ref& instruction)
     m_body->end();
 }
 
-// (base tag and payload, the cache's mode metadata, destination address) -> 1 when done
+// (base tag and payload, the cache's mode metadata, destination address, the name's uid) -> 1
+// when done: the interpreter's cache, then the VM's megamorphic cache, which the misses of a site
+// that saw more structures than the interpreter's cache holds fill (getByIdFromCompiledCode)
 void Compiler::emitGetByIdFunction()
 {
-    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32 };
-    constexpr uint32_t baseTag = 0, basePayload = 1, cache = 2;
-    const Operand dst = Operand::at(3);
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32 };
+    constexpr uint32_t baseTag = 0, basePayload = 1, cache = 2, dstAddress = 3, uid = 4;
+    const Operand dst = Operand::at(dstAddress);
     auto mode = [&](GetByIdMode value) {
         m_body->localGet(m_t1);
         m_body->i32Const(static_cast<int32_t>(value));
@@ -3506,8 +3541,77 @@ void Compiler::emitGetByIdFunction()
             storeTag(dst, static_cast<int32_t>(JSValue::UndefinedTag), m_b);
             fastPathDone();
             m_body->end();
+
+            // Then the megamorphic cache, in a function of its own: this one stays small, it runs
+            // for every read by name
+            m_body->localGet(m_next);
+            m_body->op(Op::I32Eqz);
+            m_body->ifThen();
+            m_body->localGet(basePayload);
+            m_body->localGet(uid);
+            m_body->localGet(dstAddress);
+            m_body->call(helper(Helper::MegamorphicGetById));
+            m_body->localSet(m_next);
+            m_body->end();
         }
         m_body->end();
+    });
+}
+
+// (base cell, the name's uid, destination address) -> 1 when the VM's megamorphic cache had the
+// structure and name: an own or prototype data property, or an absence. Only objects have
+// entries; a getter is left to C++.
+void Compiler::emitMegamorphicGetByIdFunction()
+{
+    using Entry = MegamorphicCache::LoadEntry;
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32 };
+    constexpr uint32_t base = 0, uid = 1;
+    const Operand dst = Operand::at(2);
+    emitFastPathFunction(parameters, [&] {
+        m_body->localGet(base);
+        m_body->i32Load(JSCell::structureIDOffset());
+        m_body->localSet(m_e);
+        findMegamorphicEntry(m_e, uid, MegamorphicCache::structureIDHashShift2,
+            MegamorphicCache::loadCachePrimaryMask, MegamorphicCache::offsetOfLoadCachePrimaryEntries(),
+            MegamorphicCache::structureIDHashShift3, MegamorphicCache::loadCacheSecondaryMask, MegamorphicCache::offsetOfLoadCacheSecondaryEntries(),
+            sizeof(Entry), Entry::offsetOfStructureID(), Entry::offsetOfUid(), Entry::offsetOfEpoch());
+        m_body->localTee(m_g);
+        m_body->i32Load(Entry::offsetOfHolder());
+        m_body->localTee(m_d);
+        m_body->op(Op::I32Eqz);
+        m_body->ifThen();
+        m_body->i32Const(0);
+        m_body->localSet(m_b);
+        storeTag(dst, static_cast<int32_t>(JSValue::UndefinedTag), m_b);
+        m_body->i32Const(1);
+        m_body->returnValue();
+        m_body->end();
+        // An own property: the base itself
+        m_body->localGet(m_d);
+        m_body->i32Const(reinterpret_cast<uintptr_t>(JSCell::seenMultipleCalleeObjects()));
+        m_body->op(Op::I32Eq);
+        m_body->ifThen();
+        m_body->localGet(base);
+        m_body->localSet(m_d);
+        m_body->end();
+        m_body->localGet(m_g);
+        m_body->i32Load16U(Entry::offsetOfOffset());
+        m_body->localSet(m_t2);
+        loadProperty(m_d, m_t2);
+        m_body->localGet(m_a);
+        m_body->i32Const(cellTag);
+        m_body->op(Op::I32Eq);
+        m_body->ifThen(Hint::Unlikely);
+        cellType(m_b);
+        m_body->i32Const(GetterSetterType);
+        m_body->op(Op::I32Eq);
+        m_body->ifThen(Hint::Unlikely);
+        m_body->i32Const(0);
+        m_body->returnValue();
+        m_body->end();
+        m_body->end();
+        storeTagAndPayload(dst, m_a, m_b);
+        fastPathDone();
     });
 }
 
@@ -4747,6 +4851,15 @@ void Compiler::emitOutOfLineFunction(OpcodeID opcode)
             m_body->localSet(m_c);
             finish();
             m_body->end();
+            // Of two tags, strictly equal only as two numbers: `x === undefined` of an object
+            if (strict) {
+                m_body->localGet(lhsTag);
+                m_body->localGet(rhsTag);
+                m_body->op(Op::I32Ne);
+                m_body->ifThen();
+                known(false);
+                m_body->end();
+            }
             break;
         }
         }

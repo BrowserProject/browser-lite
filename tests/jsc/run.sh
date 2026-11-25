@@ -42,6 +42,14 @@ run gc-stress "$here/gc-stress.js"
 run gc-stress-aggressive --slowPathAllocsBetweenGCs=10 "$here/gc-stress.js"
 run gc-stress-collect-continuously --collectContinuously=1 "$here/gc-stress.js"
 run jit "$here/jit.js"
+# Reads by name at sites of many shapes: results everywhere, and compiled through the megamorphic
+# cache about as fast as at a site of one shape
+if [ "$jit" = 0 ]; then run jit-megamorphic "$here/jit-megamorphic.js"; else run jit-megamorphic "$here/jit-megamorphic.js" -- 2.5; fi
+run jit-megamorphic-gc --collectContinuously=1 "$here/jit-megamorphic.js"
+# Strict equality of every kind of value, and its speed for two tags and atoms (patch 0185)
+run strict-equality "$here/strict-equality.js"
+if [ "$jit" = 0 ]; then limit=1.3; else limit=3; fi
+run strict-equality-speed "$here/strict-equality-speed.js" -- "$limit"
 # Array literals and getters from compiled code, also while the GC collects continuously
 run jit-literals "$here/jit-literals.js"
 run jit-literals-gc --collectContinuously=1 "$here/jit-literals.js"
