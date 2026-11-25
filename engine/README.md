@@ -156,7 +156,9 @@ ran before the messages of ports and workers posted before its deadline) comes a
     `postMessage` and IndexedDB of pages and workers),
     `CacheStorageWasm.cpp` (Cache API of pages and workers, only on the engine thread),
     `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`, `LazyFiles.cpp`
-    (files of `lazy/` mounted read only at `/lazy`, fetched on first read), `FontPrefetch.cpp`
+    (files of `lazy/` mounted read only at `/lazy`, fetched on first read or into memory ahead of
+    it), `CollationData.cpp` (ICU's collation data in memory once the first page loaded, #659),
+    `FontPrefetch.cpp`
     (the fonts and dictionaries the rendered text outside Latin-1 needs, fetched side by side), `FontArrival.cpp`
     (fallback fonts the text went on without arrived: only the text that may take them is laid
     out again), `CanvasTextFonts.cpp` (the text of a 2D canvas waits for its lazy fallback fonts

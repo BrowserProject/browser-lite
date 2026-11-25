@@ -2,8 +2,9 @@
 // linked into the engine (tools/icu-data.mjs) and the fonts of deps/recipes/lazyfonts.sh. Sizes come from an index, so stat() and the
 // directory listing need no request. The first read of a file fetches it whole with a
 // synchronous XMLHttpRequest on the thread that reads (every engine thread is a worker), in node
-// (engine tests) from the file system. The host's HTTP cache keeps the files like the other
-// engine files. A WasmFS backend: its classes come from Emscripten's system/lib/wasmfs.
+// (engine tests) from the file system, unless preloadLazyFiles fetched it into memory before. The
+// host's HTTP cache keeps the files like the other engine files. A WasmFS backend: its classes
+// come from Emscripten's system/lib/wasmfs.
 #include "config.h"
 #include "LazyFiles.h"
 
@@ -87,6 +88,25 @@ static void bl_lazy_fetch_then_report(const char* path, void* file)
     }, strdup(path), file);
 }
 
+// Fetches a file on the page main thread with low priority into buffer (size bytes) and hands it
+// to the file (bl__lazy_preloaded), whether it worked or not
+static void bl_lazy_preload(const char* path, uint8_t* buffer, size_t size, void* file)
+{
+    MAIN_THREAD_ASYNC_EM_ASM({
+        var url = locateFile(UTF8ToString($0));
+        _free($0);
+        var done = (ok) => _bl__lazy_preloaded($3, ok);
+        if (ENVIRONMENT_IS_NODE)
+            return done(0);
+        fetch(url, { priority: 'low' }).then((response) => response.ok ? response.arrayBuffer() : null).then((data) => {
+            var ok = !!data && data.byteLength == $2;
+            if (ok)
+                HEAPU8.set(new Uint8Array(data), $1);
+            done(ok);
+        }, () => done(false));
+    }, strdup(path), buffer, size, file);
+}
+
 namespace BrowserLite {
 
 using wasmfs::DataFile;
@@ -148,6 +168,32 @@ public:
         , m_group(std::move(group))
         , m_policy(policy)
     {
+    }
+
+    // Fetches the file into memory in the background unless it is there or on the way (engine
+    // thread)
+    void preload()
+    {
+        uint8_t* buffer;
+        {
+            auto handle = locked();
+            if (!m_data.empty() || !m_size || m_preload)
+                return;
+            m_preload = std::make_unique<std::vector<uint8_t>>(m_size);
+            buffer = m_preload->data();
+        }
+        bl_lazy_preload(m_url.c_str(), buffer, m_size, this);
+    }
+
+    // The fetch of preload() finished (engine thread)
+    void preloaded(bool ok)
+    {
+        auto handle = locked();
+        auto data = std::move(m_preload);
+        if (!ok || !m_data.empty())
+            return;
+        m_data = std::move(*data);
+        debugLog("[lazy] %s %lld bytes in memory ahead of its first read", m_url.c_str(), static_cast<long long>(m_size));
     }
 
     // The fetch of a limited read finished (engine thread)
@@ -231,7 +277,20 @@ private:
     bool m_fetching { false };
     bool m_arrived { false };
     std::vector<uint8_t> m_data;
+    std::unique_ptr<std::vector<uint8_t>> m_preload; // the buffer preload() fetches into
 };
+
+// The files of all mounted indexes by path in the engine folder, for preloadLazyFiles
+struct FileRegistry {
+    std::mutex lock;
+    std::map<std::string, std::shared_ptr<LazyFile>> files;
+};
+
+FileRegistry& fileRegistry()
+{
+    static auto* registry = new FileRegistry;
+    return *registry;
+}
 
 class LazyDirectory final : public MemoryDirectory {
 public:
@@ -305,7 +364,13 @@ public:
             size_t start = 0;
             for (size_t slash; (slash = relative.find('/', start)) != std::string::npos; start = slash + 1)
                 directory = directory->directory(relative.substr(start, slash - start));
-            directory->add(relative.substr(start), std::make_shared<LazyFile>(this, url, size, group, &m_policy));
+            auto file = std::make_shared<LazyFile>(this, url, size, group, &m_policy);
+            {
+                auto& registry = fileRegistry();
+                std::lock_guard lock(registry.lock);
+                registry.files[url] = file;
+            }
+            directory->add(relative.substr(start), std::move(file));
         }
         return root;
     }
@@ -345,6 +410,22 @@ void prefetchLazyFiles(const char* paths, bool low)
     bl_lazy_prefetch(paths, low);
 }
 
+void preloadLazyFiles(const std::vector<std::string>& paths)
+{
+    for (auto& path : paths) {
+        std::shared_ptr<LazyFile> file;
+        {
+            auto& registry = fileRegistry();
+            std::lock_guard lock(registry.lock);
+            auto found = registry.files.find(path);
+            if (found == registry.files.end())
+                continue;
+            file = found->second;
+        }
+        file->preload();
+    }
+}
+
 bool mountLazyFiles(const char* mountPoint, const char* urlFolder, const char* index)
 {
     std::string parent(mountPoint, strrchr(mountPoint, '/') - mountPoint);
@@ -380,6 +461,13 @@ unsigned lazyReadsGivenUp(const char* mountPoint)
 {
     auto found = backends().find(mountPoint);
     return found == backends().end() ? 0 : found->second->m_policy.givenUp;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void bl__lazy_preloaded(void* file, bool ok)
+{
+    runOnEngineThread([file, ok] {
+        static_cast<LazyFile*>(file)->preloaded(ok);
+    });
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE void bl__lazy_arrived(void* file)

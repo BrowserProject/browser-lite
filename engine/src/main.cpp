@@ -53,6 +53,12 @@
 #include <wtf/Threading.h>
 #include <wtf/text/MakeString.h>
 
+namespace JSC {
+// engine/jit/MachineStack.h, a private header of JavaScriptCore: makes the machine stack probes on
+// the page main thread, so V8 compiles their code once for all threads
+void prepareMachineStackProbes();
+}
+
 // The trampolines of a split engine.wasm call this import before a function of a chunk
 // engine.deferred-<chunk>.wasm that their thread has not instantiated yet
 // (tools/split-engine.mjs, engine/js/deferred.js). The pointer keeps the import in the linked
@@ -172,6 +178,7 @@ int main(int, char**)
     setenv("WEBKIT_CURL_MAX_TOTAL_CONNECTIONS", "64", 0);
 
     JSC::initialize();
+    JSC::prepareMachineStackProbes();
     // Before the first RegExp: expensive patterns may run in the host (HostRegExp.cpp)
     installHostRegExp();
     WTF::initializeMainThread();

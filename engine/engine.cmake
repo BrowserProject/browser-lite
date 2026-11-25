@@ -65,6 +65,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/HttpCache.cpp
     ${BL_ENGINE_SRC}/LazyFiles.cpp
     ${BL_ENGINE_SRC}/CanvasTextFonts.cpp
+    ${BL_ENGINE_SRC}/CollationData.cpp
     ${BL_ENGINE_SRC}/FontArrival.cpp
     ${BL_ENGINE_SRC}/FontPrefetch.cpp
     ${BL_ENGINE_SRC}/MemoryVFS.cpp

@@ -1,12 +1,14 @@
 // Start of the engine (packages/core/src/browser.ts start(), engine.ts): engine.js, engine.wasm
 // and engine.data are requested once each, and already while a slow storage.beforeStart runs.
 // Right after the start the engine fetches the common lazy files and the ICU data of the user's
-// languages in the background (#240).
+// languages in the background (#240). ICU's collation data loads into memory once the first page
+// loaded, so the first Intl.Collator reads none of it with a request of its own (#659).
 //
 //   node tests/core/start-test.mjs [engine-dir]
 import {
   check,
   collect,
+  evalPage,
   finish,
   launch,
   openHost,
@@ -106,6 +108,45 @@ async function newPage() {
   ];
   await waitFor(() => ahead.every((path) => requested.has(path)), 15000);
   for (const path of ahead) check(`fetched ahead: ${path}`, requested.has(path));
+  await context.close();
+}
+
+// The collation data of the root locale and of de after the page loaded, in memory before the
+// first Intl.Collator: no synchronous read of it ("[lazy] <file> <n> bytes in <ms> ms")
+{
+  const context = await browser.newContext({ locale: 'de-CH' });
+  const page = await context.newPage();
+  const results = collect(page);
+  const requested = new Map();
+  context.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (!requested.has(path)) requested.set(path, Date.now());
+  });
+  const reads = [];
+  page.on('console', (message) => {
+    if (/\[lazy\] lazy\/icu\/[^ ]*\/coll\//.test(message.text())) reads.push(message.text());
+  });
+  check('browser in de-CH starts', await openHost(page, stack.app({ url: pageURL })));
+  check('page loaded', (await results.wait('loaded')) === '1');
+  const loaded = Date.now();
+  const collation = ['ucadata.icu', 'root.res', 'de.res'].map(
+    (name) => `/engine/lazy/icu/icudt78l/coll/${name}`,
+  );
+  await waitFor(() => collation.every((path) => requested.has(path)), 15000);
+  for (const path of collation)
+    check(
+      `fetched after the page loaded: ${path}`,
+      requested.get(path) >= loaded - 1000,
+      requested.has(path) ? `${requested.get(path) - loaded} ms after` : 'not fetched',
+    );
+  // The fetches are low priority on the page main thread; give them time to land in memory
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  await evalPage(
+    page,
+    `const collator = new Intl.Collator('de'); console.log('RESULT sorted=' + ['z', '\\u00e4', 'a'].sort(collator.compare).join())`,
+  );
+  check('the collator sorts like German', (await results.wait('sorted')) === 'a,\u00e4,z');
+  check('no synchronous read of collation data', reads.length === 0, reads.join(' | '));
   await context.close();
 }
 

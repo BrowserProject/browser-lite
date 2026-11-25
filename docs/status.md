@@ -439,6 +439,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
   the common ones and the user's languages in the background right after the start (#240),
+  ICU's collation data into memory once the first page loaded (#659),
   data saver (`Save-Data`, #230), the relay traffic spread over 3 WebSockets against packet loss
   (#235), the relay keeps only about two round trips of data on the way, so a small response no
   longer waits seconds behind large downloads (#245), `<link rel=preconnect>` opens the connection ahead (#247), the fonts and line break dictionaries a page's
@@ -1125,8 +1126,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
    the page's 15 s pass before it answers. The same wait of up to 4.7 s for the worker came in 1
    of 14 checkbox runs (up to 3.1 s before #652). Both scripts run mostly in the interpreter
    (after the click LLInt itself 23 % of the engine thread, compiled code about 10 %); the JIT's
-   machine stack probe costs every new worker thread about 0.15 s (`failsWithRecursion`,
-   `engine/jit/MachineStack.cpp`). The v3 score demo (recaptcha-demo.appspot.com) answers
+   machine stack probe cost every new worker thread about 0.15 s under the profiler
+   (`failsWithRecursion`, `engine/jit/MachineStack.cpp`; since #658 about 1 ms). The v3 score demo (recaptcha-demo.appspot.com) answers
    9.7 to 13.4 s after the navigation at a load of 8 to 15 (median 12.7 s, 11.9 s before #652,
    score 0.9; Chrome 3.7 to 5 s), the same JS speed. The Moto G71 was not measured. LinkedIn
    Learning
@@ -1497,6 +1498,13 @@ browser (Safari keeps Cmd+L, T and W for itself).
    resolution. 20min.ch's Back is a route change of the same document (`popstate`), not the cache:
    its step is now in the log (#639), locally 25 s at a fourth of the CPU, and host calls such as
    a tap during the load showed steps of up to 15 s that were not logged before.
+16. The first `Intl` use of a page parses ICU tables (2026-11-25, local, Chromium host): with the
+   collation data in memory (#659) the first `Intl.Collator` on open.spotify.com still took 46 to
+   69 ms in the profile at a load of 10 (132 to 172 before, 315 at a load of 40), about 30 ms of it
+   ICU building its tables of language tags on the first parse of a tag, the rest the collation
+   tailoring. Unprofiled on a test page it takes 5 to 10 ms (30 to 89 before). If the collation
+   data is not in memory yet (a first page that collates while it loads), each of its 3 files is
+   still a synchronous request.
 
 ## Open: features
 

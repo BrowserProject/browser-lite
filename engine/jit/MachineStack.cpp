@@ -9,6 +9,7 @@
 #include "config.h"
 #include "MachineStack.h"
 
+#include <emscripten/em_asm.h>
 #include <emscripten/em_js.h>
 
 namespace JSC {
@@ -19,12 +20,18 @@ namespace JSC {
 // engine between.
 // - The recursion: frames of known size (32 values live across each call, about 313 bytes in
 //   V8) as deep as `bytes` needs. About 8 us for 94 KB.
-// - The frame (only for 94 KB): one function with a frame that large, which holds 12032 loaded
-//   values across a call on a path it never takes, so it only runs its prologue. That checks the
-//   stack pointer minus the frame size against the limit (V8's both tiers do, SpiderMonkey's
-//   measured too) without touching the frame. About 0.1 us. It is made at the first probe and
-//   trusted once a test in a later task, from a shallow stack, showed that it fails where the
-//   recursion fails: other engines or tiers may make a large frame without checking it.
+// - The frame (only for 94 KB): one function with a frame that large, which holds loaded values
+//   across a call on a path it never takes, so it only runs its prologue. That checks the stack
+//   pointer minus the frame size against the limit (V8's both tiers do, SpiderMonkey's measured
+//   too) without touching the frame. About 0.1 us. It is made at the first probe and trusted once
+//   a test in a later task showed that it fails where the recursion fails: other engines or tiers
+//   may make a large frame without checking it. The test runs frames like the recursion's as deep
+//   as the stack goes, counting them into memory, then again to where the recursion finds no room
+//   for 90 % of the frame, and calls the frame there: about 1 ms per thread in Chromium once the
+//   page main thread compiled the frame (prepareMachineStackProbes), else about 3 ms. Deeper and
+//   deeper JS frames probing every 16 levels took 8 to 11 ms, and 60 to 1000 ms under V8's
+//   sampling profiler, which walks the whole stack at every sample. Without WebAssembly SIMD the
+//   frame's module fails and the recursion probes.
 EM_JS(int, probeMachineStack, (int bytes), {
     const fits = (probe, argument) => {
         try {
@@ -34,7 +41,10 @@ EM_JS(int, probeMachineStack, (int bytes), {
             return false;
         }
     };
-    let stack = globalThis.blMachineStack;
+    // Per thread: the engine's workers keep it as a global (tests read it), the page main thread
+    // (prepareMachineStackProbes) in the module, not in the host page's window
+    const home = typeof ENVIRONMENT_IS_PTHREAD != 'undefined' && ENVIRONMENT_IS_PTHREAD ? globalThis : Module;
+    let stack = home.blMachineStack;
     if (!stack) {
         const leb = (n) => {
             const out = [];
@@ -45,56 +55,94 @@ EM_JS(int, probeMachineStack, (int bytes), {
             } while (n);
             return out;
         };
-        // A module of one (func (param i32) (result i32)) with this body and one memory
-        const module = (body) => {
-            const code = [1, ...leb(body.length), ...body];
-            return new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, 6, 1, 0x60, 1, 0x7f, 1, 0x7f, 3, 2, 1, 0,
-                5, 3, 1, 0, 1, 7, 5, 1, 1, 0x70, 0, 0, 10, ...leb(code.length), ...code]);
+        // A module of functions (func (param i32) (result i32)) with these bodies, exported as
+        // a, b and so on, and its memory of one page exported as m
+        const module = (...bodies) => {
+            let code = [bodies.length];
+            const exports = [bodies.length + 1, 1, 0x6d, 2, 0];
+            bodies.forEach((body, k) => {
+                // Not push(...body): as many arguments as the frame's body has bytes overflow
+                code = code.concat(leb(body.length), body);
+                exports.push(1, 0x61 + k, 0, k);
+            });
+            return new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, 6, 1, 0x60, 1, 0x7f, 1, 0x7f,
+                3, bodies.length + 1, bodies.length, ...bodies.map(() => 0), 5, 3, 1, 0, 1,
+                7, ...leb(exports.length), ...exports, 10, ...leb(code.length), ...code]);
         };
-        // p(n): n nested frames, each with 32 values live across its call
+        // n nested frames of the function `self`, each with 32 values live across its call, each
+        // first with `entry`, the innermost with `bottom`
         const values = 32;
-        const recursion = [1, values, 0x7e];
-        for (let k = 1; k <= values; k++)
-            recursion.push(0x20, 0, 0xad, 0x42, k, 0x7c, 0x21, k);
-        recursion.push(0x20, 0, 0x45, 0x04, 0x7f, 0x41, 0, 0x05, 0x20, 0, 0x41, 1, 0x6b, 0x10, 0, 0x0b, 0x20, 1);
-        for (let k = 2; k <= values; k++)
-            recursion.push(0x20, k, 0x7c);
-        recursion.push(0xa7, 0x6a, 0x0b);
-        // p(0) = 1 from a frame of 94 KB: else load the values, call p(0) and add them all to it
-        const loads = 94 * 1024 / 8;
+        const nested = (self, entry, bottom) => {
+            const body = [1, values, 0x7e, ...entry];
+            for (let k = 1; k <= values; k++)
+                body.push(0x20, 0, 0xad, 0x42, k, 0x7c, 0x21, k);
+            body.push(0x20, 0, 0x45, 0x04, 0x7f, ...bottom, 0x05, 0x20, 0, 0x41, 1, 0x6b, 0x10, self, 0x0b, 0x20, 1);
+            for (let k = 2; k <= values; k++)
+                body.push(0x20, k, 0x7c);
+            body.push(0xa7, 0x6a, 0x0b);
+            return body;
+        };
+        // a(n): n nested frames
+        const recursion = nested(0, [], [0x41, 0]);
+        // a(0) = 1 from a frame of 94 KB: else load the vectors, call a(0) and add them all to it.
+        // 6016 vectors of 16 bytes: V8 compiles the frame on its first call, in about 2 ms instead
+        // of the 3.5 to 7 ms of 12032 values of 8 bytes. Nested smaller frames would compile
+        // faster, but Firefox did not fail them where the recursion fails, not even two of 47 KB.
+        const frameBytes = 94 * 1024;
         const frame = [0, 0x20, 0, 0x45, 0x04, 0x7f, 0x41, 1, 0x05];
-        for (let k = 0; k < loads; k++)
-            frame.push(0x41, ...leb(k * 8), 0x29, 3, 0);
-        frame.push(0x41, 0, 0x10, 0, 0xad);
-        for (let k = 0; k < loads; k++)
-            frame.push(0x7c);
-        frame.push(0xa7, 0x0b, 0x0b);
+        for (let k = 0; k < frameBytes / 16; k++)
+            frame.push(0x41, 0, 0xfd, 0, 4, ...leb(k * 16));
+        frame.push(0x41, 0, 0x10, 0, 0xfd, 0x11);
+        for (let k = 0; k < frameBytes / 16; k++)
+            frame.push(0xfd, 0x6e);
+        frame.push(0xfd, 0x1b, 0, 0x0b, 0x0b);
 
-        stack = globalThis.blMachineStack = {
-            recursion: new WebAssembly.Instance(new WebAssembly.Module(module(recursion))).exports.p,
+        stack = home.blMachineStack = {
+            recursion: new WebAssembly.Instance(new WebAssembly.Module(module(recursion))).exports.a,
             frame: null,
+            instance: null,
+            // How long the test of the frame took (tests/core/stack-test.mjs)
+            calibrationMs: null,
         };
         const frames = (size) => Math.ceil(size / 313);
-        WebAssembly.instantiate(module(frame)).then(({ instance }) => {
-            const probe = instance.exports.p;
-            // Deeper and deeper JS frames until the recursion finds no room for 90 % of the frame
-            const failsWithRecursion = (depth) => {
-                if (depth % 16 === 0 && !fits(stack.recursion, frames(0.9 * loads * 8)))
-                    return !fits(probe, 0);
-                const result = failsWithRecursion(depth + 1);
-                return result;
+        // b(n): n + 1 nested frames like the recursion's, each storing its n at address 0, the
+        // innermost calling a(0) of the frame
+        const descent = nested(1, [0x41, 0, 0x20, 0, 0x36, 2, 0], [0x41, 0, 0x10, 0]);
+        WebAssembly.instantiate(module(frame, descent)).then(({ instance }) => {
+            // Kept: the other threads find the code V8 compiled for it (prepareMachineStackProbes)
+            stack.instance = instance;
+            const { a: probe, b: descend, m: memory } = instance.exports;
+            const level = new Int32Array(memory.buffer);
+            // As deep as the stack goes, then the frame where the recursion finds no room for
+            // 90 % of it. Tried again when the descent did not reach it: a tier of other frame
+            // sizes may have taken over in between.
+            const failsNearTheEnd = () => {
+                const deepest = 0x40000000;
+                if (fits(descend, deepest))
+                    return false;
+                const depth = deepest - level[0] + 1 - frames(0.9 * frameBytes);
+                level[0] = -1;
+                return depth > 0 && !fits(descend, depth) && level[0] === 0;
             };
+            const start = performance.now();
             try {
-                if (fits(probe, 0) && failsWithRecursion(0))
+                if (fits(probe, 0) && (failsNearTheEnd() || failsNearTheEnd() || failsNearTheEnd()))
                     stack.frame = probe;
             } catch (e) {
             }
+            stack.calibrationMs = performance.now() - start;
         }, () => {});
     }
     if (bytes === 94 * 1024 && stack.frame)
         return fits(stack.frame, 0) ? 2 : 0;
     return fits(stack.recursion, Math.ceil(bytes / 313)) ? 1 : 0;
 });
+
+// Declared in engine/src/main.cpp, which calls it (MachineStack.h is private to JavaScriptCore)
+void prepareMachineStackProbes()
+{
+    MAIN_THREAD_ASYNC_EM_ASM({ probeMachineStack(94 * 1024); });
+}
 
 bool machineStackHasRoom()
 {

@@ -6,11 +6,17 @@
 // map of chunk names on walmart.com) parse and run without recursion, a deep literal fails with a
 // RangeError in time instead of retrying its alternatives at every level, and recursions that
 // take no shadow stack or follow a deeper one get a RangeError instead of crashing the engine.
+// The same in a worker of the page. Every engine thread that probed its machine stack trusts the
+// probe by a frame after a test of a few milliseconds, also under V8's sampling profiler (its
+// first version took 60 to 1000 ms there).
 //
 //   node tests/core/stack-test.mjs [engine-dir]
 import {
+  BROWSER,
   check,
+  chromiumOnly,
   collect,
+  evalPage,
   finish,
   launch,
   openHost,
@@ -162,6 +168,12 @@ const PAGE = `<!doctype html><title>Stack</title><script>
 ${stackCases.toString()}
 console.log('RESULT cases=' + encodeURIComponent(stackCases()));
 setTimeout(() => console.log('RESULT alive=' + [1, 2, 3].map((x) => x * 2).join()), 100);
+function startWorker() {
+  const source = stackCases.toString() + '; postMessage(stackCases());';
+  const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+  worker.onmessage = (e) => console.log('RESULT workerCases=' + encodeURIComponent(e.data));
+  worker.onerror = (e) => console.log('RESULT workerCases=' + encodeURIComponent('error:' + e.message));
+}
 </script>`;
 const { url: siteURL } = await serve((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html' }).end(PAGE);
@@ -173,9 +185,11 @@ const page = await browser.newPage();
 const results = collect(page);
 await openHost(page, stack.app({ url: siteURL }));
 const raw = await results.wait('cases');
-const cases = Object.fromEntries(
-  (raw ? decodeURIComponent(raw).split(' ') : []).map((line) => line.split(':')),
-);
+const parse = (raw) =>
+  Object.fromEntries(
+    (raw ? decodeURIComponent(raw).split(' ') : []).map((line) => line.split(':')),
+  );
+const cases = parse(raw);
 // Shallow cases as in node; deep ones throw (V8's JSON.stringify and its code for long || chains do
 // not recurse, JSC's do)
 const expected = Object.fromEntries(
@@ -183,13 +197,60 @@ const expected = Object.fromEntries(
     .split(' ')
     .map((line) => line.split(':')),
 );
+const checkCases = (cases, prefix) => {
+  for (const [name, value] of Object.entries(expected)) {
+    const ok = ['stringifyDeep', 'orDeep', 'orAfterDeep'].includes(name)
+      ? [value, 'RangeError'].includes(cases[name])
+      : cases[name] === value;
+    check(`${prefix}${name}: ${value}`, ok, cases[name]);
+  }
+};
 check('all cases ran', raw !== null, raw ?? 'no result');
-for (const [name, value] of Object.entries(expected)) {
-  const ok = ['stringifyDeep', 'orDeep', 'orAfterDeep'].includes(name)
-    ? [value, 'RangeError'].includes(cases[name])
-    : cases[name] === value;
-  check(`${name}: ${value}`, ok, cases[name]);
-}
+checkCases(cases, '');
 check('the page keeps running', (await results.wait('alive')) === '2,4,6');
+
+// In a worker, whose thread tests its probe while V8's profiler samples it (Chromium)
+const cdp = chromiumOnly('profiled stack test') ? await page.context().newCDPSession(page) : null;
+await cdp?.send('Tracing.start', {
+  traceConfig: { includedCategories: ['disabled-by-default-v8.cpu_profiler'] },
+  transferMode: 'ReportEvents',
+});
+await evalPage(page, 'startWorker()');
+const workerRaw = await results.wait('workerCases');
+check('all cases ran in a worker', workerRaw !== null, workerRaw ?? 'no result');
+checkCases(parse(workerRaw), 'worker ');
+if (cdp) {
+  const done = new Promise((resolve) => cdp.once('Tracing.tracingComplete', resolve));
+  await cdp.send('Tracing.end');
+  await done;
+}
+await evalPage(page, "console.log('RESULT stillAlive=' + [4, 5].join())");
+check('the page keeps running after the worker', (await results.wait('stillAlive')) === '4,5');
+
+// The probes of the engine threads (engine/jit/MachineStack.cpp): the engine thread and the
+// worker's at least. WebKit makes large frames without checking them, so there the frame stays
+// untrusted (#500). A thread that waits (the compositor between frames) does not answer.
+const probeOf = (worker) =>
+  Promise.race([
+    worker
+      .evaluate(() => {
+        const probe = globalThis.blMachineStack;
+        return probe && { calibrationMs: probe.calibrationMs, frame: !!probe.frame };
+      })
+      .catch(() => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+  ]);
+const probes = (await Promise.all(page.workers().map(probeOf))).filter(
+  (probe) => probe?.calibrationMs != null,
+);
+check('two engine threads tested their probe', probes.length >= 2, probes.length);
+if (BROWSER !== 'webkit')
+  check(
+    'every thread trusts the probe by a frame',
+    probes.every((probe) => probe.frame),
+    probes.length,
+  );
+const slowest = Math.max(...probes.map((probe) => probe.calibrationMs));
+check('the test of the probe took at most 20 ms', slowest <= 20, `${slowest.toFixed(1)} ms`);
 await browser.close();
 finish();

@@ -9,6 +9,7 @@
 #include "Engine.h"
 #include "EngineConfig.h"
 #include "CacheStorageWasm.h"
+#include "CollationData.h"
 #include "Compositor.h"
 #include "CryptoKeys.h"
 #include "CookieJarWasm.h"
@@ -2523,6 +2524,7 @@ void WebView::didFinishLoading()
     notifyNavigationState();
     notifyHost(m_id, "load");
     updateFavicon(true);
+    preloadCollationData();
 }
 
 void WebView::didReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)

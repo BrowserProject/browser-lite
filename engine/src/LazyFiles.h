@@ -32,6 +32,11 @@ void setLazyWaitLimit(const char* mountPoint, const std::vector<std::string>& fo
 // How many limited reads of `mountPoint` failed so far (the text went on without their file)
 unsigned lazyReadsGivenUp(const char* mountPoint);
 
+// Fetches files of the mounted indexes (paths in the engine folder) in the background with low
+// priority and keeps them in memory, so their first reads need no request; files already in
+// memory or on the way and unknown paths are left out. On the engine thread.
+void preloadLazyFiles(const std::vector<std::string>& paths);
+
 // Starts fetching files of the engine folder (paths, one per line) without waiting, so their
 // first reads find them in the HTTP cache. Low: behind the other requests of the host (the
 // synchronous reads come first).

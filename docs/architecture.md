@@ -843,7 +843,10 @@ Google Fonts (most frequent characters first, about 30 KB each with Brotli), emo
 Unicode emoji groups and the symbol fonts into Unicode blocks. Files usually needed together are
 a group (a CJK font's most frequent slices, the data of an ICU locale): the first read fetches the
 others in parallel. Once the engine runs it fetches the files of `engine/lazy-prefetch.txt` and
-the ICU groups of the user's languages in the background (#240). The first read the layout waits
+the ICU groups of the user's languages in the background (#240). Once the first page loaded, ICU's
+collation data (`coll/ucadata.icu`, `coll/root.res` and the user's languages, about 0.96 MB) loads
+into memory in the background (`engine/src/CollationData.cpp`, `preloadLazyFiles`), so the first
+`Intl.Collator` or `localeCompare` waits for no request (#659). The first read the layout waits
 for scans the rendered text outside Latin-1 and fetches the fonts and dictionaries it needs side
 by side (#252, #485);
 fonts only reached as a fallback for characters (scripts, CJK, emoji) hold up the engine thread at
@@ -1090,7 +1093,10 @@ of room (#374), enough to throw and little enough for the deep scripts of Instag
 The probe is a WASM function with a frame that large, whose prologue alone checks it against the
 browser's limit (about 0.1 us); it holds for at most 64 checks and while the shadow stack stays
 within 4 KB below and 16 KB above its point, so recursions that take no shadow stack or follow a
-deeper one are probed too (#500). A one-character `replace` on a
+deeper one are probed too (#500). Each thread trusts that frame once a test showed it fails where
+a recursion of known frame size fails: a WASM recursion counts how deep the stack goes, a second
+one stops short of the end and calls the frame there, about 1 ms per thread; the page main thread
+makes the probes first, so V8 compiles the frame there once for all threads (#658). A one-character `replace` on a
 deep rope string (a string built by appending) probes too and then replaces in the resolved string
 (#368). The parser and the bytecode generator take the else branches of a conditional chain
 (`a ? b : c ? d : ...`, webpack's map of chunk names) in a loop, and the parser gives up at once
