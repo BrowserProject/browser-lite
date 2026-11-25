@@ -197,8 +197,10 @@ const expected = Object.fromEntries(
     .split(' ')
     .map((line) => line.split(':')),
 );
-const checkCases = (cases, prefix) => {
+// skip: cases not checked (profiled below)
+const checkCases = (cases, prefix, skip = []) => {
   for (const [name, value] of Object.entries(expected)) {
+    if (skip.includes(name)) continue;
     const ok = ['stringifyDeep', 'orDeep', 'orAfterDeep'].includes(name)
       ? [value, 'RangeError'].includes(cases[name])
       : cases[name] === value;
@@ -218,7 +220,9 @@ await cdp?.send('Tracing.start', {
 await evalPage(page, 'startWorker()');
 const workerRaw = await results.wait('workerCases');
 check('all cases ran in a worker', workerRaw !== null, workerRaw ?? 'no result');
-checkCases(parse(workerRaw), 'worker ');
+// V8's sampling profiler takes machine stack of the sampled thread, so a deep but legal chain
+// may not fit there on a slow machine (CI): only the cases that must throw or are shallow count
+checkCases(parse(workerRaw), 'worker ', cdp ? ['getter250'] : []);
 if (cdp) {
   const done = new Promise((resolve) => cdp.once('Tracing.tracingComplete', resolve));
   await cdp.send('Tracing.end');
