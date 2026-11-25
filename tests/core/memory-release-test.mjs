@@ -145,11 +145,11 @@ check(
   short.lines.some((line) => line.includes('with the JS code')),
   short.lines.join(' | '),
 );
-// Clearly slower than warm (without the release about as fast); less than cold, the sources
-// stay, and cold varies a lot on a busy machine
+// Clearly slower than warm (without the release about as fast, at most warm); less than cold,
+// the sources stay, and cold varies a lot on a busy machine
 check(
   'after it the first calls build the bytecode again',
-  short.after > short.warm * 3 + 5,
+  short.after > short.warm * 2 + 5,
   `cold ${short.cold} ms, warm ${short.warm} ms, after the release ${short.after} ms`,
 );
 

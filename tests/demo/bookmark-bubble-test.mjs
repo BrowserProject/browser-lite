@@ -68,6 +68,12 @@ const tab = await desktop.newPage();
 const results = collect(tab, /RESULT (\w+)=(.*?)(\s+\(|$)/);
 await tab.goto(stack.app({ url: siteURL }));
 check('page loaded', (await results.wait('ready', TIMEOUT)) === 'Star page');
+// The title reaches the tab with its own event, after the page's script ran
+await tab.waitForFunction(
+  () => document.querySelector('#tab-list .tab.active .title')?.textContent === 'Star page',
+  null,
+  { timeout: TIMEOUT },
+);
 const box = await canvasOrigin(tab);
 const clickPage = async () => {
   await tab.mouse.click(box.x + 300, box.y + 300);
