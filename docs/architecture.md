@@ -764,7 +764,10 @@ whose `firstPartyForCookies` is the top origin of the registration or creator, d
 through their creator's document. A load WebCore made opaque (CORS after a cross-origin redirect)
 takes the frame's document instead, which in a worker page has the worker's origin. Opaque contexts
 (sandboxed frames, `data:` tops) and origins without a site (`file:`) are not cached. WebKit's
-memory cache stays shared by all views of the engine. HTTP authentication (#257, `HttpAuth.cpp`):
+memory cache stays shared by all views of the engine. A font request uses the font preload of
+its URL even when the response varies by `Origin` (patch 0186, #660): WebKit loads fonts without
+CORS, so a `crossorigin` preload sent an `Origin` header the font request lacks, and both the
+memory cache and the HTTP cache took that for another response. HTTP authentication (#257, `HttpAuth.cpp`):
 curl answers Basic and Digest itself once it has a user name and password; the credentials of the
 session are kept per protection space (host, port, scheme, realm) in WebCore's `CredentialStorage`
 and sent ahead for Basic in the same directory, a 401 without them asks the host (`auth`). Range requests (the pieces of `MediaFetch`,

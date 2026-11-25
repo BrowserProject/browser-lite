@@ -1505,6 +1505,25 @@ browser (Safari keeps Cmd+L, T and W for itself).
    tailoring. Unprofiled on a test page it takes 5 to 10 ms (30 to 89 before). If the collation
    data is not in memory yet (a first page that collates while it loads), each of its 3 files is
    still a synchronous request.
+17. edition.cnn.com's first paint at a fourth of the CPU (2026-11-25, local, Chromium host, phone
+   emulation, cold start): 8.6 to 16.9 s in 18 runs of the newest engine, plain Chromium 1.5 to
+   2.7 s. Not a regression of the engine or the site: the engine of round 3 (snapshot of 27498dc
+   with the demo of that commit) loads it in 10.2 to 16.5 s today, the newest in 10.1 to 16.9 s
+   (10 interleaved runs each), b7c4b94 and later commits the same; round 2 (2026-11-20, an older
+   engine) measured 11.4 to 20.5 s, so round 3's 6.0 and 8.6 s (2026-11-21 23:15 UTC, plain
+   Chromium 1.6 and 1.9 s) were the outlier. The Wayback Machine's desktop copies of 2026-11-22
+   00:26 and 2026-11-24 12:41 are the same size (7.01 and 6.99 MB, the same 2.78 MB style sheet and
+   scripts). What the engine thread does until the first paint (local copy of the page, profiled,
+   about 2x): JS 31 % (the head's blocking scripts: a 153 KB inline loader, Adobe Launch,
+   Optimizely's 528 KB), style 23 % (2.3 MB of inline CSS in the head, its parse 6 %, rule set
+   builds under 2 %), HTML tree building 13 %, layout 11 % (text measured through the complex
+   path), and V8 compiling the engine's code lazily on a cold start; the body is in the DOM after
+   about 7.6 s, the first frame comes one rendering update (1.2 to 1.8 s) after the first visible
+   layout. The paused Stripe frame (#628) comes a minute later, after the first paint. The
+   preloaded fonts were loaded a second time and the first paint showed no headlines; now they
+   come with it (#660), but its time did not move. Not reached: within 8 s in 3 of 3 runs, under
+   4 s on a Moto G71 (not measured, the fix is not deployed); it needs the general costs above
+   to come down (item 1).
 
 ## Open: features
 

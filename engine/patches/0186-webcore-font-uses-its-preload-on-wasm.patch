@@ -1,0 +1,19 @@
+diff --git a/Source/WebCore/loader/cache/CachedResourceLoader.cpp b/Source/WebCore/loader/cache/CachedResourceLoader.cpp
+index 79d05402a5..03e24a0184 100644
+--- a/Source/WebCore/loader/cache/CachedResourceLoader.cpp
++++ b/Source/WebCore/loader/cache/CachedResourceLoader.cpp
+@@ -1575,7 +1575,13 @@ CachedResourceLoader::RevalidationPolicy CachedResourceLoader::determineRevalida
+         return Reload;
+     }
+ 
+-    if (!existingResource->varyHeaderValuesMatch(request))
++    // A font request uses the font preload of its URL whatever the preload's mode added to its
++    // headers: WebKit loads fonts without CORS and reuses a font loaded in either mode (bug 86817,
++    // shouldUpdateCachedResourceWithCurrentRequest), so the Origin header of a `crossorigin`
++    // preload must not make a response with `Vary: Origin` load again. HTML matches a preload by
++    // URL, destination, mode and credentials, not by Vary (edition.cnn.com: all its fonts)
++    bool isPreloadedFont = type == CachedResource::Type::FontResource && existingResource->isPreloaded();
++    if (!isPreloadedFont && !existingResource->varyHeaderValuesMatch(request))
+         return Reload;
+ 
+     RefPtr textDecoder = existingResource->textResourceDecoder();
