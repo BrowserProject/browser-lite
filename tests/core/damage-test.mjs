@@ -180,17 +180,25 @@ const snapshot = (page) =>
     const context = probe.getContext('2d', { willReadFrequently: true });
     context.imageSmoothingEnabled = false;
     context.drawImage(canvas, 0, 0, probe.width, probe.height);
-    // Damage tiles over the canvas show the frames that changed little (DamageTiles.h)
+    // Damage tiles over the canvas show the frames that changed little (DamageTiles.h), each the
+    // top left corner of its frame
     const scale = probe.width / canvas.width;
     const layer = canvas.parentElement.querySelector(`[data-bl-tiles="${canvas.dataset.blView}"]`);
-    for (const tile of layer ? layer.querySelectorAll('canvas') : [])
+    for (const tile of layer ? layer.querySelectorAll('canvas') : []) {
+      const width = Math.min(tile.width, Number.parseFloat(tile.style.width));
+      const height = Math.min(tile.height, Number.parseFloat(tile.style.height));
       context.drawImage(
         tile,
+        0,
+        0,
+        width,
+        height,
         Number.parseFloat(tile.style.left) * scale,
         Number.parseFloat(tile.style.top) * scale,
-        tile.width * scale,
-        tile.height * scale,
+        width * scale,
+        height * scale,
       );
+    }
     const data = context.getImageData(0, 0, probe.width, probe.height).data;
     let text = '';
     for (let i = 0; i < data.length; i += 0x8000)

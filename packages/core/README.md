@@ -31,7 +31,8 @@ playing video goes before the canvas, underneath it (the engine leaves its rect 
 After the text field an absolutely positioned layer over the canvas holds the damage tiles the
 engine asks for (`view-tiles.ts`): small canvases that show frames which change only a small part
 of the page (a spinner), so the host repaints only them and not the whole canvas, and regions, a
-canvas fitted to damage that keeps coming at one place (a pulsing ad placeholder). Above them it
+canvas fitted to damage that keeps coming at one place (a pulsing ad placeholder); a tile canvas
+may hold a larger frame and shows its top left corner. Above them it
 holds the host layers (`view-host-layers.ts`): a canvas per layer that only animates its opacity
 and transform (a pulsing placeholder or dot), whose animation runs as a Web Animation, so the engine
 sends no frames for it, and right above it a canvas without animation for the page's layers over it.

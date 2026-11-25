@@ -10,7 +10,9 @@
 // what lies under it shows like in Chrome, and the spinner over it turns in its tiles.
 // Damage that keeps coming at one place over many tiles (an ad placeholder that pulses its
 // background color, as on edition.cnn.com) gets a region, one canvas fitted to it, and the tiles
-// under it get empty; what it shows is what a whole frame shows.
+// under it get empty; what it shows is what a whole frame shows. Two regions of other sizes drawn
+// every frame keep the size of the compositor's framebuffer (each frame lies in its top left
+// corner).
 // Like Safari 18, the engine's workers here keep a canvas's last frame after
 // transferFromImageBitmap(null): Safari reads such a canvas back empty but keeps showing the frame,
 // so tiles emptied that way showed stale pieces of earlier frames and pages on iPhones.
@@ -106,17 +108,20 @@ source.addEventListener('sourceopen', () => {
 });
 empty.addEventListener('playing', () => console.log('RESULT playing=1'), { once: true });
 </script>`;
-// A box of 500x90 at 70, 100 over 10 tiles pulses its background color
+// A box of 500x90 at 70, 100 over 10 tiles pulses its background color, and one of 80x80 at
+// 600, 360 on the corner of 4 tiles, like the two regions of edition.cnn.com
 const PULSE_PAGE = `<!doctype html><title>A pulsing placeholder</title>
 <style>
   body { margin: 0; font: 16px sans-serif; background: #fff; }
-  #pulse { position: absolute; left: 70px; top: 100px; width: 500px; height: 90px;
-    animation: pulse 2s infinite; }
+  .pulse { position: absolute; animation: pulse 2s infinite; }
+  #pulse { left: 70px; top: 100px; width: 500px; height: 90px; }
+  #spot { left: 600px; top: 360px; width: 80px; height: 80px; }
   @keyframes pulse { 0% { background-color: #262626; } 50% { background-color: #808080; }
     100% { background-color: #262626; } }
-  p { margin: 260px 20px 0; }
+  p { margin: 260px 20px 0; width: 520px; }
 </style>
-<div id="pulse"></div><p>${'Static text under a pulsing placeholder. '.repeat(20)}</p>`;
+<div class="pulse" id="pulse"></div><div class="pulse" id="spot"></div>
+<p>${'Static text under a pulsing placeholder. '.repeat(20)}</p>`;
 let clip = null;
 const PAGES = { '/video': VIDEO_PAGE, '/empty-video': EMPTY_VIDEO_PAGE, '/pulse': PULSE_PAGE };
 const { url: siteURL } = await serve((req, res) => {
@@ -162,13 +167,15 @@ const shown = (page, withTiles) =>
     const context = probe.getContext('2d', { willReadFrequently: true });
     context.drawImage(canvas, 0, 0);
     const tiles = [...document.querySelectorAll('[data-bl-tiles] canvas')];
+    // A tile shows the top left corner of its frame (GpuRaster.h)
     if (withTiles)
-      for (const tile of tiles)
-        context.drawImage(
-          tile,
-          Number.parseFloat(tile.style.left),
-          Number.parseFloat(tile.style.top),
-        );
+      for (const tile of tiles) {
+        const width = Math.min(tile.width, Number.parseFloat(tile.style.width));
+        const height = Math.min(tile.height, Number.parseFloat(tile.style.height));
+        const left = Number.parseFloat(tile.style.left);
+        const top = Number.parseFloat(tile.style.top);
+        context.drawImage(tile, 0, 0, width, height, left, top, width, height);
+      }
     const data = context.getImageData(0, 0, probe.width, probe.height).data;
     let text = '';
     for (let i = 0; i < data.length; i += 0x8000)
@@ -204,6 +211,54 @@ const differentPixels = (a, b, { tolerance = 0, box = null, inside = false } = {
 // tilted square (with its corners in this box) the other way
 const SAMPLING = 4;
 const TILTED = [290, 90, 350, 150];
+
+/**
+ * How often an OffscreenCanvas that sends frames (the framebuffer of a WebGL context of the
+ * engine) gets a new width or height during `ms`, and how many frames it sends. Workers that wait
+ * in a thread of the engine never answer; they are skipped.
+ */
+const framebufferSizes = async (page, ms) => {
+  const within = (promise) =>
+    Promise.race([promise.catch(() => null), new Promise((r) => setTimeout(r, 2000, null))]);
+  const workers = page.workers();
+  const each = (fn) => Promise.all(workers.map((worker) => within(worker.evaluate(fn))));
+  await each(() => {
+    if (globalThis.blTestFramebuffer || typeof OffscreenCanvas === 'undefined') return;
+    const stats = { frames: 0, changes: 0 };
+    globalThis.blTestFramebuffer = stats;
+    const proto = OffscreenCanvas.prototype;
+    const transfer = proto.transferToImageBitmap;
+    proto.transferToImageBitmap = function () {
+      // Not the 1x1 canvas that empties tiles
+      if (this.width * this.height > 1) {
+        this.blSendsFrames = true;
+        stats.frames++;
+      }
+      return transfer.call(this);
+    };
+    for (const key of ['width', 'height']) {
+      const { get, set } = Object.getOwnPropertyDescriptor(proto, key);
+      Object.defineProperty(proto, key, {
+        configurable: true,
+        get,
+        set(value) {
+          if (this.blSendsFrames && get.call(this) !== value) stats.changes++;
+          set.call(this, value);
+        },
+      });
+    }
+  });
+  await page.waitForTimeout(500);
+  await each(() => Object.assign(globalThis.blTestFramebuffer ?? {}, { frames: 0, changes: 0 }));
+  await page.waitForTimeout(ms);
+  const all = await each(() => globalThis.blTestFramebuffer ?? null);
+  return all
+    .filter(Boolean)
+    .reduce((sum, s) => ({ frames: sum.frames + s.frames, changes: sum.changes + s.changes }), {
+      frames: 0,
+      changes: 0,
+    });
+};
 
 // In a worker of the engine: transferFromImageBitmap(null) keeps the frame shown, as on screen in
 // Safari 18, so the readback of the test sees what Safari shows
@@ -373,17 +428,18 @@ clip = await recordClip(browser, 3);
         .map((canvas) => {
           const x = Number.parseFloat(canvas.style.left);
           const y = Number.parseFloat(canvas.style.top);
+          // The size it was made with: an emptied canvas holds 1x1 pixels, a drawn one may hold
+          // a larger frame
+          const width = Number.parseFloat(canvas.style.width);
+          const height = Number.parseFloat(canvas.style.height);
           const probe = document.createElement('canvas');
-          probe.width = canvas.width;
-          probe.height = canvas.height;
+          probe.width = Math.min(canvas.width, width);
+          probe.height = Math.min(canvas.height, height);
           const context = probe.getContext('2d', { willReadFrequently: true });
           context.drawImage(canvas, 0, 0);
           const data = context.getImageData(0, 0, probe.width, probe.height).data;
           let shows = false;
           for (let i = 3; i < data.length && !shows; i += 4) shows = data[i] > 0;
-          // The size it was made with: an emptied canvas holds 1x1 pixels
-          const width = Number.parseFloat(canvas.style.width);
-          const height = Number.parseFloat(canvas.style.height);
           return { x, y, width, height, shows };
         })
         .filter(
@@ -423,8 +479,19 @@ clip = await recordClip(browser, 3);
     pulsed && differentPixels(viewBefore, viewAfter) === 0,
     `${differentPixels(viewBefore, viewAfter)} pixels of the view canvas changed in 500 ms`,
   );
-  // Paused, it shows what a whole frame shows
-  await evalPage(page, `document.getElementById('pulse').style.animationPlayState = 'paused'`);
+  // Both regions every frame, in one framebuffer size (GpuRaster.h): each new size reallocates
+  // the drawing buffer of WebGL, before twice per frame
+  const sizes = await framebufferSizes(page, 2000);
+  check(
+    'region: two regions of other sizes keep the framebuffer size',
+    sizes.frames >= 10 && sizes.changes <= 2,
+    `${sizes.changes} width or height changes in ${sizes.frames} frames`,
+  );
+  // Paused, they show what a whole frame shows
+  await evalPage(
+    page,
+    `for (const box of document.querySelectorAll('.pulse')) box.style.animationPlayState = 'paused'`,
+  );
   await page.waitForTimeout(500);
   const fromRegion = await shown(page, true);
   await evalPage(page, `document.body.style.background = '#eee'`);

@@ -1312,6 +1312,17 @@ browser (Safari keeps Cmd+L, T and W for itself).
    idled at 2.69 to 2.84 cores against 2.83 to 2.96 before and 2.87 to 3.10 for plain Chromium:
    that day CNN's playing videos took most of it in both (on 2026-11-21 plain Chromium 1.19 to
    1.23). What the engine thread still does: painting the frames (about a third) and layout.
+   Its two regions (80x80 and 736x112) resized the compositor's WebGL canvas twice a frame, about
+   1100 times per 10 s, each new size reallocating WebGL's drawing buffer; since #657 the tiles
+   share one size (2026-11-25, local, Chromium host 1280x800, 30 or 60 s after a 60 s settle, 5
+   runs against 5 of the engine before): 1.3 to 6.7 resizes per 10 s, 14.7 in a run whose page
+   showed 22 whole frames (two resizes each), `bl_gpu_prepare` 0.01 s instead of 6.2 s per 30 s,
+   the compositor thread busy 5.8 instead of 11.9 s per 30 s. The setters mostly waited for the
+   GPU process: renderer and GPU process together 2.85 to 2.99 cores against 2.88 to 2.98 before,
+   plain Chromium 2.29 to 2.35 (GPU process 1.27 to 1.36 against 0.95 to 1.00, renderer 1.57 to
+   1.63 against 1.33 to 1.35). Still open there: the SwiftShader cost of the region canvases in
+   the GPU process and the engine thread's idle work (IntersectionObserver geometry, layout,
+   style, together about 0.33 cores).
 6. Images drawn small still decode at full size unless they are JPEGs or still WebPs (#270,
    #286): PNG, AVIF, GIF and animated WebP decoders ignore the subsampling level. A JPEG also
    decodes at full size for `img.decode()`, WebGL, `createImageBitmap`, `createPattern` and

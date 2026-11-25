@@ -105,7 +105,10 @@ const probeFrames = (ms) =>
           const top = Number.parseFloat(tile.style.top);
           const tx = x * ratio - left;
           const ty = y * ratio - top;
-          if (tx >= 0 && ty >= 0 && tx < tile.width && ty < tile.height)
+          // A tile shows the top left corner of its frame
+          const width = Math.min(tile.width, Number.parseFloat(tile.style.width));
+          const height = Math.min(tile.height, Number.parseFloat(tile.style.height));
+          if (tx >= 0 && ty >= 0 && tx < width && ty < height)
             context.drawImage(tile, tx, ty, 1, 1, 0, 0, 1, 1);
         }
         colors.push([...context.getImageData(0, 0, 1, 1).data.slice(0, 3)].join(','));
@@ -124,12 +127,13 @@ const snapshot = () =>
     probe.height = view.height;
     const context = probe.getContext('2d', { willReadFrequently: true });
     context.drawImage(view, 0, 0);
-    for (const tile of view.parentElement.querySelectorAll('[data-bl-tiles] canvas'))
-      context.drawImage(
-        tile,
-        Number.parseFloat(tile.style.left),
-        Number.parseFloat(tile.style.top),
-      );
+    for (const tile of view.parentElement.querySelectorAll('[data-bl-tiles] canvas')) {
+      const width = Math.min(tile.width, Number.parseFloat(tile.style.width));
+      const height = Math.min(tile.height, Number.parseFloat(tile.style.height));
+      const left = Number.parseFloat(tile.style.left);
+      const top = Number.parseFloat(tile.style.top);
+      context.drawImage(tile, 0, 0, width, height, left, top, width, height);
+    }
     const data = context.getImageData(0, 0, probe.width, probe.height).data;
     let text = '';
     for (let i = 0; i < data.length; i += 0x8000)

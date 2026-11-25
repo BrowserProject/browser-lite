@@ -133,7 +133,8 @@ ran before the messages of ports and workers posted before its deadline) comes a
     WebGL 2, the stall log's state; a closing view's host waits for its
     tile jobs and detaches every layer that names it; a view hidden for 10 s releases its tiles), `DamageTiles.cpp` (a frame with a
     small change goes only into the host canvases of the tiles it touches, none on a video hole
-    of `VideoOverlay.cpp`, or of a region fitted to damage that keeps coming there; emptied with a
+    of `VideoOverlay.cpp`, or of a region fitted to damage that keeps coming there; all drawn in
+    one framebuffer size, `Gpu::FrameSize::SharedByTiles`, each in its top left corner; emptied with a
     transparent bitmap, `Module.blEmptyBitmap` in `engine-pre.js`, since Safari 18 keeps showing a
     canvas after `transferFromImageBitmap(null)`), `HostLayers.cpp` (layers that only animate
     their opacity and transform get host canvases whose animation the host runs; plain layers

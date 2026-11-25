@@ -4,8 +4,9 @@
 // those. The engine asks for the tiles it needs (event 'tiles'); they cover the view canvas in a
 // grid of `size` frame pixels and belong to the worker that paints, like the view canvas. Damage
 // that keeps coming at one place gets a region instead, a canvas of its own fitted to it, which
-// the engine drops again when it no longer needs it. The same layer holds the canvases of the
-// host layers above them (view-host-layers.ts).
+// the engine drops again when it no longer needs it. A canvas may get a frame larger than itself
+// (the compositor draws all tiles in one size, engine/src/GpuRaster.h): it shows the top left
+// corner. The same layer holds the canvases of the host layers above them (view-host-layers.ts).
 
 import { type HostLayerRequest, HostLayers } from './view-host-layers.js';
 
@@ -26,6 +27,8 @@ interface TileCanvas {
   canvas: HTMLCanvasElement;
   x: number;
   y: number;
+  width: number;
+  height: number;
 }
 
 /** The tile canvases of one view, in a layer over the view canvas. */
@@ -88,7 +91,7 @@ export class ViewTiles {
       `position:absolute;left:${x}px;top:${y}px;` +
       `width:${width}px;height:${height}px;object-fit:none;object-position:0 0;`;
     this.layer.append(canvas);
-    this.tiles.set(key, { canvas, x, y });
+    this.tiles.set(key, { canvas, x, y, width, height });
     const offscreen = canvas.transferControlToOffscreen();
     const { size, viewId } = this;
     this.worker.postMessage({ blTile: offscreen, viewId, size, key }, [offscreen]);
@@ -144,8 +147,12 @@ export class ViewTiles {
    * (debug).
    */
   drawOver(context: CanvasRenderingContext2D, ratio: number): void {
-    for (const { canvas, x, y } of this.tiles.values())
-      context.drawImage(canvas, x / ratio, y / ratio, canvas.width / ratio, canvas.height / ratio);
+    for (const { canvas, x, y, width, height } of this.tiles.values()) {
+      // An emptied canvas holds 1x1 pixels
+      const w = Math.min(width, canvas.width);
+      const h = Math.min(height, canvas.height);
+      context.drawImage(canvas, 0, 0, w, h, x / ratio, y / ratio, w / ratio, h / ratio);
+    }
     this.hostLayers.drawOver(context, ratio);
   }
 

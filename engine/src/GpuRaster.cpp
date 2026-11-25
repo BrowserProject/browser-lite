@@ -6,6 +6,7 @@
 #include "EngineConfig.h"
 #include "WebView.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <emscripten/emscripten.h>
 #include <emscripten/html5_webgl.h>
@@ -21,6 +22,7 @@
 #include <skia/gpu/ganesh/gl/GrGLInterface.h>
 #include <skia/gpu/ganesh/gl/GrGLMakeWebGLInterface.h>
 #include <skia/gpu/ganesh/gl/GrGLTypes.h>
+#include <wtf/MonotonicTime.h>
 
 // Own WebGL 2 context on an OffscreenCanvas in the engine worker. Without depth
 // and antialiasing: Skia paints into its own textures, the framebuffer only
@@ -252,14 +254,42 @@ bool hasCanvas(int viewId)
     return context() && bl_gpu_has_canvas(viewId);
 }
 
-sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height)
+struct Size {
+    int width { 0 };
+    int height { 0 };
+};
+
+// The framebuffer size of the tiles (FrameSize::SharedByTiles): it grows at once and shrinks
+// once the tiles of two periods no longer need it
+static Size sharedTileSize(int width, int height)
+{
+    static constexpr Seconds period { 2_s };
+    static thread_local Size current, previous;
+    static thread_local MonotonicTime start;
+    auto now = MonotonicTime::now();
+    if (now - start >= period) {
+        previous = now - start < 2 * period ? current : Size { };
+        current = { };
+        start = now;
+    }
+    current = { std::max(current.width, width), std::max(current.height, height) };
+    return { std::max(current.width, previous.width), std::max(current.height, previous.height) };
+}
+
+sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height, FrameSize frameSize)
 {
     auto* gr = context();
-    if (!gr || width <= 0 || height <= 0 || !bl_gpu_prepare(viewId, width, height))
+    if (!gr || width <= 0 || height <= 0)
+        return nullptr;
+    auto canvas = frameSize == FrameSize::SharedByTiles ? sharedTileSize(width, height) : Size { width, height };
+    if (!bl_gpu_prepare(viewId, canvas.width, canvas.height))
         return nullptr;
     GrGLFramebufferInfo framebuffer { 0, 0x8058 /* GL_RGBA8 */ };
-    auto target = GrBackendRenderTargets::MakeGL(width, height, 0, 8, framebuffer);
-    return SkSurfaces::WrapBackendRenderTarget(gr, target, kBottomLeft_GrSurfaceOrigin, kRGBA_8888_SkColorType, nullptr, nullptr);
+    auto target = GrBackendRenderTargets::MakeGL(canvas.width, canvas.height, 0, 8, framebuffer);
+    auto surface = SkSurfaces::WrapBackendRenderTarget(gr, target, kBottomLeft_GrSurfaceOrigin, kRGBA_8888_SkColorType, nullptr, nullptr);
+    if (surface && (canvas.width != width || canvas.height != height))
+        surface->getCanvas()->clipRect(SkRect::MakeIWH(width, height));
+    return surface;
 }
 
 bool showFramebuffer(int viewId, std::optional<unsigned> tile)

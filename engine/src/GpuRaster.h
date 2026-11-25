@@ -15,6 +15,7 @@
 // the context. Then Skia gets a new one.
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <skia/core/SkRefCnt.h>
 
@@ -46,12 +47,19 @@ sk_sp<SkSurface> createSurface(int width, int height);
 // false if the view has no canvas in the engine worker (yet).
 bool present(int viewId, SkSurface&);
 
-// Paint directly into the framebuffer of the context (compositor): surface in
-// the size of the view, of a damage tile (DamageTiles.h) or of a host layer (HostLayers.h),
-// nullptr if the view has no canvas here. Afterwards showFramebuffer() sends the frame without a
-// copy into the canvas of the view or of the tile, showFramebufferInLayer() into that of the layer.
+// How big the framebuffer is for a frame of width x height. Exact: the view canvas and host layers
+// (HostLayers.h). SharedByTiles: damage tiles and regions (DamageTiles.h), several of other sizes
+// per frame, share one size, the bounding size of the tiles of the last 2 to 4 seconds; the frame
+// lies in its top left corner, which is what the host's tile canvases show (object-fit: none).
+// Each new size reallocates the drawing buffer of WebGL.
+enum class FrameSize : uint8_t { Exact, SharedByTiles };
+
+// Paint directly into the framebuffer of the context (compositor): surface for a frame in
+// the size of the view, of a damage tile or of a host layer, clipped to it, nullptr if the view has
+// no canvas here. Afterwards showFramebuffer() sends the frame without a copy into the canvas of
+// the view or of the tile, showFramebufferInLayer() into that of the layer.
 bool hasCanvas(int viewId);
-sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height);
+sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height, FrameSize = FrameSize::Exact);
 bool showFramebuffer(int viewId, std::optional<unsigned> tile = std::nullopt);
 bool showFramebufferInLayer(int viewId, unsigned key);
 

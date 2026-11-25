@@ -322,7 +322,11 @@ a small canvas of its own over the view canvas, which keeps its last frame (`Dam
 whole view per frame before). Damage that keeps coming at one place over two tiles or more a frame
 (a pulsing ad placeholder over 12 tiles, a spinner on the corner of 4) gets a region instead, one
 canvas fitted to the damage of its last 16 frames, since every canvas costs the host about the
-same per frame however small it is (#574); tiles and regions may overlap, and every one that
+same per frame however small it is (#574). The compositor draws all tiles and regions in one
+size of its WebGL canvas, the bounding size of the tiles of the last 2 to 4 seconds, each in the
+top left corner, which is what its host canvas shows (`object-fit: none`): every new size of the
+WebGL canvas reallocates its drawing buffer, which two regions of other sizes did twice a frame
+(#657). Tiles and regions may overlap, and every one that
 shows something shows the view as it is: a frame draws again each one its damage touches, or
 empties it when the canvases of the frame cover all of it where the view canvas is out of date. A
 frame whose tiles touch the hole of a video the host shows (see Media), in

@@ -105,7 +105,7 @@ static bool compositeTiles(CompositorScene& scene, SkiaCompositingLayer& rootLay
 {
     auto* grContext = Gpu::context();
     for (auto& tile : tiles) {
-        auto surface = Gpu::framebufferSurface(scene.viewId, tile.rect.width(), tile.rect.height());
+        auto surface = Gpu::framebufferSurface(scene.viewId, tile.rect.width(), tile.rect.height(), Gpu::FrameSize::SharedByTiles);
         if (!surface)
             return false;
         auto* canvas = surface->getCanvas();

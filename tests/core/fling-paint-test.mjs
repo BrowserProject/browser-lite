@@ -79,8 +79,13 @@ await page.evaluate(() => {
     context.drawImage(view, 0, 0, width, height);
     for (const tile of document.querySelectorAll('[data-bl-tiles] canvas')) {
       const box = tile.getBoundingClientRect();
+      // A tile shows the top left corner of its frame
       context.drawImage(
         tile,
+        0,
+        0,
+        Math.min(tile.width, Number.parseFloat(tile.style.width)),
+        Math.min(tile.height, Number.parseFloat(tile.style.height)),
         (box.left - rect.left) / 4,
         (box.top - rect.top) / 4,
         box.width / 4,

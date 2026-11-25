@@ -132,7 +132,10 @@ const shown = (page) =>
         const m = new DOMMatrix(style.transform);
         context.transform(m.a, m.b, m.c, m.d, m.e, m.f);
       }
-      context.drawImage(over, 0, 0);
+      // A damage tile shows the top left corner of its frame
+      const width = Math.min(over.width, Number.parseFloat(over.style.width));
+      const height = Math.min(over.height, Number.parseFloat(over.style.height));
+      context.drawImage(over, 0, 0, width, height, 0, 0, width, height);
       context.restore();
     }
     const data = context.getImageData(0, 0, probe.width, probe.height).data;
