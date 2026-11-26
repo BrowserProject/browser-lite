@@ -5,7 +5,7 @@
 #   deploy-shell -c '<image digest> <commit> <user>'    (the GitHub token on stdin)
 #
 # Gets compose.yml of that commit from the GitHub API, starts the image by digest and checks
-# /healthz through the tunnel. Anything else is refused.
+# https://<domain>/healthz (through the tunnel or tailscale serve). Anything else is refused.
 set -euo pipefail
 
 repo=BrowserProject/browser-lite

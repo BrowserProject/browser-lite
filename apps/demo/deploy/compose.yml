@@ -1,12 +1,12 @@
-# browser-lite on the server, behind a Cloudflare Tunnel: cloudflared on the server (setup-server.sh)
-# forwards the domain to the published port, which listens only on the loopback interface.
+# browser-lite on the server, behind a Cloudflare Tunnel or `tailscale serve` (setup-server.sh): the
+# proxy on the server forwards the domain to the published port, which listens only on loopback.
 # The deploy (deploy-shell.sh) sets IMAGE (always by digest); DOMAIN and RELAY_TOKEN come from
 # server.env on the server, never from the repository.
 services:
   browser-lite:
     image: ${IMAGE:?IMAGE missing}
     restart: unless-stopped
-    # Only cloudflared on the same host reaches it: Cloudflare puts the client address last in
+    # Only the proxy on the same host reaches it and puts the client address last in
     # X-Forwarded-For, so one proxy can be trusted
     ports:
       - "127.0.0.1:8080:8080"

@@ -4,7 +4,8 @@ The public demo: `browser-lite-server` ([packages/server](../../../packages/serv
 the packaged demo (target `demo` of the `Dockerfile` in the repository root) behind a Cloudflare
 Tunnel: `cloudflared` on the server connects outwards to Cloudflare, which serves HTTPS and HTTP/3
 for the domain and forwards it to the container (`compose.yml`). The server needs no public
-address and no open port besides SSH in its own network.
+address and no open port besides SSH in its own network. A second server, reachable only inside the
+owner's tailnet, gets the same deploy ([Tailnet server](#tailnet-server)).
 The browser profile lies in `/data` (named volume `profile`, kept across deploys). The server is
 public, so relay and profile need the relay token: `RELAY_TOKEN` in `/opt/browser-lite/server.env`
 on the server (never in the repository). Open the demo once with `?token=<token>`; it stays in
@@ -26,11 +27,14 @@ Against DNS rebinding relay and `/profile/` answer only under the domain of `ser
    - builds the images and tests them read-only (`tools/build-images.sh`: headers, Brotli,
      relay, profile, clean exit on SIGTERM)
    - pushes the demo image to `DEMO_IMAGE` of `versions.env` (tags `<commit>` and `main`)
-   - restarts it on the server: the job `deploy` (GitHub-hosted) logs in over SSH as `deploy`
-     with its own key, through the tunnel (`cloudflared access ssh` of `CLOUDFLARED_VERSION`;
-     Cloudflare Access lets only the deploy's service token through). Repository secrets
-     `DEPLOY_HOST` (the SSH host name of the tunnel), `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`,
-     `DEPLOY_ACCESS_ID` and `DEPLOY_ACCESS_SECRET`. The login shell of `deploy`
+   - restarts it on each server (matrix `target`: `demo`, `tailnet`, one failing does not stop
+     the other): the job `deploy` (GitHub-hosted) logs in over SSH as `deploy`
+     with its own key, to the demo through the tunnel (`cloudflared access ssh` of
+     `CLOUDFLARED_VERSION`; Cloudflare Access lets only the deploy's service token through), to
+     the tailnet server directly. Repository secrets `DEPLOY_HOST` (the SSH host name of the
+     tunnel), `DEPLOY_TAILNET_HOST` (the tailnet server's public address), `DEPLOY_SSH_KEY` (one
+     key for both), `DEPLOY_KNOWN_HOSTS` (both hosts), `DEPLOY_ACCESS_ID` and
+     `DEPLOY_ACCESS_SECRET`. The login shell of `deploy`
      (`deploy-shell.sh`) takes only image digest, commit and the GitHub token on stdin, gets
      `compose.yml` of that commit, starts the image by digest and checks `https://<domain>/healthz`
 
@@ -69,6 +73,23 @@ tunnel's token, the user `deploy` (login shell `deploy-shell.sh`, its key with `
 terminal, no forwarding), `/opt/browser-lite/server.env` with the domain and a generated relay
 token (kept when it exists), SSH with keys only and at most 3 tries, fail2ban on SSH, a firewall
 with only 22 open, automatic security updates.
+
+## Tailnet server
+
+A server whose demo is reachable only inside a tailnet: `setup-server.sh` with
+`TAILSCALE_AUTHKEY_FILE` instead of `TUNNEL_TOKEN_FILE` installs Tailscale of `versions.env`,
+joins the tailnet as `TAILSCALE_HOSTNAME` and runs `tailscale serve` (HTTPS on 443 of the tailnet
+address with the tailnet's certificate, no Funnel). The domain in `server.env` is the node's
+MagicDNS name (`<name>.<tailnet>.ts.net`), the firewall also lets in all of `tailscale0` and
+UDP 41641. SSH stays on the public address for the deploy (Tailscale in CI would need secrets and
+ACLs of the tailnet, decision 307):
+
+```bash
+TAILSCALE_HOSTNAME=browser-lite DEPLOY_KEY_FILE=deploy_ed25519.pub TAILSCALE_AUTHKEY_FILE=<file> \
+  apps/demo/deploy/setup-server.sh root@<address>
+gh secret set DEPLOY_TAILNET_HOST --body <address>
+# DEPLOY_KNOWN_HOSTS: the line of the demo and `ssh-keyscan -t ed25519 <address>`
+```
 
 ## Security
 

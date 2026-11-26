@@ -590,6 +590,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **CI and deploy**: every push to `main` builds, tests and deploys the public demo;
   all jobs on GitHub-hosted runners, the server sits behind a Cloudflare Tunnel and the deploy
   logs in over SSH through it with a key of its own and an Access service token (#335, #482).
+  A second server, reachable only inside the owner's tailnet (`tailscale serve`), gets every
+  deploy too (#661).
 
 ## Measurements (local, first visit)
 
