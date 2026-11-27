@@ -1,9 +1,9 @@
 name: Deploy
 
 # After a green CI on main (or by hand): build and test the images (tools/build-images.sh), push
-# the demo image to ghcr.io and restart it on each server. The job deploy logs in to a server over
-# SSH as deploy with a key of its own (secrets DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS and the host of
-# the target), whose login shell only restarts the demo (apps/demo/deploy/deploy-shell.sh).
+# the demo image to ghcr.io and restart it on the server. The job deploy logs in to the server over
+# SSH as deploy with a key of its own (secrets DEPLOY_HOST, DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS),
+# whose login shell only restarts the demo (apps/demo/deploy/deploy-shell.sh).
 
 on:
   workflow_run:
@@ -108,55 +108,30 @@ jobs:
           echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "$DEMO_IMAGE:$SHA")" >> "$GITHUB_OUTPUT"
 
   deploy:
-    name: Restart on the server (${{ matrix.target }})
+    name: Restart on the server
     needs: image
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: read
-    # demo: the public demo behind a Cloudflare Tunnel; tailnet: a server reachable only inside a
-    # tailnet, its SSH on the public address. One failing target does not stop the other.
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [demo, tailnet]
+    # The server is reachable only inside a tailnet; its SSH stays on the public address
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          ref: ${{ needs.image.outputs.sha }}
-          sparse-checkout: versions.env
-          sparse-checkout-cone-mode: false
-      # The demo sits behind a Cloudflare Tunnel: SSH goes through cloudflared, which Cloudflare
-      # Access lets through only with the deploy's service token
-      - name: cloudflared of versions.env
-        if: matrix.target == 'demo'
-        run: |
-          source versions.env
-          curl -fsSL -o cloudflared \
-            "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64"
-          echo "$CLOUDFLARED_SHA256  cloudflared" | sha256sum -c --quiet
-          install -m 755 cloudflared /usr/local/bin/cloudflared
       - name: Restart
         env:
           TOKEN: ${{ github.token }}
           IMAGE: ${{ needs.image.outputs.image }}
           SHA: ${{ needs.image.outputs.sha }}
           ACTOR: ${{ github.actor }}
-          TARGET: ${{ matrix.target }}
-          HOST: ${{ matrix.target == 'demo' && secrets.DEPLOY_HOST || secrets.DEPLOY_TAILNET_HOST }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
           KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          TUNNEL_SERVICE_TOKEN_ID: ${{ matrix.target == 'demo' && secrets.DEPLOY_ACCESS_ID || '' }}
-          TUNNEL_SERVICE_TOKEN_SECRET: ${{ matrix.target == 'demo' && secrets.DEPLOY_ACCESS_SECRET || '' }}
         # The token only on stdin: deploy-shell.sh fetches the deploy files with it and pulls the image
         run: |
-          [ -n "$HOST" ] || { echo "::error::No host for $TARGET"; exit 1; }
+          [ -n "$HOST" ] || { echo "::error::No DEPLOY_HOST"; exit 1; }
           install -d -m 700 ~/.ssh
           printf '%s\n' "$KEY" > ~/.ssh/deploy
           chmod 600 ~/.ssh/deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           trap 'rm -f ~/.ssh/deploy' EXIT
-          proxy=()
-          if [ "$TARGET" = demo ]; then proxy=(-o 'ProxyCommand=cloudflared access ssh --hostname %h'); fi
           printf '%s\n' "$TOKEN" | ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes "${proxy[@]}" "deploy@$HOST" "$IMAGE $SHA $ACTOR"
+            -o StrictHostKeyChecking=yes "deploy@$HOST" "$IMAGE $SHA $ACTOR"

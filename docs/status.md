@@ -587,11 +587,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   messages, storage, UI slots rendered by the demo; no extensions yet, and without one nothing of
   it runs.
 - **Yardstick**: 257 of 280 checks like Chromium.
-- **CI and deploy**: every push to `main` builds, tests and deploys the public demo;
-  all jobs on GitHub-hosted runners, the server sits behind a Cloudflare Tunnel and the deploy
-  logs in over SSH through it with a key of its own and an Access service token (#335, #482).
-  A second server, reachable only inside the owner's tailnet (`tailscale serve`), gets every
-  deploy too (#661).
+- **CI and deploy**: every push to `main` builds, tests and deploys the demo on its server,
+  reachable only inside the owner's tailnet (`tailscale serve`); all jobs on GitHub-hosted
+  runners, the deploy logs in over SSH on the public address with a key of its own (#335, #661,
+  #662). There is no public demo any more.
 
 ## Measurements (local, first visit)
 

@@ -1,5 +1,5 @@
-# browser-lite on the server, behind a Cloudflare Tunnel or `tailscale serve` (setup-server.sh): the
-# proxy on the server forwards the domain to the published port, which listens only on loopback.
+# browser-lite on the server, behind `tailscale serve` (setup-server.sh): the proxy on the server
+# forwards the domain to the published port, which listens only on loopback.
 # The deploy (deploy-shell.sh) sets IMAGE (always by digest); DOMAIN and RELAY_TOKEN come from
 # server.env on the server, never from the repository.
 services:

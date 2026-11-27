@@ -99,7 +99,7 @@ the pages do runs in your origin: no third-party scripts on the browser page. Mo
 
 `apps/demo` is a full browser (tabs, history, bookmarks, settings, profile) on the packages. It
 runs with an engine from CI (artifact `engine` of a green run) in `build/webcore/bin/`; commands,
-URL parameters and modules: [apps/demo/README.md](apps/demo/README.md); deployment on the home
+URL parameters and modules: [apps/demo/README.md](apps/demo/README.md); deployment on the demo
 server: [apps/demo/deploy/README.md](apps/demo/deploy/README.md).
 
 ## Build the engine
@@ -112,7 +112,7 @@ time): [docs/build.md](docs/build.md).
 ```
 engine/        WebKit embedder (C++ and JS), patches/ for WebKit, abi.json (contract with the core)
 packages/      npm packages: core, transport-wisp, ui, profile, server
-apps/demo/     the demo browser (Vite) and deploy/ for the public demo server
+apps/demo/     the demo browser (Vite) and deploy/ for the demo server
 examples/      copyable embedding templates: minimal (own route) and existing-site
 tests/         contract, engine, JSC and browser suites (tests/README.md)
 tools/         build, patch, packaging and style scripts

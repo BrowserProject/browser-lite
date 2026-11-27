@@ -73,7 +73,7 @@ with the same version.
 ## Secrets and security
 
 The repo is public: never commit secrets, tokens, server IPs or names from the home network.
-Never log tokens. The public demo server runs with `RELAY_TOKEN` (only in `server.env` on the
+Never log tokens. The demo server runs with `RELAY_TOKEN` (only in `server.env` on the
 server); never run a reachable server without `RELAY_TOKEN` or `RELAY_SECRET`.
 Threat model: [docs/security.md](docs/security.md).
 

@@ -1,42 +1,32 @@
 #!/usr/bin/env bash
-# Sets up browser-lite on an Ubuntu or Debian server (repeatable, needs root there): Docker, the
-# way in, the user deploy for the deploy workflow (SSH key only, login shell deploy-shell.sh),
-# server.env with the domain and a generated relay token, SSH with keys only, fail2ban, a firewall
-# with only 22 open, automatic security updates. Two ways in, exactly one of them:
+# Sets up browser-lite on an Ubuntu or Debian server (repeatable, needs root there): Docker,
+# Tailscale (the demo is reachable only inside the tailnet: `tailscale serve` gives HTTPS with the
+# tailnet's certificate, the domain is the node's MagicDNS name), the user deploy for the deploy
+# workflow (SSH key only, login shell deploy-shell.sh), server.env with the domain and a generated
+# relay token, SSH with keys only, fail2ban, a firewall with only SSH and Tailscale open,
+# automatic security updates.
 #
-#   Cloudflare Tunnel (public demo): cloudflared as a service with the tunnel's token
-#     DOMAIN=browser-lite.example.com DEPLOY_KEY_FILE=<public key> TUNNEL_TOKEN_FILE=<file> \
-#       apps/demo/deploy/setup-server.sh root@<host>
-#   Tailscale (only inside a tailnet): joins it with the auth key, `tailscale serve` gives HTTPS
-#   with the tailnet's certificate, DOMAIN is the node's MagicDNS name
-#     TAILSCALE_HOSTNAME=browser-lite DEPLOY_KEY_FILE=<public key> TAILSCALE_AUTHKEY_FILE=<file> \
-#       apps/demo/deploy/setup-server.sh root@<host>
+#   TAILSCALE_HOSTNAME=browser-lite DEPLOY_KEY_FILE=<public key> TAILSCALE_AUTHKEY_FILE=<file> \
+#     [TAILSCALE_PORT=41700] apps/demo/deploy/setup-server.sh root@<host>
 #
 # DEPLOY_KEY_FILE: the public half of the key of the deploy workflow (its private half is the
-# repository secret DEPLOY_SSH_KEY). The relay token stays on the server (/opt/browser-lite/server.env).
+# repository secret DEPLOY_SSH_KEY). TAILSCALE_PORT: the UDP port of tailscaled (default 41641;
+# some hosters' DDoS filters drop WireGuard on 41641). The relay token stays on the server
+# (/opt/browser-lite/server.env).
 set -euo pipefail
 here="$(dirname "$0")"
 
-target="${1:?Usage: DEPLOY_KEY_FILE=... (DOMAIN=... TUNNEL_TOKEN_FILE=... | TAILSCALE_HOSTNAME=... TAILSCALE_AUTHKEY_FILE=...) apps/demo/deploy/setup-server.sh root@<host>}"
+target="${1:?Usage: TAILSCALE_HOSTNAME=... DEPLOY_KEY_FILE=... TAILSCALE_AUTHKEY_FILE=... [TAILSCALE_PORT=...] apps/demo/deploy/setup-server.sh root@<host>}"
 : "${DEPLOY_KEY_FILE:?DEPLOY_KEY_FILE missing}"
+: "${TAILSCALE_AUTHKEY_FILE:?TAILSCALE_AUTHKEY_FILE missing}"
+: "${TAILSCALE_HOSTNAME:?TAILSCALE_HOSTNAME missing}"
+port="${TAILSCALE_PORT:-41641}"
 key="$(cat "$DEPLOY_KEY_FILE")"
 [[ "$key" =~ ^ssh-ed25519\ [A-Za-z0-9+/=]+(\ [A-Za-z0-9@._\ -]+)?$ ]] || { echo "DEPLOY_KEY_FILE: one ssh-ed25519 key" >&2; exit 2; }
-if [ -n "${TUNNEL_TOKEN_FILE:-}" ] && [ -z "${TAILSCALE_AUTHKEY_FILE:-}" ]; then
-    way=tunnel
-    : "${DOMAIN:?DOMAIN missing}"
-    [[ "$DOMAIN" =~ ^[a-z0-9.-]+$ ]] || { echo "invalid DOMAIN" >&2; exit 2; }
-    secret="$(cat "$TUNNEL_TOKEN_FILE")"
-    [[ "$secret" =~ ^[A-Za-z0-9+/=_-]+$ ]] || { echo "TUNNEL_TOKEN_FILE: one token" >&2; exit 2; }
-elif [ -n "${TAILSCALE_AUTHKEY_FILE:-}" ] && [ -z "${TUNNEL_TOKEN_FILE:-}" ]; then
-    way=tailscale
-    : "${TAILSCALE_HOSTNAME:?TAILSCALE_HOSTNAME missing}"
-    [[ "$TAILSCALE_HOSTNAME" =~ ^[a-z0-9-]+$ ]] || { echo "invalid TAILSCALE_HOSTNAME" >&2; exit 2; }
-    secret="$(cat "$TAILSCALE_AUTHKEY_FILE")"
-    [[ "$secret" =~ ^tskey-[A-Za-z0-9-]+$ ]] || { echo "TAILSCALE_AUTHKEY_FILE: one auth key" >&2; exit 2; }
-else
-    echo "exactly one of TUNNEL_TOKEN_FILE and TAILSCALE_AUTHKEY_FILE" >&2
-    exit 2
-fi
+[[ "$TAILSCALE_HOSTNAME" =~ ^[a-z0-9-]+$ ]] || { echo "invalid TAILSCALE_HOSTNAME" >&2; exit 2; }
+[[ "$port" =~ ^[0-9]{4,5}$ ]] || { echo "invalid TAILSCALE_PORT" >&2; exit 2; }
+secret="$(cat "$TAILSCALE_AUTHKEY_FILE")"
+[[ "$secret" =~ ^tskey-[A-Za-z0-9-]+$ ]] || { echo "TAILSCALE_AUTHKEY_FILE: one auth key" >&2; exit 2; }
 # shellcheck source=versions.env
 source "$here/../../../versions.env"
 
@@ -51,40 +41,28 @@ command -v docker >/dev/null || apt-get install -y -q docker.io
 docker compose version >/dev/null 2>&1 || apt-get install -y -q docker-compose-v2
 apt-get install -y -q curl ca-certificates jq fail2ban ufw unattended-upgrades
 
-if [ '$way' = tunnel ]; then
-    # cloudflared of versions.env, checked against its SHA256, as a service with the tunnel's token
-    if [ "\$(cloudflared --version 2>/dev/null | awk '{print \$3}')" != '$CLOUDFLARED_VERSION' ]; then
-        deb=/tmp/cloudflared.deb
-        curl -fsSL -o "\$deb" 'https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64.deb'
-        echo '$CLOUDFLARED_DEB_SHA256  '"\$deb" | sha256sum -c --quiet
-        dpkg -i "\$deb" >/dev/null
-        rm "\$deb"
-    fi
-    systemctl list-unit-files cloudflared.service >/dev/null 2>&1 && cloudflared service uninstall >/dev/null 2>&1 || true
-    cloudflared service install '$secret' >/dev/null 2>&1
-    systemctl enable -q --now cloudflared
-    domain='${DOMAIN:-}'
-else
-    # Tailscale of versions.env from its apt repository (signing key checked against its SHA256)
-    . /etc/os-release
-    ring=/usr/share/keyrings/tailscale-archive-keyring.gpg
-    curl -fsSL -o "\$ring" "https://pkgs.tailscale.com/stable/\$ID/\$VERSION_CODENAME.noarmor.gpg"
-    echo '$TAILSCALE_KEYRING_SHA256  '"\$ring" | sha256sum -c --quiet
-    echo "deb [signed-by=\$ring] https://pkgs.tailscale.com/stable/\$ID \$VERSION_CODENAME main" > /etc/apt/sources.list.d/tailscale.list
-    apt-get update -q
-    apt-get install -y -q --allow-downgrades 'tailscale=$TAILSCALE_VERSION'
-    systemctl enable -q --now tailscaled
-    # The auth key is needed only to join; a node already in the tailnet keeps its identity
-    if ! tailscale status >/dev/null 2>&1; then
-        (umask 077 && printf '%s' '$secret' > /root/browser-lite-tskey)
-        tailscale up --auth-key=file:/root/browser-lite-tskey --hostname='${TAILSCALE_HOSTNAME:-}'
-        rm /root/browser-lite-tskey
-    fi
-    domain="\$(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')"
-    [[ "\$domain" =~ ^[a-z0-9.-]+\.ts\.net\$ ]] || { echo "no MagicDNS name" >&2; exit 1; }
-    # HTTPS on 443 of the tailnet address with the tailnet's certificate, never public (no Funnel)
-    tailscale serve --bg --yes --https=443 http://127.0.0.1:8080 >/dev/null
+# Tailscale of versions.env from its apt repository (signing key checked against its SHA256)
+. /etc/os-release
+ring=/usr/share/keyrings/tailscale-archive-keyring.gpg
+curl -fsSL -o "\$ring" "https://pkgs.tailscale.com/stable/\$ID/\$VERSION_CODENAME.noarmor.gpg"
+echo '$TAILSCALE_KEYRING_SHA256  '"\$ring" | sha256sum -c --quiet
+echo "deb [signed-by=\$ring] https://pkgs.tailscale.com/stable/\$ID \$VERSION_CODENAME main" > /etc/apt/sources.list.d/tailscale.list
+apt-get update -q
+apt-get install -y -q --allow-downgrades 'tailscale=$TAILSCALE_VERSION'
+sed -i 's/^PORT=.*/PORT="$port"/' /etc/default/tailscaled
+grep -qx 'PORT="$port"' /etc/default/tailscaled || echo 'PORT="$port"' >> /etc/default/tailscaled
+systemctl enable -q tailscaled
+systemctl restart tailscaled
+# The auth key is needed only to join; a node already in the tailnet keeps its identity
+if ! tailscale status >/dev/null 2>&1; then
+    (umask 077 && printf '%s' '$secret' > /root/browser-lite-tskey)
+    tailscale up --auth-key=file:/root/browser-lite-tskey --hostname='$TAILSCALE_HOSTNAME'
+    rm /root/browser-lite-tskey
 fi
+domain="\$(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')"
+[[ "\$domain" =~ ^[a-z0-9.-]+\.ts\.net\$ ]] || { echo "no MagicDNS name" >&2; exit 1; }
+# HTTPS on 443 of the tailnet address with the tailnet's certificate, never public (no Funnel)
+tailscale serve --bg --yes --https=443 http://127.0.0.1:8080 >/dev/null
 
 install -m 755 /tmp/browser-lite-deploy-shell /usr/local/bin/browser-lite-deploy-shell
 rm /tmp/browser-lite-deploy-shell
@@ -138,10 +116,8 @@ systemctl restart fail2ban
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
 ufw allow 22/tcp >/dev/null
-if [ '$way' = tailscale ]; then
-    ufw allow in on tailscale0 >/dev/null
-    ufw allow 41641/udp >/dev/null
-fi
+ufw allow in on tailscale0 >/dev/null
+ufw allow '$port'/udp >/dev/null
 ufw --force enable >/dev/null
 
 echo 'APT::Periodic::Update-Package-Lists "1";' > /etc/apt/apt.conf.d/20auto-upgrades

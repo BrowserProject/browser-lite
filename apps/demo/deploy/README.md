@@ -1,21 +1,21 @@
 # apps/demo/deploy/
 
-The public demo: `browser-lite-server` ([packages/server](../../../packages/server/README.md)) with
-the packaged demo (target `demo` of the `Dockerfile` in the repository root) behind a Cloudflare
-Tunnel: `cloudflared` on the server connects outwards to Cloudflare, which serves HTTPS and HTTP/3
-for the domain and forwards it to the container (`compose.yml`). The server needs no public
-address and no open port besides SSH in its own network. A second server, reachable only inside the
-owner's tailnet, gets the same deploy ([Tailnet server](#tailnet-server)).
-The browser profile lies in `/data` (named volume `profile`, kept across deploys). The server is
-public, so relay and profile need the relay token: `RELAY_TOKEN` in `/opt/browser-lite/server.env`
-on the server (never in the repository). Open the demo once with `?token=<token>`; it stays in
-localStorage of that browser. The profile (cookies, so sign-ins) lies unencrypted on the server
+The demo server: `browser-lite-server` ([packages/server](../../../packages/server/README.md)) with
+the packaged demo (target `demo` of the `Dockerfile` in the repository root), reachable only inside
+the owner's tailnet: `tailscale serve` on the server terminates HTTPS on its tailnet address with
+the tailnet's certificate (no Funnel) and forwards to the container (`compose.yml`). There is no
+public demo. SSH stays on the public address for the deploy (Tailscale in CI would need secrets
+and ACLs of the tailnet, decision 307).
+The browser profile lies in `/data` (named volume `profile`, kept across deploys). Relay and
+profile need the relay token: `RELAY_TOKEN` in `/opt/browser-lite/server.env` on the server (never
+in the repository). Open the demo once with `?token=<token>`; it stays in localStorage of that
+browser. The profile (cookies, so sign-ins) lies unencrypted on the server
 ([docs/security.md](../../../docs/security.md)).
 
-The container publishes its port on the loopback interface only: just `cloudflared` reaches it,
-and Cloudflare puts the client address last in `X-Forwarded-For`, so `RELAY_TRUST_PROXY=1`.
-Against DNS rebinding relay and `/profile/` answer only under the domain of `server.env`
-(`ALLOWED_HOSTS`), otherwise 403.
+The container publishes its port on the loopback interface only: just `tailscale serve` reaches
+it and puts the client address last in `X-Forwarded-For`, so `RELAY_TRUST_PROXY=1`. Against DNS
+rebinding relay and `/profile/` answer only under the domain of `server.env` (`ALLOWED_HOSTS`, the
+node's MagicDNS name), otherwise 403.
 
 ## On every push to main
 
@@ -27,14 +27,9 @@ Against DNS rebinding relay and `/profile/` answer only under the domain of `ser
    - builds the images and tests them read-only (`tools/build-images.sh`: headers, Brotli,
      relay, profile, clean exit on SIGTERM)
    - pushes the demo image to `DEMO_IMAGE` of `versions.env` (tags `<commit>` and `main`)
-   - restarts it on each server (matrix `target`: `demo`, `tailnet`, one failing does not stop
-     the other): the job `deploy` (GitHub-hosted) logs in over SSH as `deploy`
-     with its own key, to the demo through the tunnel (`cloudflared access ssh` of
-     `CLOUDFLARED_VERSION`; Cloudflare Access lets only the deploy's service token through), to
-     the tailnet server directly. Repository secrets `DEPLOY_HOST` (the SSH host name of the
-     tunnel), `DEPLOY_TAILNET_HOST` (the tailnet server's public address), `DEPLOY_SSH_KEY` (one
-     key for both), `DEPLOY_KNOWN_HOSTS` (both hosts), `DEPLOY_ACCESS_ID` and
-     `DEPLOY_ACCESS_SECRET`. The login shell of `deploy`
+   - restarts it on the server: the job `deploy` (GitHub-hosted) logs in over SSH as `deploy`
+     with its own key. Repository secrets `DEPLOY_HOST` (the server's public address),
+     `DEPLOY_SSH_KEY` and `DEPLOY_KNOWN_HOSTS`. The login shell of `deploy`
      (`deploy-shell.sh`) takes only image digest, commit and the GitHub token on stdin, gets
      `compose.yml` of that commit, starts the image by digest and checks `https://<domain>/healthz`
 
@@ -47,49 +42,25 @@ Build locally: `npm ci && npm run build && tools/package-demo.sh <engine-dir> bu
 
 ## Set up the server
 
-An Ubuntu or Debian server (a VM or container with Docker is enough, for example an LXC
-container with nesting) and a domain in Cloudflare:
-
-1. In Cloudflare a tunnel (remotely managed) with two public host names: `<domain>` to
-   `http://127.0.0.1:8080` and `<ssh-name>` (for example `<name>-deploy.<zone>`, covered by the
-   zone's certificate) to `ssh://127.0.0.1:22`; the DNS records are CNAMEs to the tunnel. A
-   Cloudflare Access application for `<ssh-name>` with a service token as its only policy
-   (decision "Service Auth"). Save the tunnel's token in a file.
-2. Then:
+An Ubuntu or Debian server (a VM or container with Docker is enough) and an auth key of the
+tailnet (one-off, not ephemeral):
 
 ```bash
 ssh-keygen -t ed25519 -N '' -f deploy_ed25519        # the key of the deploy workflow
-DOMAIN=<domain> DEPLOY_KEY_FILE=deploy_ed25519.pub TUNNEL_TOKEN_FILE=<file> \
-  apps/demo/deploy/setup-server.sh root@<host>
-gh secret set DEPLOY_HOST --body <ssh-name>
+TAILSCALE_HOSTNAME=browserlite DEPLOY_KEY_FILE=deploy_ed25519.pub TAILSCALE_AUTHKEY_FILE=<file> \
+  TAILSCALE_PORT=41700 apps/demo/deploy/setup-server.sh root@<address>
+gh secret set DEPLOY_HOST --body <address>
 gh secret set DEPLOY_SSH_KEY < deploy_ed25519
-ssh-keyscan -t ed25519 <host> | sed 's/^[^ ]*/<ssh-name>/' | gh secret set DEPLOY_KNOWN_HOSTS
-gh secret set DEPLOY_ACCESS_ID --body <service token client id>
-gh secret set DEPLOY_ACCESS_SECRET --body <service token client secret>
+ssh-keyscan -t ed25519 <address> | gh secret set DEPLOY_KNOWN_HOSTS
 ```
 
-`setup-server.sh` is repeatable: Docker, `cloudflared` of `versions.env` as a service with the
-tunnel's token, the user `deploy` (login shell `deploy-shell.sh`, its key with `restrict`: no
-terminal, no forwarding), `/opt/browser-lite/server.env` with the domain and a generated relay
-token (kept when it exists), SSH with keys only and at most 3 tries, fail2ban on SSH, a firewall
-with only 22 open, automatic security updates.
-
-## Tailnet server
-
-A server whose demo is reachable only inside a tailnet: `setup-server.sh` with
-`TAILSCALE_AUTHKEY_FILE` instead of `TUNNEL_TOKEN_FILE` installs Tailscale of `versions.env`,
-joins the tailnet as `TAILSCALE_HOSTNAME` and runs `tailscale serve` (HTTPS on 443 of the tailnet
-address with the tailnet's certificate, no Funnel). The domain in `server.env` is the node's
-MagicDNS name (`<name>.<tailnet>.ts.net`), the firewall also lets in all of `tailscale0` and
-UDP 41641. SSH stays on the public address for the deploy (Tailscale in CI would need secrets and
-ACLs of the tailnet, decision 307):
-
-```bash
-TAILSCALE_HOSTNAME=browser-lite DEPLOY_KEY_FILE=deploy_ed25519.pub TAILSCALE_AUTHKEY_FILE=<file> \
-  apps/demo/deploy/setup-server.sh root@<address>
-gh secret set DEPLOY_TAILNET_HOST --body <address>
-# DEPLOY_KNOWN_HOSTS: the line of the demo and `ssh-keyscan -t ed25519 <address>`
-```
+`setup-server.sh` is repeatable: Docker, Tailscale of `versions.env` (joins the tailnet as
+`TAILSCALE_HOSTNAME`, `tailscale serve` on 443), the user `deploy` (login shell `deploy-shell.sh`,
+its key with `restrict`: no terminal, no forwarding), `/opt/browser-lite/server.env` with the
+node's MagicDNS name as domain and a generated relay token (kept when it exists), SSH with keys
+only and at most 3 tries, fail2ban on SSH, a firewall with only 22, all of `tailscale0` and the
+UDP port of tailscaled open, automatic security updates. `TAILSCALE_PORT` (default 41641) moves
+tailscaled off 41641 for hosters whose DDoS filter drops WireGuard there (ZAP-Hosting).
 
 ## Security
 
@@ -101,8 +72,6 @@ The repository is public. Therefore:
   restart the demo with an image of `ghcr.io` by digest.
 - The lint of the CI (`tools/check-style.sh`) checks the runners, that only that job uses the
   `DEPLOY_` secrets, and that all actions are pinned by commit.
-- The deploy's SSH host name is reachable only with the Cloudflare Access service token of the
-  secrets `DEPLOY_ACCESS_ID`/`DEPLOY_ACCESS_SECRET`; behind it the key still logs in only as
-  `deploy`.
+- SSH takes keys only (fail2ban, at most 3 tries); the deploy's key logs in only as `deploy`.
 - The container runs read-only, without capabilities, as user `node`. It can write only to the
   volume `/data` (profile).
